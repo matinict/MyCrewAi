@@ -12,9 +12,11 @@ This repository serves as a collection of advanced Agentic Intelligence examples
 
 
 
+---
+
 ## 📂 Project Structure
 
-
+```
 
 MyCrewAi/
 │
@@ -27,7 +29,8 @@ MyCrewAi/
 └── debate/                    \# Sub-project 2: Multi-Agent Debate System
 ├── main.py
 └── ...
- 
+
+````
 
 
 
@@ -98,3 +101,4 @@ To run any of the projects above, follow these general steps:
  LLM Keys: Configure your environment variables with the necessary API keys (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) as these crews are designed for multi-model usage.
 
 
+### 📚 Licens
