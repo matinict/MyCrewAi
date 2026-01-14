@@ -1,0 +1,109 @@
+# ============================================
+# FILE: src/book_writer/config/tasks.yaml
+# ============================================
+research_task:
+  description: >
+    Research the topic '{title}' thoroughly. Gather key information, facts, statistics,
+    expert opinions, and relevant examples. Focus on finding credible sources and
+    organizing the information in a way that will be useful for writing.
+  expected_output: >
+    A comprehensive research document with:
+    - Key facts and statistics about {title}
+    - Expert insights and quotes
+    - Relevant examples and case studies
+    - List of credible sources
+  agent: researcher
+  output_file: output/research_notes.md
+
+planning_task:
+  description: >
+    Based on the research, create a detailed outline for a {chapters}-chapter book about {title}.
+    The book should be in the {genre} genre. Each chapter should have:
+    - A clear title
+    - 3-5 main sections
+    - Key points to cover
+    Ensure the outline has a logical flow and covers the topic comprehensively.
+  expected_output: >
+    A detailed book outline with:
+    - Book title: {title}
+    - {chapters} chapter titles
+    - Section breakdown for each chapter
+    - Key points and themes for each section
+  agent: planner
+  context:
+    - research_task
+  output_file: output/book_outline.md
+
+writing_task:
+  description: >
+    Write the complete book based on the outline. Each chapter should be approximately
+    {words_per_chapter} words. Write in an engaging {genre} style that's appropriate
+    for the target audience. Use the research to support your writing with facts,
+    examples, and credible information.
+    Book title: {title}
+  expected_output: >
+    A complete draft of the book with {chapters} chapters, each properly structured
+    with an introduction, body sections, and conclusion. The writing should be
+    engaging, well-researched, and appropriate for the {genre} genre.
+  agent: writer
+  context:
+    - research_task
+    - planning_task
+  output_file: output/book_draft.md
+
+editing_task:
+  description: >
+    Review and edit the complete book draft. Focus on:
+    - Grammar, spelling, and punctuation
+    - Sentence structure and clarity
+    - Consistency in tone and style
+    - Flow and transitions between sections
+    - Removing redundancies
+    - Ensuring accuracy of facts
+    Provide a polished, publication-ready version of the book.
+  expected_output: >
+    A polished, edited version of the book that is ready for publication.
+    The final book should be in ENGLISH language only.
+  agent: editor
+  context:
+    - writing_task
+  output_file: output/{title}_en.md
+
+translation_task:
+  description: >
+    CRITICAL TASK: Translate the ENTIRE English book into ACTUAL Bengali (বাংলা) language.
+    
+    IMPORTANT INSTRUCTIONS:
+    1. Read the complete English book from output/{title}_en.md
+    2. Translate EVERY SINGLE CHAPTER into REAL Bengali language (বাংলা)
+    3. DO NOT leave any English text - translate everything to Bengali
+    4. Work chapter by chapter to avoid timeout (translate 2-3 chapters at a time)
+    5. Use natural, fluent Bengali language
+    6. Preserve markdown formatting (# for headings, ** for bold, etc.)
+    7. Use correct Bengali Unicode characters
+    8. Technical terms can be kept in English with Bengali explanation in parentheses
+    
+    EXAMPLE of what output should look like:
+    # এলএলএম অ্যাপ্লিকেশন ইঞ্জিনিয়ার (LLM Application Engineer)
+    
+    এই বইটি আপনাকে বুঝতে সাহায্য করবে...
+    
+    VERIFICATION: After translation, verify that the output file contains Bengali script (বাংলা), 
+    NOT English letters. If you see English words like "Introduction", "Chapter", you have NOT 
+    translated correctly.
+    
+    Book to translate: {title}
+    Total chapters: {chapters}
+  expected_output: >
+    A COMPLETE Bengali (বাংলা) translation file where:
+    - EVERY chapter is translated to Bengali language
+    - The file contains Bengali Unicode characters (à¦¬à¦¾à¦‚à¦²à¦¾)
+    - NO English sentences remain (except technical terms in parentheses)
+    - All {chapters} chapters are included
+    - Markdown structure is preserved
+    
+    The output MUST be in Bengali language, not English!
+  agent: translator
+  context:
+    - editing_task
+  output_file: output/{title}_bn.md
