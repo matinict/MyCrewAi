@@ -1,0 +1,69 @@
+################################################################################
+# 1. PYTHON & ENVIRONMENTS (Recursive)
+################################################################################
+# Virtual Environments
+**/venv/
+**/env/
+**/.venv/
+**/bin/
+**/Include/
+**/Lib/
+**/Scripts/
+**/share/python-wheels/
+
+# Python Cache & Metadata
+**/__pycache__/
+**/*.py[cod]
+**/*.so
+**/.python-version
+**/.pytest_cache/
+**/.mypy_cache/
+
+################################################################################
+# 2. CREDENTIALS & SENSITIVE DATA
+################################################################################
+**/.env*
+**/*.env
+**/auth.json
+**/*.key
+**/*.pem
+**/*.crt
+**/.netrc
+
+################################################################################
+# 3. PROJECT SPECIFIC (CrewAI, n8n, bwriter)
+################################################################################
+# Specific request: Ignore bwriter output content
+bwriter/outpu/
+# (If you meant 'output', keep the line below as well)
+**/output/
+**/outputs/
+
+# n8n specific (If running local n8n instances)
+**/.n8n/
+**/*.sqlite
+**/binaryData/
+
+# Logs & Temporary files
+**/*.log
+**/logs/
+**/temp/
+**/tmp/
+**/.tmp/
+
+################################################################################
+# 4. SYSTEM & EDITORS
+################################################################################
+.DS_Store
+Thumbs.db
+**/.vscode/
+**/.idea/
+**/.ipynb_checkpoints/
+
+################################################################################
+# 5. NODE / FRONTEND (If applicable)
+################################################################################
+**/node_modules/
+**/dist/
+**/build/
+.npm

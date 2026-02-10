@@ -1,0 +1,112 @@
+research_task:
+  description: >
+    Conduct comprehensive deep research on: {topic}    
+    Your research must cover:
+    1. Current state and recent developments (focus on {current_year})
+    2. Key players, companies, and researchers in the field
+    3. Emerging trends and breakthrough innovations
+    4. Technical advancements and new methodologies
+    5. Market analysis and adoption rates
+    6. Challenges and limitations
+    7. Future predictions and roadmap (next 3-5 years)
+    8. Real-world applications and use cases
+    9. Regulatory and ethical considerations
+    10. Expert opinions and thought leadership
+    
+    Use web search to find:
+    - Recent news articles and blog posts
+    - Academic papers and research publications
+    - Industry reports and whitepapers
+    - Expert interviews and conference talks
+    - Company announcements and press releases
+    - Statistical data and market research
+    
+    Ensure all information is:
+    - Current and relevant to {current_year}
+    - From credible and authoritative sources
+    - Properly attributed with source URLs
+    - Fact-checked and verified
+    - Comprehensive and well-researched
+    
+  expected_output: >
+    A detailed research document containing:
+    - 15-20 key findings organized by category
+    - Each finding should include:
+      * Clear title/headline
+      * Detailed explanation (3-5 sentences)
+      * Source attribution with URL
+      * Relevance to current year ({current_year})
+      * Impact assessment (High/Medium/Low)
+    - Research should be organized into logical sections
+    - Include statistics, data points, and concrete examples
+    - Highlight emerging trends and future predictions    
+  agent: researcher
+  output_file: output/research_findings.md
+
+reporting_task:
+  description: >
+    Transform the research findings into a comprehensive, professional report 
+    about {topic}.
+    Report Structure Requirements:    
+    1. EXECUTIVE SUMMARY (2-3 paragraphs)
+       - High-level overview of the topic
+       - Key findings and insights
+       - Critical takeaways    
+    2. INTRODUCTION
+       - Background and context of {topic}
+       - Why this topic matters in {current_year}
+       - Scope of the report    
+    3. CURRENT STATE ANALYSIS
+       - Detailed analysis of current developments
+       - Key statistics and data points
+       - Market landscape and major players    
+    4. EMERGING TRENDS
+       - Breakthrough innovations
+       - New methodologies and approaches
+       - Shift in industry focus    
+    5. TECHNICAL ADVANCEMENTS
+       - Latest technological developments
+       - Performance improvements
+       - New capabilities and features    
+    6. CHALLENGES & LIMITATIONS
+       - Current obstacles
+       - Technical challenges
+       - Adoption barriers    
+    7. FUTURE OUTLOOK (3-5 years)
+       - Predictions and forecasts
+       - Expected developments
+       - Potential disruptions    
+    8. REAL-WORLD APPLICATIONS
+       - Use cases and implementations
+       - Success stories
+       - Industry adoption    
+    9. RECOMMENDATIONS
+       - Actionable insights
+       - Strategic considerations
+       - Next steps for stakeholders    
+    10. CONCLUSION
+        - Summary of key points
+        - Final thoughts
+        - Call to action
+    Formatting Requirements:
+    - Use proper markdown headers (##, ###)
+    - Include bullet points for lists
+    - Add bold for emphasis on key terms
+    - Include source citations inline
+    - Use tables for data comparison (if applicable)
+    - Add horizontal rules (---) between major sections
+    - NO code blocks (```), write pure markdown
+  expected_output: >
+    A fully comprehensive markdown report (2000-3000 words) with:
+    - Professional formatting and structure
+    - Clear section headers and subheaders
+    - Detailed analysis in each section (minimum 3 paragraphs per section)
+    - Data-driven insights with statistics
+    - Source citations throughout
+    - Actionable recommendations
+    - Executive summary at the top
+    - Conclusion with key takeaways
+    - Pure markdown format (NO ```)
+    - Ready for publication or presentation
+  agent: reporting_analyst
+  output_file: output/report_{topic}.md
