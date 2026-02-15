@@ -1,0 +1,31 @@
+[project]
+name = "book_writer"
+version = "0.1.0"
+description = "book_writer using crewAI"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "crewai-tools>=1.5.0",
+    "crewai[anthropic,google-genai,tools]==1.5.0",
+    "ebooklib>=0.20",
+    "litellm>=1.80.11",
+    "markdown2>=2.5.4",
+    "ollama>=0.6.1",
+    "python-dotenv>=1.2.1",
+    "weasyprint>=67.0",
+]
+
+[project.scripts]
+book_writer = "book_writer.main:run"
+run_crew = "book_writer.main:run"
+train = "book_writer.main:train"
+replay = "book_writer.main:replay"
+test = "book_writer.main:test"
+run_with_trigger = "book_writer.main:run_with_trigger"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.crewai]
+type = "crew"

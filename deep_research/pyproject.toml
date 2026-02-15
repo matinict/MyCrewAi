@@ -1,0 +1,34 @@
+[project]
+name = "deep_research"
+version = "0.1.0"
+description = "deep_research using crewAI"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "apscheduler>=3.11.2",
+    "crewai-tools>=1.8.1",
+    "crewai[anthropic,google-genai,tools]==1.8.1",
+    "fastapi>=0.128.0",
+    "langchain-openai>=0.3.23",
+    "litellm>=1.75.3",
+    "ollama>=0.6.1",
+    "openai<2.0.0",
+    "pydantic[email]>=2.11.10",
+    "python-dotenv>=1.1.1",
+    "uvicorn>=0.40.0",
+]
+
+[project.scripts]
+deep_research = "deep_research.main:run"
+run_crew = "deep_research.main:run"
+train = "deep_research.main:train"
+replay = "deep_research.main:replay"
+test = "deep_research.main:test"
+run_with_trigger = "deep_research.main:run_with_trigger"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.crewai]
+type = "crew"

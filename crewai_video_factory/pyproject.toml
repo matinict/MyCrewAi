@@ -1,0 +1,36 @@
+[project]
+name = "crewai_video_factory"
+version = "0.1.0"
+description = "crewai_video_factory using crewAI"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "crewai[anthropic,google-genai]==1.8.1",
+    "crewai-tools>=0.17.0,<1.0.0,!=0.76.0",
+    "pandas>=2.0.0",
+    "matplotlib>=3.7.0",
+    "pillow>=10.0.0",
+    "opencv-python>=4.8.0",
+    "bar_chart_race>=0.1.0",
+    "gtts>=2.3.0",
+    "moviepy>=1.0.3",
+    "numpy>=1.24.0",
+    "litellm>=1.0.0",
+    "ollama>=0.1.0",
+    "moviepy==1.0.3",
+]
+
+[project.scripts]
+crewai_video_factory = "crewai_video_factory.main:run"
+run_crew = "crewai_video_factory.main:run"
+train = "crewai_video_factory.main:train"
+replay = "crewai_video_factory.main:replay"
+test = "crewai_video_factory.main:test"
+run_with_trigger = "crewai_video_factory.main:run_with_trigger"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.crewai]
+type = "crew"
