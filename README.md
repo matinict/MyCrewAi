@@ -92,6 +92,8 @@ To run any of the projects above, follow these general steps:
 
 4.  Run the Crew:
     bash
+    # Delete ALL cached task results (this is why you see old topics!)
+    rm -rf .crewai/ .crewai_cache/ output/*.csv output/*.mp4
     crewai run
     
 
