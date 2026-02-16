@@ -22,7 +22,9 @@ DEFAULT_INPUTS = {
     "animation_styles": ["bar"],           # Options: "bar", "line", "bubble", "map", "pie", "stream"
     "video_formats": ["Shorts"],           # Options: "HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"
     "fps": 0.5,                             # Duration control: 1.0 = 12 sec for 12 rows (2.0=6s, 0.5=24s)
-    "use_existing_csv":True  # if True use existing output/{topics} .csv
+    "use_existing_csv":False,  # if True use existing output/{topics} .csv
+    "audio_enabled": True,                 # NEW: Enable/disable audio narration
+    "audio_speed": 0.9                     # NEW: Speech speed (0.8-1.2, lower = slower)
 }
 
 def run():

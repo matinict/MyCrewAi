@@ -64,22 +64,37 @@ create_video:
     Generate visualization videos from the CSV file for {topic}.
     Animation styles: {animation_styles}
     Video formats: {video_formats}
-    Animation speed: {fps} fps (controls duration: lower = slower/longer videos)
+    FPS: {fps}
     
     Use the Video Generation Tool to:
-    - Read the CSV file from output/{filename}.csv
-    - Create videos for ALL styles in {animation_styles} list (e.g., "bar", "line")
-    - Generate videos with naming pattern: {filename}_[style]_[format].mp4
-      where [style] is each value from animation_styles and [format] from video_formats
-    - Apply FPS parameter for smooth duration control
-    - Save all videos to output/ directory
-
-    Ensure videos properly represent time-series data with clear labels,
-    smooth animations, and professional presentation.
+    - Read CSV from output/{filename}.csv
+    - Create videos for ALL styles in {animation_styles}
+    - Save to output/ directory with naming pattern: {filename}_[style]_[format].mp4
+      (where [style] = values from animation_styles list, [format] = values from video_formats list)
+    
+    Title format requirement (STRICT):
+    - Line 1: Pure topic name only ("Programming Language")
+    - Line 2: Visualization type + year ("Race - 2019")
   expected_output: >
-    Confirmation of successful video creation with paths, duration estimate
-    (rows / fps), and any warnings/errors encountered during generation.
+    Confirmation of successful video creation with exact file paths for all generated videos.
+    Example: "output/ProgrammingLanguage_bar_Shorts.mp4"
   agent: video_producer
   context:
     - research_data
+    - generate_csv
+
+add_audio:
+  description: >
+    Generate professional audio narration and merge with videos.
+    Automatically skips if audio is disabled in inputs.
+    When enabled:
+    - Uses narration based on {topic} and CSV data
+    - Processes ALL videos from previous task
+    - Applies narration speed: {audio_speed}x
+  expected_output: >
+    List of audio-enhanced videos created, OR skip message if disabled.
+    Example: "✅ Audio added: ProgrammingLanguage_bar_Shorts_with_audio.mp4"
+  agent: audio_engineer
+  context:
+    - create_video
     - generate_csv
