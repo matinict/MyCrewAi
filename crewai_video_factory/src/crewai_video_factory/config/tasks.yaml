@@ -98,3 +98,16 @@ add_audio:
   context:
     - create_video
     - generate_csv
+
+merge_audio_video:
+  description: >
+    Merge existing MP4 video files with corresponding MP3 audio files.
+    This task will automatically skip if merge_audio_video is disabled in inputs.
+    When enabled, searches for pairs like 'filename_style_format.mp4' and 'filename_style_format_audio.mp3'
+    and creates 'filename_style_format_with_audio.mp4'.
+  expected_output: >
+    Confirmation of successful merges, OR skip message if disabled.
+    Example: "🔄 Audio-video merging completed (1 successful).\n✅ Merged: ProgrammingLanguage_bar_Shorts_with_audio.mp4"
+  agent: merge_specialist
+  context:
+    - add_audio # Ensure audio files exist before attempting merge
