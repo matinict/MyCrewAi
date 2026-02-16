@@ -30,6 +30,8 @@ class SmartVideoTool(BaseTool):
         video_formats: Optional[list] = None,
         fps: float = 2.0
     ) -> str:
+      # 🔒 HARD CLEAN TOPIC (single source of truth)
+        topic = topic.split("\n")[0].split(" - ")[0].strip()
         # Normalize inputs - remove whitespace and handle single values
         if animation_styles is None:
             animation_styles = ["bar", "line"]
@@ -132,18 +134,10 @@ class SmartVideoTool(BaseTool):
         return formats.get(video_format.strip(), (12, 6.75))
 
     def _format_title(self, title: str, time_value, viz_type: str) -> str:
-        """Format title with topic on first line, visualization type + year on second line.
-        
-        Args:
-            title: Main topic name (e.g., "Programming Language")
-            time_value: Current time period value (e.g., 2019)
-            viz_type: Animation style code ("bar", "line", etc.)
-        
-        Returns:
-            Formatted 2-line title string:
-            "Programming Language\nRace - 2019"
         """
-        # Map style codes to human-readable names
+        Line 1: CLEAN topic only
+        Line 2: Visualization + year
+        """
         style_names = {
             "bar": "Race",
             "line": "Line Chart",
@@ -152,10 +146,14 @@ class SmartVideoTool(BaseTool):
             "stream": "Streamgraph",
             "map": "Heatmap"
         }
+
+        # CLEAN topic (remove any accidental suffixes)
+        clean_title = title.split(" - ")[0].split("\n")[0].strip()
+
         viz_label = style_names.get(viz_type.strip(), viz_type.strip().title())
-        
-        # ALWAYS use 2-line format: Topic on first line, visualization + year on second
-        return f"{title}\n{viz_label} - {time_value}"
+
+        return f"{clean_title}\n{viz_label} - {time_value}"
+
 
     def _create_line_chart(self, df, time_col, data_cols, title, output_path, video_format="HD", fps=2.0):
         """Create animated line chart video"""
