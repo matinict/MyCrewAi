@@ -58,7 +58,7 @@ generate_csv:
   agent: csv_generator
   context:
     - research_data
-
+ 
 create_video:
   description: >
     Generate visualization videos from the CSV file for {topic}.
@@ -85,7 +85,6 @@ create_video:
   context:
     - research_data
     - generate_csv
-
 add_audio:
   description: >
     Generate professional audio narration and merge with videos.

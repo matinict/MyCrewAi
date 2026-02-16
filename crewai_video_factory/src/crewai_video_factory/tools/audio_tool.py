@@ -1,6 +1,5 @@
 import os
 import shutil
-import traceback # Import traceback for detailed error logging
 from crewai.tools import BaseTool
 from typing import Type
 from pydantic import BaseModel, Field
@@ -28,51 +27,39 @@ class AudioGenerationTool(BaseTool):
         audio_enabled: bool = False,
         audio_speed: float = 0.9
     ) -> str:
-        print(f"[DEBUG] Audio Tool started with topic: {topic[:30]}..., filename: {filename}") # Debug log
-
         # IMMEDIATE SKIP - zero overhead when disabled
         if not audio_enabled:
-            print("[INFO] Audio generation skipped (disabled in inputs)") # Info log
             return "🔇 Audio generation skipped (disabled in inputs)"
 
         # Check dependencies
         try:
             from gtts import gTTS
-        except ImportError as e:
-            error_msg = f"❌ gTTS not installed. Run: pip install gTTS. Error: {e}"
-            print(error_msg) # Log error
-            return error_msg
+        except ImportError:
+            return "⚠️ gTTS not installed. Run: pip install gTTS"
 
         if not self._ffmpeg_available():
-            error_msg = "❌ ffmpeg not found. Install: sudo apt install ffmpeg (Linux) or brew install ffmpeg (macOS)"
-            print(error_msg) # Log error
-            return error_msg
+            return "⚠️ ffmpeg not found. Install: sudo apt install ffmpeg (Linux) or brew install ffmpeg (macOS)"
 
         # 🔑 CRITICAL FIX: CLEAN UP CORRUPTED INPUTS FROM CREWAI
         import re
-        # Extract clean filename (first 3 words of topic) - More robust fallback
+        # Extract clean filename (first 3 words of topic)
         clean_words = re.findall(r'\w+', topic)[:3]
-        clean_filename_from_topic = ''.join(clean_words)
-        # Use the filename from input, but fall back to the one derived from topic if it seems invalid
-        clean_filename = clean_filename_from_topic if not re.match(r'^[\w]+$', filename) else filename
-        print(f"[DEBUG] Derived clean filename: {clean_filename} (from topic: {clean_filename_from_topic}, original: {filename})") # Debug log
+        clean_filename = ''.join(clean_words)
+        
+        print(f"[DEBUG] Clean filename derived: {clean_filename}")
 
         # Generate narration
         csv_path = f"output/{clean_filename}.csv"
-        print(f"[DEBUG] Attempting to read CSV: {csv_path}") # Debug log
+        print(f"[DEBUG] Looking for CSV at: {csv_path}")
+        print(f"[DEBUG] CSV exists: {os.path.exists(csv_path)}")
+        
         narration = self._generate_narration(topic, csv_path)
 
         # CREATE NARRATION TEXT FILE
         text_file_path = f"output/{clean_filename}_Race_Narration_Full.txt"
-        print(f"[DEBUG] Writing narration text to: {text_file_path}") # Debug log
-        try:
-            with open(text_file_path, 'w', encoding='utf-8') as f:
-                f.write(narration)
-            print(f"[INFO] Narration text saved to: {text_file_path}") # Info log
-        except IOError as e:
-            error_msg = f"❌ Failed to write narration text file {text_file_path}: {e}"
-            print(error_msg) # Log error
-            return error_msg
+        with open(text_file_path, 'w', encoding='utf-8') as f:
+            f.write(narration)
+        print(f"[DEBUG] Narration text saved to: {text_file_path}")
 
         results = []
         processed = 0
@@ -80,84 +67,67 @@ class AudioGenerationTool(BaseTool):
         # 🔑 CRITICAL FIX: SCAN DIRECTORY FOR ACTUAL VIDEO FILES (BYPASSES CORRUPTED INPUTS)
         output_dir = "output"
         if not os.path.exists(output_dir):
-            error_msg = f"❌ Output directory '{output_dir}' not found"
-            print(error_msg) # Log error
-            return error_msg
+            return f"❌ Output directory '{output_dir}' not found"
 
         # Look for video files that match the actual naming pattern
         import glob
         # Find all video files matching the actual filename pattern
-        video_pattern = f"output/{clean_filename}_*.mp4"
-        print(f"[DEBUG] Scanning for video files with pattern: {video_pattern}") # Debug log
-        actual_video_files = glob.glob(video_pattern)
+        actual_video_files = glob.glob(f"output/{clean_filename}_*.mp4")
 
         # Filter out audio and already processed files
         video_files = [
-            f for f in actual_video_files
+            f for f in actual_video_files 
             if "_with_audio" not in f and "_audio" not in f
         ]
-        print(f"[DEBUG] Found {len(video_files)} video files to process: {video_files}") # Debug log
+        
+        print(f"[DEBUG] Found {len(video_files)} video files: {video_files}")
 
         if not video_files:
             existing_files = [f for f in os.listdir(output_dir) if f.endswith('.mp4')]
-            warning_msg = f"⚠️ No videos found to generate audio for\n🔍 Existing videos matching pattern '{video_pattern}': {', '.join(existing_files) if existing_files else 'None'}"
-            print(warning_msg) # Log warning
-            return warning_msg
+            return f"⚠️ No videos found to generate audio for\n🔍 Existing videos: {', '.join(existing_files) if existing_files else 'None'}"
 
         # Process all found video files - ONLY generate audio
         for video_path in video_files:
-            try:
-                print(f"[DEBUG] Processing video: {video_path}") # Debug log
-                # Generate audio file
-                audio_path = video_path.replace('.mp4', '_audio.mp3')
-                print(f"[DEBUG] Generating audio file: {audio_path}") # Debug log
-                self._generate_audio(narration, audio_path, audio_speed)
+            # Generate audio file
+            audio_path = video_path.replace('.mp4', '_audio.mp3')
+            self._generate_audio(narration, audio_path, audio_speed)
 
-                # Verify if audio file was created successfully
-                if os.path.exists(audio_path):
-                    print(f"[INFO] Successfully created audio file: {audio_path}") # Info log
-                    # Add generated audio file path to results
-                    results.append(os.path.basename(audio_path))
-                    processed += 1
-                else:
-                    error_msg = f"❌ Failed to create audio file: {audio_path} (file not found after generation)"
-                    print(error_msg) # Log error
-                    results.append(error_msg)
-            except Exception as e:
-                error_msg = f"❌ Error processing video {video_path}: {e}\nTraceback: {traceback.format_exc()}"
-                print(error_msg) # Log detailed error
-                results.append(error_msg)
+            # Add generated audio file path to results
+            results.append(os.path.basename(audio_path))
+            processed += 1
 
         if processed == 0:
-            error_msg = "⚠️ No videos found to generate audio for or all attempts failed"
-            print(error_msg) # Log error
-            return error_msg
+            return "⚠️ No videos found to generate audio for"
 
-        success_msg = "🎵 Audio narration files created:\n" + "\n".join([f"   • {r}" for r in results]) + \
+        return "🎵 Audio narration files created:\n" + "\n".join([f"   • {r}" for r in results]) + \
                f"\n\n📋 Narration saved to: {os.path.basename(text_file_path)}\n" + \
                f"\nNarration preview: \"{narration[:70]}...\""
-        print(f"[INFO] Audio Tool completed successfully. Processed {processed} files.") # Info log
-        return success_msg
 
 
     def _generate_narration(self, topic: str, csv_path: str) -> str:
         """Generate professional narration following the specified format with dynamic CSV reading"""
-        print(f"[DEBUG] Attempting to read CSV for narration: {csv_path}") # Debug log
+        print(f"[DEBUG] _generate_narration called with csv_path: {csv_path}")
+        
         if os.path.exists(csv_path):
             try:
                 import pandas as pd
                 df = pd.read_csv(csv_path)
-                print(f"[DEBUG] CSV read successfully. Shape: {df.shape}") # Debug log
+                print(f"[DEBUG] CSV loaded successfully. Shape: {df.shape}")
+                print(f"[DEBUG] CSV columns: {df.columns.tolist()}")
 
                 # Get time column (first column) and data columns
                 time_col = df.columns[0]
                 data_cols = df.columns[1:]
+                
+                print(f"[DEBUG] Time column: {time_col}")
+                print(f"[DEBUG] Data columns: {data_cols.tolist()}")
 
                 # Extract years and find top performers
                 years = df[time_col].tolist()
                 start_year = int(years[0])
                 end_year = int(years[-1])
-                print(f"[DEBUG] CSV time range: {start_year} to {end_year}") # Debug log
+                
+                print(f"[DEBUG] Year range: {start_year} to {end_year}")
 
                 # Find the leader for each year
                 yearly_leaders = []
@@ -166,6 +136,7 @@ class AudioGenerationTool(BaseTool):
                     value = row[leader]
                     year = int(row[time_col])
                     yearly_leaders.append((year, leader, value))
+                    print(f"[DEBUG] Year {year}: Leader={leader}, Value={value}")
 
                 # Build narration following your exact format
                 narration_parts = [
@@ -194,62 +165,42 @@ class AudioGenerationTool(BaseTool):
                 narration_parts.append("Subscribe to @PlayOwnAi for more insights.")
 
                 narration_text = " ".join(narration_parts)
-                print(f"[DEBUG] Narration generated, length: {len(narration_text)} chars") # Debug log
+                print(f"[DEBUG] Narration generated, length: {len(narration_text)} chars")
                 return narration_text
 
             except Exception as e:
-                error_msg = f"⚠️ CSV reading failed: {e}\nTraceback: {traceback.format_exc()}" # Include traceback
-                print(error_msg) # Log error
+                print(f"[ERROR] CSV reading failed: {e}")
+                import traceback
+                traceback.print_exc()
 
         # Generic fallback if CSV processing fails
-        fallback_text = (
+        print("[WARN] Using fallback narration")
+        return (
             "Welcome to @PlayOwnAi. Today, we're exploring programming language trends. "
             "Let's see how the landscape evolved over time. "
             "The evolution of technology and trends continues. "
             "Subscribe to @PlayOwnAi for more insights."
         )
-        print("[DEBUG] Using fallback narration") # Debug log
-        return fallback_text
 
     def _generate_audio(self, text: str, output_path: str, speed: float):
-        print(f"[DEBUG] Starting audio generation for file: {output_path}, speed: {speed}") # Debug log
         from gtts import gTTS
         import subprocess
 
         tts = gTTS(text=text, lang='en', slow=(speed <= 0.85))
         temp_path = output_path.replace('.mp3', '_temp.mp3')
-        print(f"[DEBUG] Saving initial TTS to temp file: {temp_path}") # Debug log
         tts.save(temp_path)
-        print(f"[DEBUG] Initial TTS saved, size: {os.path.getsize(temp_path)} bytes") # Debug log
 
         # Apply speed control using ffmpeg
         if abs(speed - 1.0) > 0.05:
-            print(f"[DEBUG] Applying speed adjustment using ffmpeg, target speed: {speed}") # Debug log
             atempo = max(0.5, min(2.0, speed))
-            try:
-                result = subprocess.run([
-                    'ffmpeg', '-y', '-i', temp_path,
-                    '-filter:a', f'atempo={atempo}', output_path
-                ], capture_output=True, check=True)
-                print(f"[DEBUG] FFmpeg speed adjustment completed. Stdout: {result.stdout.decode()[:100]}") # Log first 100 chars
-            except subprocess.CalledProcessError as e:
-                print(f"[ERROR] FFmpeg speed adjustment failed. Stderr: {e.stderr.decode()}") # Log error details
-                raise # Re-raise to be caught by caller
-            except Exception as e:
-                print(f"[ERROR] Unexpected error during FFmpeg speed adjustment: {e}") # Log error
-                raise # Re-raise to be caught by caller
+            subprocess.run([
+                'ffmpeg', '-y', '-i', temp_path,
+                '-filter:a', f'atempo={atempo}', output_path
+            ], capture_output=True, check=False)
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
         else:
-            print(f"[DEBUG] Speed is 1.0x, renaming temp file directly to output: {output_path}") # Debug log
             os.rename(temp_path, output_path)
 
-        # Cleanup temp file if it still exists (e.g., if speed was 1.0x)
-        if os.path.exists(temp_path):
-            print(f"[DEBUG] Removing temporary file: {temp_path}") # Debug log
-            os.remove(temp_path)
-
-        print(f"[DEBUG] Audio generation completed for: {output_path}") # Debug log
-
     def _ffmpeg_available(self) -> bool:
-        available = shutil.which('ffmpeg') is not None
-        print(f"[DEBUG] FFmpeg available check: {available}") # Debug log
-        return available
+        return shutil.which('ffmpeg') is not None
