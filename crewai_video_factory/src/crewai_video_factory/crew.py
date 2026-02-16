@@ -2,7 +2,7 @@ from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
 from crewai_video_factory.tools.csv_tool import CSVTool
 from crewai_video_factory.tools.smart_video_tool import SmartVideoTool
-from crewai_video_factory.tools.audio_tool import AudioGenerationTool  # VALID IMPORT
+from crewai_video_factory.tools.audio_tool import AudioGenerationTool  # Added import
 import re
 
 @CrewBase
@@ -12,6 +12,7 @@ class CrewaiVideoFactory:
     tasks_config = 'config/tasks.yaml'
 
     def __init__(self):
+        # Will be set during kickoff
         self.filename = None
 
     @agent
@@ -35,13 +36,15 @@ class CrewaiVideoFactory:
             config=self.agents_config['video_producer'],
             tools=[SmartVideoTool()],
             verbose=True
-        )
-
+        ) 
+    
+    # ===== DEDICATED AUDIO AGENT (AUDIO TOOL ONLY HERE) =====
     @agent
     def audio_engineer(self) -> Agent:
+        # AUDIO AGENT HAS ONLY AUDIO TOOLS - NO VIDEO
         return Agent(
             config=self.agents_config['audio_engineer'],
-            tools=[AudioGenerationTool()],
+            tools=[AudioGenerationTool()],  # Video tool NOT included
             verbose=True
         )
 
@@ -63,12 +66,13 @@ class CrewaiVideoFactory:
             config=self.tasks_config['create_video'],
         )
 
+    # ===== DEDICATED AUDIO TASK =====
     @task
     def add_audio(self) -> Task:
         return Task(
             config=self.tasks_config['add_audio'],
         )
-
+    
     @crew
     def crew(self) -> Crew:
         """Creates the Video Factory crew"""

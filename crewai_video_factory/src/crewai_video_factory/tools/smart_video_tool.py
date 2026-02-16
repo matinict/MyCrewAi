@@ -30,8 +30,9 @@ class SmartVideoTool(BaseTool):
         video_formats: Optional[list] = None,
         fps: float = 2.0
     ) -> str:
-      # 🔒 HARD CLEAN TOPIC (single source of truth)
+        # 🔒 HARD CLEAN TOPIC (single source of truth)
         topic = topic.split("\n")[0].split(" - ")[0].strip()
+        
         # Normalize inputs - remove whitespace and handle single values
         if animation_styles is None:
             animation_styles = ["bar", "line"]
@@ -154,6 +155,40 @@ class SmartVideoTool(BaseTool):
 
         return f"{clean_title}\n{viz_label} - {time_value}"
 
+    def _get_label_mapping(self):
+        """Load label mappings from data/label_mappings.json"""
+        import json
+        import os
+        mapping_path = "data/label_mappings.json"
+        
+        if os.path.exists(mapping_path):
+            try:
+                with open(mapping_path, 'r') as f:
+                    data = json.load(f)
+                    return data.get("bar_race_labels", {})
+            except Exception as e:
+                print(f"⚠️ Failed to load label mappings: {e}")
+        
+        # Fallback: minimal mapping for common cases
+        return {
+            "JavaScript": "JS",
+            "Microsoft": "MS",
+            "Google": "Gle",
+            "Amazon": "AMZ",
+            "Apple": "APL",
+            "Meta": "MTA",
+            "NVIDIA": "NVD",
+            "Tesla": "TS",
+            "OpenAI": "OI",
+            "Anthropic": "AN"
+        }
+
+    def _trim_label(self, label: str, style: str) -> str:
+        """Trim labels for bar race videos only"""
+        if style == "bar":
+            mapping = self._get_label_mapping()
+            return mapping.get(label, label)
+        return label
 
     def _create_line_chart(self, df, time_col, data_cols, title, output_path, video_format="HD", fps=2.0):
         """Create animated line chart video"""
@@ -183,7 +218,7 @@ class SmartVideoTool(BaseTool):
             return lines
         
         anim = animation.FuncAnimation(
-            fig, animate, frames=len(df),
+            fig, animate, frames=len(df), 
             interval=1000/fps, blit=True, repeat=False
         )
         
@@ -191,7 +226,7 @@ class SmartVideoTool(BaseTool):
         plt.close()
 
     def _create_racing_bars(self, df, time_col, data_cols, title, output_path, video_format="HD", fps=2.0):
-        """Create racing bar chart animation"""
+        """Create racing bar chart animation with label trimming for bar race videos"""
         figsize = self._get_video_dimensions(video_format)
         fig, ax = plt.subplots(figsize=figsize)
         
@@ -204,17 +239,21 @@ class SmartVideoTool(BaseTool):
             # Get current data sorted for racing effect
             current_data = df.iloc[frame][data_cols].sort_values(ascending=True)
             
+            # Apply label trimming for bar race only
+            trimmed_labels = [self._trim_label(label, "bar") for label in current_data.index]
+            
             # Create horizontal bars
             bars = ax.barh(range(len(current_data)), current_data.values, 
-                          color=[color_map[col] for col in current_data.index])
+                           color=[color_map[col] for col in current_data.index])
             
             # Add value labels on bars
             for i, (idx, val) in enumerate(current_data.items()):
+                trimmed_label = trimmed_labels[i]
                 ax.text(val, i, f' {val:.1f}', va='center', fontsize=10, fontweight='bold')
             
             # Styling
             ax.set_yticks(range(len(current_data)))
-            ax.set_yticklabels(current_data.index, fontsize=11)
+            ax.set_yticklabels(trimmed_labels, fontsize=11)  # Use trimmed labels
             ax.set_xlim(0, df[data_cols].max().max() * 1.15)
             ax.set_xlabel('Value', fontsize=12, fontweight='bold')
             # === 2-LINE TITLE FORMAT (ALWAYS) ===
@@ -255,7 +294,7 @@ class SmartVideoTool(BaseTool):
             # Plot bubbles
             for i, col in enumerate(current_data.index):
                 ax.scatter(x_pos[i], y_pos[i], s=sizes[i], 
-                          color=color_map[col], alpha=0.6, edgecolors='black', linewidth=2)
+                           color=color_map[col], alpha=0.6, edgecolors='black', linewidth=2)
                 ax.text(x_pos[i], y_pos[i], f'{y_pos[i]:.1f}', 
                        ha='center', va='center', fontsize=10, fontweight='bold')
             

@@ -70,11 +70,14 @@ create_video:
     - Read CSV from output/{filename}.csv
     - Create videos for ALL styles in {animation_styles}
     - Save to output/ directory with naming pattern: {filename}_[style]_[format].mp4
-      (where [style] = values from animation_styles list, [format] = values from video_formats list)
+      (where [style] = values from {animation_styles}, [format] = values from {video_formats})
     
     Title format requirement (STRICT):
     - Line 1: Pure topic name only ("Programming Language")
     - Line 2: Visualization type + year ("Race - 2019")
+    
+    For bar race videos, apply label trimming using data/label_mappings.json
+    (e.g., "JavaScript" → "JS", "Microsoft" → "MS")
   expected_output: >
     Confirmation of successful video creation with exact file paths for all generated videos.
     Example: "output/ProgrammingLanguage_bar_Shorts.mp4"
@@ -86,11 +89,8 @@ create_video:
 add_audio:
   description: >
     Generate professional audio narration and merge with videos.
-    Automatically skips if audio is disabled in inputs.
-    When enabled:
-    - Uses narration based on {topic} and CSV data
-    - Processes ALL videos from previous task
-    - Applies narration speed: {audio_speed}x
+    This task will automatically skip if audio is disabled in inputs.
+    When enabled, processes all videos with narration based on {topic}.
   expected_output: >
     List of audio-enhanced videos created, OR skip message if disabled.
     Example: "✅ Audio added: ProgrammingLanguage_bar_Shorts_with_audio.mp4"

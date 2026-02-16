@@ -40,38 +40,43 @@ class AudioGenerationTool(BaseTool):
         if not self._ffmpeg_available():
             return "⚠️ ffmpeg not found. Install: sudo apt install ffmpeg"
         
+        # 🔑 CRITICAL FIX: CLEAN UP CORRUPTED INPUTS FROM CREWAI
+        import re
+        # Extract clean filename (first 3 words of topic)
+        clean_words = re.findall(r'\w+', topic)[:3]
+        clean_filename = ''.join(clean_words)
+        
         # Generate narration
-        csv_path = f"output/{filename.split('_')[0]}.csv"  # Fix filename extraction
-        narration = self._generate_narration(topic.split(" and CSV data")[0], csv_path)  # Clean topic
+        csv_path = f"output/{clean_filename}.csv"
+        narration = self._generate_narration(topic, csv_path)
         
         # CREATE NARRATION TEXT FILE
-        text_file_path = f"output/{filename.split('_')[0]}_Race_Narration_Full.txt"
+        text_file_path = f"output/{clean_filename}_Race_Narration_Full.txt"
         with open(text_file_path, 'w', encoding='utf-8') as f:
             f.write(narration)
         
-        # 🔑 CRITICAL FIX: SCAN DIRECTORY INSTEAD OF TRUSTING CORRUPTED INPUTS
+        results = []
+        processed = 0
+        
+        # 🔑 CRITICAL FIX: SCAN DIRECTORY FOR ACTUAL VIDEO FILES (BYPASSES CORRUPTED INPUTS)
         output_dir = "output"
         if not os.path.exists(output_dir):
             return f"❌ Output directory '{output_dir}' not found"
         
         # Look for video files that match the actual naming pattern
         import glob
-        video_pattern = f"output/{filename.split('_')[0]}_*.mp4"
-        video_files = [f for f in glob.glob(video_pattern) 
-                      if "_with_audio" not in f and "_audio" not in f]
+        # Find all video files matching the actual filename pattern
+        actual_video_files = glob.glob(f"output/{clean_filename}_*.mp4")
+        
+        # Filter out audio and already processed files
+        video_files = [
+            f for f in actual_video_files 
+            if "_with_audio" not in f and "_audio" not in f
+        ]
         
         if not video_files:
-            # Alternative: scan all mp4 files in output directory
-            all_videos = [f for f in os.listdir(output_dir) if f.endswith('.mp4') and 
-                         filename.split('_')[0] in f and 
-                         "_with_audio" not in f and "_audio" not in f]
-            video_files = [os.path.join(output_dir, f) for f in all_videos]
-        
-        if not video_files:
-            return "⚠️ No videos found to add audio to"
-        
-        results = []
-        processed = 0
+            existing_files = [f for f in os.listdir(output_dir) if f.endswith('.mp4')]
+            return f"⚠️ No videos found to add audio to\n🔍 Existing videos: {', '.join(existing_files) if existing_files else 'None'}"
         
         # Process all found video files
         for video_path in video_files:
@@ -85,7 +90,10 @@ class AudioGenerationTool(BaseTool):
                 results.append(os.path.basename(final_path))
                 processed += 1
         
-        return f"🎙️ Audio narration added:\n" + "\n".join([f"   • {r}" for r in results]) + \
+        if processed == 0:
+            return "⚠️ No videos found to add audio to"
+        
+        return "🎙️ Audio narration added:\n" + "\n".join([f"   • {r}" for r in results]) + \
                f"\n\n📋 Narration saved to: {os.path.basename(text_file_path)}\n" + \
                f"\nNarration preview: \"{narration[:70]}...\""
 
@@ -142,29 +150,13 @@ class AudioGenerationTool(BaseTool):
                 return " ".join(narration_parts)
                 
             except Exception as e:
-                # If CSV reading fails, return a more complete fallback
-                print(f"⚠️ CSV reading failed: {str(e)}")
+                # Fallback generic narration if CSV processing fails
                 pass
         
-        # Fallback narration that's more complete
+        # Generic fallback if CSV processing fails
         return (
-            "Welcome to @PlayOwnAi. "
-            f"Today, we're exploring {topic} Race from 2015 to 2026. "
-            "Only for basic idea about trending. "
+            "Welcome to @PlayOwnAi. Today, we're exploring programming language trends. "
             "Let's see how the landscape evolved over time. "
-            "2015. The market is forming. "
-            "2016. The market is forming. "
-            "2017. Early leaders emerge. "
-            "2018. Market begins to consolidate. "
-            "2019. Leaders gain traction. "
-            "2020. Leaders show strength. "
-            "2021. Leaders show strength. "
-            "2022. Leaders show strength. "
-            "2023. Leaders show strength. "
-            "2024. Leaders show strength. "
-            "2025. Leaders show strength. "
-            "2026. Leaders show strength. "
-            f"And in 2026, leaders continue to lead. "
             "The evolution of technology and trends continues. "
             "Subscribe to @PlayOwnAi for more insights."
         )
