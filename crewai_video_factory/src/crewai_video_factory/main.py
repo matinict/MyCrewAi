@@ -6,6 +6,7 @@ crewai run
 Or directly:
 python main.py
 """
+import os
 import sys
 import json
 import re
@@ -14,14 +15,14 @@ from crewai_video_factory.crew import CrewaiVideoFactory
 # Single source of truth for default inputs
 # ⚠️ DO NOT include "Race" suffix here — it's added automatically for bar race videos only
 DEFAULT_INPUTS = {
-    "topic": "AI Multimodal LLM",          # Clean topic (no "Race" suffix)
+    "topic": "Programming Language",          # Clean topic (no "Race" suffix)
     "start": 2015,
     "end": 2026,
     "granularity": "yearly",               # Options: "yearly", "monthly", "daily"
     "animation_styles": ["bar"],           # Options: "bar", "line", "bubble", "map", "pie", "stream"
     "video_formats": ["Shorts"],           # Options: "HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"
-    "fps": 1.0,                             # Duration control: 1.0 = 12 sec for 12 rows (2.0=6s, 0.5=24s)
-    "use_existing_csv": False  # if true use existing output/{topics} .csv
+    "fps": 0.5,                             # Duration control: 1.0 = 12 sec for 12 rows (2.0=6s, 0.5=24s)
+    "use_existing_csv":True  # if True use existing output/{topics} .csv
 }
 
 def run():

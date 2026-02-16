@@ -131,19 +131,19 @@ class SmartVideoTool(BaseTool):
         }
         return formats.get(video_format.strip(), (12, 6.75))
 
-    def _format_title(self, title: str, time_value, style: str) -> str:
+    def _format_title(self, title: str, time_value, viz_type: str) -> str:
         """Format title with topic on first line, visualization type + year on second line.
         
         Args:
-            title: Main topic name (e.g., "AI Multimodal LLM")
-            time_value: Current time period value (e.g., 2025)
-            style: Animation style code ("bar", "line", etc.)
+            title: Main topic name (e.g., "Programming Language")
+            time_value: Current time period value (e.g., 2019)
+            viz_type: Animation style code ("bar", "line", etc.)
         
         Returns:
             Formatted 2-line title string:
-            "AI Multimodal LLM\nRace - 2025"
+            "Programming Language\nRace - 2019"
         """
-        # Map style codes to human-readable visualization names
+        # Map style codes to human-readable names
         style_names = {
             "bar": "Race",
             "line": "Line Chart",
@@ -152,10 +152,10 @@ class SmartVideoTool(BaseTool):
             "stream": "Streamgraph",
             "map": "Heatmap"
         }
-        viz_type = style_names.get(style.strip(), style.strip().title())
+        viz_label = style_names.get(viz_type.strip(), viz_type.strip().title())
         
         # ALWAYS use 2-line format: Topic on first line, visualization + year on second
-        return f"{title}\n{viz_type} - {time_value}"
+        return f"{title}\n{viz_label} - {time_value}"
 
     def _create_line_chart(self, df, time_col, data_cols, title, output_path, video_format="HD", fps=2.0):
         """Create animated line chart video"""
@@ -180,8 +180,8 @@ class SmartVideoTool(BaseTool):
             for i, (line, col) in enumerate(zip(lines, data_cols)):
                 line.set_data(range(frame + 1), df[col].iloc[:frame + 1])
             # Set title with 2-line format
-            ax.set_title(self._format_title(title, df[time_col].iloc[frame], "line"),
-                        fontsize=16, fontweight='bold', pad=20)
+            formatted_title = self._format_title(title, df[time_col].iloc[frame], "line")
+            ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
             return lines
         
         anim = animation.FuncAnimation(
@@ -219,9 +219,9 @@ class SmartVideoTool(BaseTool):
             ax.set_yticklabels(current_data.index, fontsize=11)
             ax.set_xlim(0, df[data_cols].max().max() * 1.15)
             ax.set_xlabel('Value', fontsize=12, fontweight='bold')
-            # === CRITICAL: 2-LINE TITLE FORMAT ===
-            ax.set_title(self._format_title(title, df[time_col].iloc[frame], "bar"),
-                        fontsize=16, fontweight='bold', pad=20)
+            # === 2-LINE TITLE FORMAT (ALWAYS) ===
+            formatted_title = self._format_title(title, df[time_col].iloc[frame], "bar")
+            ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
             # =====================================
             ax.grid(axis='x', alpha=0.3)
             
@@ -266,10 +266,10 @@ class SmartVideoTool(BaseTool):
             ax.set_xticklabels(current_data.index, rotation=45, ha='right', fontsize=10)
             ax.set_ylim(0, df[data_cols].max().max() * 1.2)
             ax.set_ylabel('Value', fontsize=12, fontweight='bold')
-            # === 2-LINE TITLE FORMAT ===
-            ax.set_title(self._format_title(title, df[time_col].iloc[frame], "bubble"),
-                        fontsize=16, fontweight='bold', pad=20)
-            # ==========================
+            # === 2-LINE TITLE FORMAT (ALWAYS) ===
+            formatted_title = self._format_title(title, df[time_col].iloc[frame], "bubble")
+            ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
+            # =====================================
             ax.grid(True, alpha=0.3, axis='y')
         
         anim = animation.FuncAnimation(
@@ -308,10 +308,10 @@ class SmartVideoTool(BaseTool):
                 autotext.set_color('white')
                 autotext.set_fontsize(9)
             
-            # === 2-LINE TITLE FORMAT ===
-            ax.set_title(self._format_title(title, df[time_col].iloc[frame], "pie"),
-                        fontsize=16, fontweight='bold', pad=20)
-            # ==========================
+            # === 2-LINE TITLE FORMAT (ALWAYS) ===
+            formatted_title = self._format_title(title, df[time_col].iloc[frame], "pie")
+            ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
+            # =====================================
         
         anim = animation.FuncAnimation(
             fig, animate, frames=len(df),
@@ -345,10 +345,10 @@ class SmartVideoTool(BaseTool):
             ax.set_ylabel('Cumulative Value', fontsize=14)
             ax.legend(loc='upper left', fontsize=9, ncol=2)
             ax.grid(True, alpha=0.3, axis='y')
-            # === 2-LINE TITLE FORMAT ===
-            ax.set_title(self._format_title(title, df[time_col].iloc[frame], "stream"),
-                        fontsize=16, fontweight='bold', pad=20)
-            # ==========================
+            # === 2-LINE TITLE FORMAT (ALWAYS) ===
+            formatted_title = self._format_title(title, df[time_col].iloc[frame], "stream")
+            ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
+            # =====================================
         
         anim = animation.FuncAnimation(
             fig, animate, frames=len(df),
@@ -393,10 +393,10 @@ class SmartVideoTool(BaseTool):
                     text = ax.text(j, i, f'{current_column[i, j]:.0f}',
                                  ha="center", va="center", color="black", fontsize=8)
             
-            # === 2-LINE TITLE FORMAT ===
-            ax.set_title(self._format_title(title, df[time_col].iloc[frame], "map"),
-                        fontsize=16, fontweight='bold', pad=20)
-            # ==========================
+            # === 2-LINE TITLE FORMAT (ALWAYS) ===
+            formatted_title = self._format_title(title, df[time_col].iloc[frame], "map")
+            ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
+            # =====================================
         
         anim = animation.FuncAnimation(
             fig, animate, frames=len(df),
