@@ -2,25 +2,24 @@ research_data:
   description: >
     Research and compile time-series data for {topic} from {start} to {end}.
     The data should be organized with {granularity} granularity.
-    
     CRITICAL FORMAT REQUIREMENTS:
     Create data in MULTI-COLUMN format tracking multiple items/frameworks/tools over time.
-    
+
     Example structure for "AI Agent Framework Popularity":
     Year,LangChain,CrewAI,AutoGPT,BabyAGI,SemanticKernel,n8n,Make,Zapier,Haystack,MetaGPT
     2015,0,0,0,0,0,5,8,20,0,0
     2016,0,0,0,0,0,8,12,25,0,0
     2017,2,0,0,0,0,12,18,30,0,0
     ...
-    
+
     Structure requirements:
     - First column: Time period (Year, Month, Date based on {granularity})
     - Subsequent columns: Different items/frameworks/tools being tracked
     - Values: Popularity scores, adoption rates, or relevant metrics (0-100 scale)
     - Include 5-10 different items to compare
-    
+
     The data must be formatted as a list of dictionaries where each dictionary represents one row.
-    Example: [{{"Year": 2015, "LangChain": 0, "CrewAI": 0, ...}}, {{"Year": 2016, ...}}]
+    Example: [{"Year": 2015, "LangChain": 0, "CrewAI": 0, ...}, {"Year": 2016, ...}]
   expected_output: >
     A Python list of dictionaries in multi-column format, ready for CSV export.
     Each dictionary must have the time period as first key, followed by 5-10 items being tracked.
@@ -30,12 +29,11 @@ research_data:
 generate_csv:
   description: >
     Generate a CSV file from the researched data with strict filename and format rules:
-    
     FILENAME RULES:
     - Filename must be: First 3 words of "{topic}" with no spaces
     - Example: "AI Agent Framework Popularity" → "AIAgentFramework.csv"
     - Location: output/{filename}.csv
-    
+
     FORMAT RULES:
     - Multi-column format with time period in first column
     - 5-10 items/frameworks/tools in subsequent columns
@@ -44,7 +42,7 @@ generate_csv:
       2015,0,0,0,0,0,5,8,20,0,0
       2016,0,0,0,0,0,8,12,25,0,0
       ...
-    
+
     Use the CSV Writer Tool to create the file with proper structure:
     - First column: Year/Month/Date (based on granularity)
     - Remaining columns: Different items being tracked
@@ -52,7 +50,7 @@ generate_csv:
     - Include headers for all columns
     - Ensure data is properly formatted
     - Save to the output directory
-    
+
     The CSV must be ready for video generation processing with multi-line chart visualization.
   expected_output: >
     Confirmation message with the exact filepath where CSV was saved,
@@ -65,20 +63,22 @@ create_video:
   description: >
     Generate visualization videos from the CSV file for {topic}.
     Animation styles: {animation_styles}
-    Video formats: {video_formats}  
+    Video formats: {video_formats}
+    Animation speed: {fps} fps (controls duration: lower = slower/longer videos)
     
     Use the Video Generation Tool to:
     - Read the CSV file from output/{filename}.csv
-    - Create engaging visualization videos for ALL styles: {animation_styles}
-    - Generate racing_bars video: output/{filename}_racing_bars.mp4
-    - Generate line_chart video: output/{filename}_line_chart.mp4
-    - Save all videos to the output directory
-    
-    Ensure the video properly represents the time-series data with
-    clear labels, smooth animations, and professional presentation.
-  expected_output: > 
-    Confirmation that videos were successfully created for ALL formats: {video_formats} 
-    with the output path, or detailed error message if generation failed.
+    - Create videos for ALL styles in {animation_styles} list (e.g., "bar", "line")
+    - Generate videos with naming pattern: {filename}_[style]_[format].mp4
+      where [style] is each value from animation_styles and [format] from video_formats
+    - Apply FPS parameter for smooth duration control
+    - Save all videos to output/ directory
+
+    Ensure videos properly represent time-series data with clear labels,
+    smooth animations, and professional presentation.
+  expected_output: >
+    Confirmation of successful video creation with paths, duration estimate
+    (rows / fps), and any warnings/errors encountered during generation.
   agent: video_producer
   context:
     - research_data

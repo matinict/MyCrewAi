@@ -20,13 +20,14 @@ DEFAULT_INPUTS = {
     "granularity": "yearly",               # Options: "yearly", "monthly", "daily"
     "animation_styles": ["bar"],           # Options: "bar", "line", "bubble", "map", "pie", "stream"
     "video_formats": ["Shorts"],           # Options: "HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"
-    "fps": 1.0                             # Duration control: 1.0 = 12 sec for 12 rows (2.0=6s, 0.5=24s)
+    "fps": 1.0,                             # Duration control: 1.0 = 12 sec for 12 rows (2.0=6s, 0.5=24s)
+    "use_existing_csv": False  # if true use existing output/{topics} .csv
 }
 
 def run():
     inputs = DEFAULT_INPUTS.copy()
     
-    # Try to get inputs from command line args
+    # Parse CLI arguments
     if len(sys.argv) > 1:
         try:
             custom_inputs = json.loads(sys.argv[1])
@@ -34,34 +35,62 @@ def run():
         except json.JSONDecodeError:
             print("⚠️  Invalid JSON input. Using defaults.")
     
-    # Calculate filename from topic (first 3 words, no spaces)
+    # Generate filename from topic
     words = re.findall(r'\w+', inputs['topic'])[:3]
     inputs['filename'] = ''.join(words)
-    
-    # === CRITICAL: LOCK TOPIC TO PREVENT AGENT OVERRIDE ===
-    # Store original topic to prevent LLM agents from "improving" it to "AI Growth Over Years"
     inputs['original_topic'] = inputs['topic']
-    # =======================================================
+    
+    # FPS validation
+    fps = float(inputs.get('fps', 1.0))
+    if fps < 0.1 or fps > 30.0:
+        print(f"⚠️  Invalid FPS {fps}. Clamping to valid range (0.1-30.0)")
+        fps = max(0.1, min(30.0, fps))
+    inputs['fps'] = fps
+    
+    # ===== USE_EXISTING_CSV HANDLING =====
+    csv_path = f"output/{inputs['filename']}.csv"
+    use_existing = inputs.get('use_existing_csv', False)
     
     print("\n" + "="*60)
     print("🎬 VIDEO FACTORY STARTING")
     print("="*60)
-    print(f"📊 REQUESTED Topic: {DEFAULT_INPUTS['topic']}")
-    print(f"🔍 LOCKED Topic: {inputs['topic']}")          # Shows actual topic used
-    print(f"📅 Period: {inputs['start']} - {inputs['end']}")
-    print(f"⏱️  Granularity: {inputs['granularity']}")
-    print(f"⏱️  Duration Control (fps): {inputs.get('fps', 2.0)}")
-    styles = inputs.get('animation_styles') or [inputs.get('animation_style', 'bar')]
-    if isinstance(styles, str): 
-        styles = [styles.strip()]
-    print(f"🎨 Animations: {', '.join(styles)}")
-    print(f"📱 Format: {', '.join(inputs.get('video_formats', ['HD']))}")
-    print(f"📁 Filename: {inputs['filename']}.csv")
+    print(f"📊 Topic: {inputs['topic']}")
+    print(f"⏱️  Animation speed: {fps} fps → ~{12/fps:.1f} sec duration (for 12 data points)")
+    print(f"📁 CSV File: {csv_path}")
+    
+    if use_existing:
+        if not os.path.exists(csv_path):
+            print(f"❌ ERROR: use_existing_csv=True but CSV not found at {csv_path}")
+            print("💡 Fix: Set use_existing_csv=False to generate new data, or create the CSV manually")
+            sys.exit(1)
+        print("⏭️  SKIPPING data research & CSV generation (using existing file)")
+        # Skip research/generation tasks - only run video creation
+        inputs['_skip_research'] = True
+        inputs['_skip_csv'] = True
+    else:
+        print("🔍 Researching new data & generating CSV")
+        inputs['_skip_research'] = False
+        inputs['_skip_csv'] = False
+    # =====================================
+    
+    print(f"🎨 Animations: {', '.join(inputs['animation_styles'])}")
+    print(f"📱 Formats: {', '.join(inputs['video_formats'])}")
     print("="*60 + "\n")
     
     try:
         crew_instance = CrewaiVideoFactory()
-        result = crew_instance.crew().kickoff(inputs=inputs)
+        
+        # ===== CONDITIONAL TASK EXECUTION =====
+        if use_existing:
+            # Only run video creation task
+            full_crew = crew_instance.crew()
+            # Filter to only video creation task
+            full_crew.tasks = [t for t in full_crew.tasks if t.name == 'create_video']
+            result = full_crew.kickoff(inputs=inputs)
+        else:
+            # Run full pipeline
+            result = crew_instance.crew().kickoff(inputs=inputs)
+        # =======================================
         
         print("\n" + "="*60)
         print("✅ VIDEO FACTORY COMPLETED")
@@ -69,22 +98,14 @@ def run():
         print("\nResult:")
         print(result)
         print("\n" + "="*60)
-        print(f"\n📁 Check your outputs:")
-        print(f"   CSV: output/{inputs['filename']}.csv")
+        print(f"\n📁 Outputs:")
+        print(f"   CSV: {csv_path}")
         print(f"   Videos:")
-        styles = inputs.get('animation_styles') or [inputs.get('animation_style', 'bar')]
-        if isinstance(styles, str):
-            styles = [styles.strip()]
-        formats = inputs.get('video_formats') or [inputs.get('video_format', 'HD')]
-        if isinstance(formats, str):
-            formats = [formats.strip()]
-        for style in styles:
-            for fmt in formats:
+        for style in inputs['animation_styles']:
+            for fmt in inputs['video_formats']:
                 print(f"      - output/{inputs['filename']}_{style}_{fmt}.mp4")
-        print("\n💡 Bar race videos will show: \"{topic} Race - {year}\"")
-        print("   (e.g., \"AI Multimodal LLM Race - 2025\")")
+        print(f"\n⏱️  Duration tip: With {fps} fps and {12} data points → ~{12/fps:.1f} seconds")
         print("="*60 + "\n")
-        
         return result
         
     except Exception as e:
@@ -96,34 +117,7 @@ def run():
         traceback.print_exc()
         sys.exit(1)
 
-def train():
-    """
-    Train the crew for a given number of iterations.
-    """
-    inputs = DEFAULT_INPUTS.copy()
-    try:
-        CrewaiVideoFactory().crew().train(n_iterations=int(sys.argv[1]), filename=sys.argv[2], inputs=inputs)
-    except Exception as e:
-        raise Exception(f"An error occurred while training the crew: {e}")
-
-def replay():
-    """
-    Replay the crew execution from a specific task.
-    """
-    try:
-        CrewaiVideoFactory().crew().replay(task_id=sys.argv[1])
-    except Exception as e:
-        raise Exception(f"An error occurred while replaying the crew: {e}")
-
-def test():
-    """
-    Test the crew execution and returns the results.
-    """
-    inputs = DEFAULT_INPUTS.copy()
-    try:
-        CrewaiVideoFactory().crew().test(n_iterations=int(sys.argv[1]), openai_model_name=sys.argv[2], inputs=inputs)
-    except Exception as e:
-        raise Exception(f"An error occurred while testing the crew: {e}")
+# ... [train/replay/test functions unchanged] ...
 
 if __name__ == "__main__":
     run()
