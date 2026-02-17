@@ -23,9 +23,9 @@ DEFAULT_INPUTS = {
     "fps": 0.5,
     "use_existing_csv": True,
     "video_enabled": False,
-    "audio_enabled": True,
+    "audio_enabled": False,                  # ✅ Can be False if audio already exists
     "audio_speed": 0.9,
-    "merge_audio_video": True,
+    "merge_audio_video": True,               # ✅ Can be True even if audio_enabled=False
     "generate_youtube_metadata": True,
 }
 
@@ -84,28 +84,30 @@ def run():
         crew_instance = CrewaiVideoFactory()
         full_crew = crew_instance.crew()
 
+        # ===== CONDITIONAL TASK EXECUTION =====
         final_tasks = []
 
         if not inputs.get('_skip_research', False):
-            final_tasks.append(full_crew.tasks[0])
+            final_tasks.append(full_crew.tasks[0])  # research_data
         if not inputs.get('_skip_csv', False):
-            final_tasks.append(full_crew.tasks[1])
+            final_tasks.append(full_crew.tasks[1])  # generate_csv
 
         if inputs.get('video_enabled', True):
-            final_tasks.append(full_crew.tasks[2])
+            final_tasks.append(full_crew.tasks[2])  # create_video
 
+        # 🔑 KEY FIX: Audio and Merge are now INDEPENDENT
         if inputs.get('audio_enabled', False):
-            final_tasks.append(full_crew.tasks[3])
+            final_tasks.append(full_crew.tasks[3])  # add_audio
 
-            if inputs.get('merge_audio_video', False):
-                final_tasks.append(full_crew.tasks[4])
+        if inputs.get('merge_audio_video', False):
+            final_tasks.append(full_crew.tasks[4])  # merge_audio_video
 
         if inputs.get('generate_youtube_metadata', False):
-            final_tasks.append(full_crew.tasks[5])
+            final_tasks.append(full_crew.tasks[5])  # generate_youtube_metadata
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
-            print("💡 Fix: Enable video_enabled OR audio_enabled OR generate_youtube_metadata OR disable use_existing_csv")
+            print("💡 Fix: Enable video_enabled OR audio_enabled OR merge_audio_video OR generate_youtube_metadata OR disable use_existing_csv")
             sys.exit(1)
 
         full_crew.tasks = final_tasks
@@ -137,6 +139,8 @@ def run():
                     audio_file = f"output/{inputs['filename']}_{style}_{fmt}_audio.mp3"
                     if os.path.exists(audio_file):
                         print(f"      - {audio_file}")
+        else:
+            print(f"   Audio: SKIPPED (using existing audio files)")
 
         if inputs.get('merge_audio_video', False):
             print(f"   Merged:")
