@@ -26,6 +26,7 @@ DEFAULT_INPUTS = {
     "audio_enabled": True,                  # ✅ True to generate audio
     "audio_speed": 0.9,
     "merge_audio_video": True,              # ✅ True to merge audio+video
+    "generate_youtube_metadata": True,  # NEW PARAM
 }
 
 def run():
@@ -40,7 +41,7 @@ def run():
             print("⚠️  Invalid JSON input. Using defaults.")
 
     # Generate filename from topic
-    words = re.findall(r'\w+', inputs['topic'])[:3]
+    words = re.findall(r'\w+', inputs['topic'])[:2]
     inputs['filename'] = ''.join(words)
     inputs['original_topic'] = inputs['topic']
 
@@ -81,6 +82,7 @@ def run():
     print(f"🎬 Video Enabled: {inputs.get('video_enabled', True)}")
     print(f"🔊 Audio Enabled: {inputs.get('audio_enabled', False)}")
     print(f"🔄 Merge Audio-Video: {inputs.get('merge_audio_video', False)}")
+    print(f"📝 YouTube Metadata: {inputs.get('generate_youtube_metadata', False)}")
     print("="*60 + "\n")
 
     try:
@@ -109,10 +111,14 @@ def run():
             if inputs.get('merge_audio_video', False):
                 final_tasks.append(full_crew.tasks[4])  # merge_audio_video
 
+                        # YouTube Metadata task (independent, runs last)
+        if inputs.get('generate_youtube_metadata', False):
+            final_tasks.append(full_crew.tasks[5])  # generate_youtube_metadata
+
         # 🔑 CRITICAL FIX: Ensure at least one task exists
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
-            print("💡 Fix: Enable video_enabled OR audio_enabled OR disable use_existing_csv")
+            print("💡 Fix: Enable video_enabled OR audio_enabled OR generate_youtube_metadata OR disable use_existing_csv")
             sys.exit(1)
 
         # Set the filtered tasks list on the crew instance
@@ -157,6 +163,17 @@ def run():
                     merged_file = f"output/{inputs['filename']}_{style}_{fmt}_with_audio.mp4"
                     if os.path.exists(merged_file):
                         print(f"      - {merged_file}")
+        # Show YouTube metadata files if generated
+        if inputs.get('generate_youtube_metadata', False):
+            print(f"   YouTube Metadata:")
+            metadata_files = [
+                f"output/{inputs['filename']}_Race_Narration_Full.txt",
+                f"output/{inputs['filename']}_YouTube_Metadata.json",
+                f"output/{inputs['filename']}_YouTube_Metadata.txt",
+            ]
+            for mf in metadata_files:
+                if os.path.exists(mf):
+                    print(f"      - {os.path.basename(mf)}")
 
         print(f"\n⏱️  Duration tip: With {fps} fps and {12} data points → ~{12/fps:.1f} seconds")
         print("="*60 + "\n")

@@ -110,3 +110,28 @@ merge_audio_video:
   agent: merge_specialist
   context:
     - add_audio # Ensure audio files exist before attempting merge
+
+generate_youtube_metadata:
+  description: >
+    Generate YouTube metadata and narration text file for {topic}.
+    This includes:
+    - Narration text file ({filename}_Race_Narration_Full.txt)
+    - YouTube title (SEO optimized)
+    - YouTube description (with keywords and call-to-action)
+    - YouTube tags (25+ SEO tags)
+    - YouTube chapters/timestamps
+    - Metadata saved as JSON and TXT files
+    
+    Parameters:
+    - Topic: {topic}
+    - Year Range: {start} to {end}
+    - Video Duration: Calculate from {fps} and data points
+  expected_output: >
+    Confirmation of metadata files created:
+    - {filename}_Race_Narration_Full.txt
+    - {filename}_YouTube_Metadata.json
+    - {filename}_YouTube_Metadata.txt
+  agent: youtube_metadata_specialist
+  context:
+    - generate_csv
+    - create_video

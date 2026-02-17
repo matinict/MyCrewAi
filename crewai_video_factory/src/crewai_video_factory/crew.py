@@ -4,6 +4,7 @@ from crewai_video_factory.tools.csv_tool import CSVTool
 from crewai_video_factory.tools.smart_video_tool import SmartVideoTool
 from crewai_video_factory.tools.audio_tool import AudioGenerationTool
 from crewai_video_factory.tools.merge_tool import MergeAudioVideoTool
+from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool  # NEW IMPORT
 import re
 
 @CrewBase
@@ -54,6 +55,15 @@ class CrewaiVideoFactory:
             verbose=True
         )
 
+    # ===== NEW YOUTUBE METADATA AGENT =====
+    @agent
+    def youtube_metadata_specialist(self) -> Agent:
+        return Agent(
+            config=self.agents_config['youtube_metadata_specialist'],
+            tools=[YouTubeMetadataTool()],
+            verbose=True
+        )
+
     @task
     def research_data(self) -> Task:
         return Task(
@@ -84,10 +94,16 @@ class CrewaiVideoFactory:
             config=self.tasks_config['merge_audio_video'],
         )
 
+    # ===== NEW YOUTUBE METADATA TASK =====
+    @task
+    def generate_youtube_metadata(self) -> Task:
+        return Task(
+            config=self.tasks_config['generate_youtube_metadata'],
+        )
+
     @crew
     def crew(self) -> Crew:
-        """Creates the Video Factory crew with ALL potential agents and tasks.
-        Conditional execution is handled in main.py"""
+        """Creates the Video Factory crew"""
         return Crew(
             agents=self.agents,
             tasks=self.tasks,
