@@ -1,0 +1,74 @@
+{
+  "topic": {
+    "type": "string",
+    "description": "Topic for video (e.g., 'Programming Language', 'AI Frameworks')",
+    "example": "Programming Language"
+  },
+  "start": {
+    "type": "integer",
+    "description": "Start year for data range",
+    "example": 2015
+  },
+  "end": {
+    "type": "integer",
+    "description": "End year for data range",
+    "example": 2026
+  },
+  "granularity": {
+    "type": "string",
+    "description": "Data granularity",
+    "enum": ["yearly", "monthly", "daily"],
+    "example": "yearly"
+  },
+  "animation_styles": {
+    "type": "array",
+    "description": "Animation styles to generate",
+    "enum": ["bar", "line", "bubble", "pie", "stream", "map"],
+    "example": ["bar", "line"]
+  },
+  "video_formats": {
+    "type": "array",
+    "description": "Video formats to generate",
+    "enum": ["HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"],
+    "example": ["Shorts", "HD"]
+  },
+  "fps": {
+    "type": "number",
+    "description": "Frames per second (0.1-30.0)",
+    "minimum": 0.1,
+    "maximum": 30.0,
+    "example": 0.5
+  },
+  "use_existing_csv": {
+    "type": "boolean",
+    "description": "Use existing CSV instead of generating new one",
+    "example": false
+  },
+  "video_enabled": {
+    "type": "boolean",
+    "description": "Enable video generation",
+    "example": true
+  },
+  "audio_enabled": {
+    "type": "boolean",
+    "description": "Enable audio narration generation",
+    "example": true
+  },
+  "audio_speed": {
+    "type": "number",
+    "description": "Audio speech speed (0.7-1.3)",
+    "minimum": 0.7,
+    "maximum": 1.3,
+    "example": 0.9
+  },
+  "merge_audio_video": {
+    "type": "boolean",
+    "description": "Merge audio with video files",
+    "example": true
+  },
+  "generate_youtube_metadata": {
+    "type": "boolean",
+    "description": "Generate YouTube metadata files",
+    "example": true
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "topic": "BDBL Revenue",
+  "start": 2015,
+  "end": 2026,
+  "granularity": "yearly",
+  "animation_styles": ["bar"],
+  "video_formats": ["Shorts"],
+  "fps": 0.5,
+  "use_existing_csv": false,
+  "video_enabled": true,
+  "audio_enabled": true,
+  "audio_speed": 0.9,
+  "merge_audio_video": true,
+  "generate_youtube_metadata": true
+}

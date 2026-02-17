@@ -21,54 +21,87 @@ class MergeAudioVideoTool(BaseTool):
         output_dir: str,
         audio_speed: float = 0.9
     ) -> str:
-        # 🔑 KEY: Get output_dir from inputs (passed from main.py)
+        # 🔑 KEY: Use parameters passed directly
         if not os.path.exists(output_dir):
-            return f"âŒ Output directory '{output_dir}' not found"
+            return f"❌ Output directory '{output_dir}' not found"
 
-        # 🔑 KEY: Get clean_filename from inputs (consistent across all tools)
-        clean_filename = filename
-
+        # 🔍 DEBUG: List files in directory
+        print(f"\n🔍 DEBUG: Merge Tool Starting")
+        print(f"   Output dir: {output_dir}")
+        if os.path.exists(output_dir):
+            all_files = os.listdir(output_dir)
+            print(f"   Files in directory: {all_files}")
+        
         import glob
-        # 🔑 KEY: Search in topic subdirectory
-        video_pattern = f"{output_dir}/{clean_filename}_*.mp4"
-        video_files = [f for f in glob.glob(video_pattern) if "_with_audio" not in f and "_audio" not in f]
+        
+        # 🔑 KEY: Search all .mp4 files in subdirectory (style-based naming: bar_Shorts_bar_Shorts.mp4)
+        all_videos = glob.glob(f"{output_dir}/*.mp4")
+        
+        # Filter: only base videos (exclude merged & audio files)
+        video_files = [
+            f for f in all_videos 
+            if "_with_audio" not in f and "_audio" not in f
+        ]
+
+        print(f"   Found {len(video_files)} videos to process")
 
         results = []
         processed = 0
 
         for video_path in video_files:
-            audio_path = video_path.replace('.mp4', '_audio.mp3')
+            # Extract video filename and create matching audio filename
+            # Example: bar_Shorts_bar_Shorts.mp4 → bar_Shorts_bar_Shorts_audio.mp3
+            video_basename = os.path.basename(video_path)
+            audio_basename = video_basename.replace('.mp4', '_audio.mp3')
+            audio_path = os.path.join(output_dir, audio_basename)
+
+            print(f"\n   Processing: {video_basename}")
+            print(f"   Looking for audio: {audio_basename}")
 
             if not os.path.exists(audio_path):
-                results.append(f"⚠️ Missing audio: {os.path.basename(audio_path)} for {os.path.basename(video_path)}")
+                results.append(f"⚠️ Missing audio: {audio_basename}")
+                print(f"   ❌ Audio file not found!")
                 continue
 
-            final_path = video_path.replace('.mp4', '_with_audio.mp4')
+            # Create merged output: bar_Shorts_bar_Shorts_with_audio.mp4
+            merged_basename = video_basename.replace('.mp4', '_with_audio.mp4')
+            final_path = os.path.join(output_dir, merged_basename)
+
+            print(f"   Creating: {merged_basename}")
 
             if self._merge_audio_video(video_path, audio_path, final_path):
-                results.append(f"✅ Merged: {os.path.basename(final_path)}")
+                results.append(f"✅ Merged: {merged_basename}")
                 processed += 1
             else:
-                results.append(f"❌ Failed merge: {os.path.basename(final_path)}")
+                results.append(f"❌ Failed merge: {merged_basename}")
 
         if processed == 0:
             return "⚠️ No successful merges performed.\n" + "\n".join(results)
 
-        return f"🔄 Audio-video merging completed ({processed} successful).\n" + "\n".join(results)
+        return f"📹 Audio-video merging completed ({processed} successful).\n" + "\n".join(results)
 
     def _merge_audio_video(self, video_path: str, audio_path: str, output_path: str) -> bool:
         """Merges video and audio using ffmpeg."""
         try:
-            subprocess.run([
+            result = subprocess.run([
                 'ffmpeg', '-y', '-i', video_path, '-i', audio_path,
                 '-c:v', 'copy', '-c:a', 'aac',
                 '-avoid_negative_ts', 'make_zero',
                 output_path
-            ], capture_output=True, check=True)
-            return os.path.exists(output_path)
+            ], capture_output=True, text=True, check=True)
+            
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                print(f"      ✅ Merged successfully ({file_size} bytes)")
+                return True
+            else:
+                print(f"      ❌ Output file not created")
+                return False
+                
         except subprocess.CalledProcessError as e:
-            print(f"❌ FFmpeg merge failed for {video_path} and {audio_path}: {e.stderr.decode()}")
+            print(f"      ❌ FFmpeg merge failed:")
+            print(f"         Error: {e.stderr[:100]}")
             return False
         except Exception as e:
-            print(f"❌ Unexpected error during merge for {video_path} and {audio_path}: {e}")
+            print(f"      ❌ Unexpected error: {e}")
             return False

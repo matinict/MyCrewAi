@@ -12,33 +12,41 @@ import json
 import re
 from crewai_video_factory.crew import CrewaiVideoFactory
 
-# Single source of truth for default inputs
-DEFAULT_INPUTS = {
-    "topic": "Programming Language",
-    "start": 2015,
-    "end": 2026,
-    "granularity": "yearly",
-    "animation_styles": ["bar"],
-    "video_formats": ["Shorts"],
-    "fps": 0.5,
-    "use_existing_csv":False,
-    "video_enabled": True,
-    "audio_enabled": True,
-    "audio_speed": 0.9,
-    "merge_audio_video": True,
-    "generate_youtube_metadata": True,
-}
+def load_config():
+    """Load configuration from input/data.json"""
+    config_path = "input/data.json"
+    
+    if not os.path.exists(config_path):
+        print(f"❌ Configuration file not found: {config_path}")
+        print("📝 Please create input/data.json with your settings")
+        print("📖 See input/data.schema.json for available options")
+        sys.exit(1)
+    
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        return config
+    except json.JSONDecodeError as e:
+        print(f"❌ Invalid JSON in {config_path}: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Error loading config: {e}")
+        sys.exit(1)
+
+DEFAULT_INPUTS = load_config()
 
 def run():
     inputs = DEFAULT_INPUTS.copy()
 
-    # Parse CLI arguments
+    # Parse CLI arguments (override input/data.json if provided)
     if len(sys.argv) > 1:
         try:
             custom_inputs = json.loads(sys.argv[1])
             inputs.update(custom_inputs)
+            print("✅ CLI arguments override applied\n")
         except json.JSONDecodeError:
-            print("⚠️  Invalid JSON input. Using defaults.")
+            print("⚠️  Invalid JSON in CLI args. Using input/data.json values\n")
+
 
     # Generate filename from topic
     words = re.findall(r'\w+', inputs['topic'])[:3]
