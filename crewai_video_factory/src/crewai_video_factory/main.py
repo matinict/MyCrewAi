@@ -21,18 +21,17 @@ DEFAULT_INPUTS = {
     "animation_styles": ["bar"],
     "video_formats": ["Shorts"],
     "fps": 0.5,
-    "use_existing_csv": True,              # ✅ True if you have existing CSV
-    "video_enabled": False,                 # ✅ False to skip video generation
-    "audio_enabled": True,                  # ✅ True to generate audio
+    "use_existing_csv": True,
+    "video_enabled": False,
+    "audio_enabled": True,
     "audio_speed": 0.9,
-    "merge_audio_video": True,              # ✅ True to merge audio+video
-    "generate_youtube_metadata": True,  # NEW PARAM
+    "merge_audio_video": True,
+    "generate_youtube_metadata": True,
 }
 
 def run():
     inputs = DEFAULT_INPUTS.copy()
 
-    # Parse CLI arguments
     if len(sys.argv) > 1:
         try:
             custom_inputs = json.loads(sys.argv[1])
@@ -40,19 +39,16 @@ def run():
         except json.JSONDecodeError:
             print("⚠️  Invalid JSON input. Using defaults.")
 
-    # Generate filename from topic
-    words = re.findall(r'\w+', inputs['topic'])[:2]
+    words = re.findall(r'\w+', inputs['topic'])[:3]
     inputs['filename'] = ''.join(words)
     inputs['original_topic'] = inputs['topic']
 
-    # FPS validation
     fps = float(inputs.get('fps', 1.0))
     if fps < 0.1 or fps > 30.0:
         print(f"⚠️  Invalid FPS {fps}. Clamping to valid range (0.1-30.0)")
         fps = max(0.1, min(30.0, fps))
     inputs['fps'] = fps
 
-    # ===== USE_EXISTING_CSV HANDLING =====
     csv_path = f"output/{inputs['filename']}.csv"
     use_existing = inputs.get('use_existing_csv', False)
 
@@ -76,7 +72,6 @@ def run():
         inputs['_skip_research'] = False
         inputs['_skip_csv'] = False
 
-    # =====================================
     print(f"🎨 Animations: {', '.join(inputs['animation_styles'])}")
     print(f"📱 Formats: {', '.join(inputs['video_formats'])}")
     print(f"🎬 Video Enabled: {inputs.get('video_enabled', True)}")
@@ -89,44 +84,33 @@ def run():
         crew_instance = CrewaiVideoFactory()
         full_crew = crew_instance.crew()
 
-        # ===== CONDITIONAL TASK EXECUTION =====
         final_tasks = []
 
-        # Always include research and CSV tasks (unless using existing CSV)
         if not inputs.get('_skip_research', False):
-            final_tasks.append(full_crew.tasks[0])  # research_data
+            final_tasks.append(full_crew.tasks[0])
         if not inputs.get('_skip_csv', False):
-            final_tasks.append(full_crew.tasks[1])  # generate_csv
+            final_tasks.append(full_crew.tasks[1])
 
-        # Conditionally add video task
         if inputs.get('video_enabled', True):
-            final_tasks.append(full_crew.tasks[2])  # create_video
+            final_tasks.append(full_crew.tasks[2])
 
-        # 🔑 KEY FIX: Audio task is INDEPENDENT of video task
-        # Audio only needs CSV to exist, not video generation
         if inputs.get('audio_enabled', False):
-            final_tasks.append(full_crew.tasks[3])  # add_audio
+            final_tasks.append(full_crew.tasks[3])
 
-            # Conditionally add merge task (requires audio)
             if inputs.get('merge_audio_video', False):
-                final_tasks.append(full_crew.tasks[4])  # merge_audio_video
+                final_tasks.append(full_crew.tasks[4])
 
-                        # YouTube Metadata task (independent, runs last)
         if inputs.get('generate_youtube_metadata', False):
-            final_tasks.append(full_crew.tasks[5])  # generate_youtube_metadata
+            final_tasks.append(full_crew.tasks[5])
 
-        # 🔑 CRITICAL FIX: Ensure at least one task exists
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
             print("💡 Fix: Enable video_enabled OR audio_enabled OR generate_youtube_metadata OR disable use_existing_csv")
             sys.exit(1)
 
-        # Set the filtered tasks list on the crew instance
         full_crew.tasks = final_tasks
 
         result = full_crew.kickoff(inputs=inputs)
-
-        # =======================================
 
         print("\n" + "="*60)
         print("✅ VIDEO FACTORY COMPLETED")
@@ -146,7 +130,6 @@ def run():
         else:
             print(f"   Videos: SKIPPED (using existing videos)")
 
-        # Show audio files if generated
         if inputs.get('audio_enabled', False):
             print(f"   Audio:")
             for style in inputs['animation_styles']:
@@ -155,7 +138,6 @@ def run():
                     if os.path.exists(audio_file):
                         print(f"      - {audio_file}")
 
-        # Show merged files if generated
         if inputs.get('merge_audio_video', False):
             print(f"   Merged:")
             for style in inputs['animation_styles']:
@@ -163,11 +145,11 @@ def run():
                     merged_file = f"output/{inputs['filename']}_{style}_{fmt}_with_audio.mp4"
                     if os.path.exists(merged_file):
                         print(f"      - {merged_file}")
-        # Show YouTube metadata files if generated
+
         if inputs.get('generate_youtube_metadata', False):
             print(f"   YouTube Metadata:")
             metadata_files = [
-                f"output/{inputs['filename']}_Race_Narration_Full.txt",
+                f"output/{inputs['filename']}_cc_en.txt",
                 f"output/{inputs['filename']}_YouTube_Metadata.json",
                 f"output/{inputs['filename']}_YouTube_Metadata.txt",
             ]

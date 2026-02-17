@@ -36,135 +36,129 @@ class AudioGenerationTool(BaseTool):
             return "⚠️ gTTS not installed. Run: pip install gTTS"
 
         if not self._ffmpeg_available():
-            return "⚠️ ffmpeg not found. Install: sudo apt install ffmpeg"
+            return "⚠️ ffmpeg not found. Install: sudo apt install ffmpeg (Linux) or brew install ffmpeg (macOS)"
 
-        # 🔑 FIX: Derive clean filename from topic (first 3 words, no spaces)
+        # 🔑 CRITICAL FIX: CLEAN UP CORRUPTED INPUTS FROM CREWAI
         import re
         clean_words = re.findall(r'\w+', topic)[:3]
         clean_filename = ''.join(clean_words)
-        
-        print(f"[DEBUG] Clean filename: {clean_filename} (from topic: {topic})")
 
-        # 🔑 FIX: Scan output directory for ANY matching CSV, not just exact name
-        output_dir = "output"
-        csv_files = [f for f in os.listdir(output_dir) if f.endswith('.csv')]
-        csv_path = None
-        for cf in csv_files:
-            if clean_filename.lower() in cf.lower():
-                csv_path = os.path.join(output_dir, cf)
-                break
-        
-        if not csv_path:
-            # Fallback: use the most recent CSV
-            csv_files = [os.path.join(output_dir, f) for f in csv_files]
-            if csv_files:
-                csv_path = max(csv_files, key=os.path.getctime)
-        
-        print(f"[DEBUG] Using CSV: {csv_path}")
+        # Generate narration
+        csv_path = f"output/{clean_filename}.csv"
         narration = self._generate_narration(topic, csv_path)
 
-        # Save narration text file
-        text_file_path = f"{output_dir}/{clean_filename}_Race_Narration_Full.txt"
+        # CREATE NARRATION TEXT FILE (_cc_en.txt for future multi-language support)
+        text_file_path = f"output/{clean_filename}_cc_en.txt"
         with open(text_file_path, 'w', encoding='utf-8') as f:
             f.write(narration)
 
         results = []
         processed = 0
 
-        # 🔑 FIX: Scan for ANY video files matching the base filename pattern
+        # 🔑 CRITICAL FIX: SCAN DIRECTORY FOR ACTUAL VIDEO FILES
+        output_dir = "output"
+        if not os.path.exists(output_dir):
+            return f"❌ Output directory '{output_dir}' not found"
+
         import glob
-        video_pattern = f"{output_dir}/{clean_filename}_*.mp4"
+        video_pattern = f"output/{clean_filename}_*.mp4"
         actual_video_files = glob.glob(video_pattern)
-        
-        # Filter out processed files
+
+        # Filter out audio and already processed files
         video_files = [
-            f for f in actual_video_files 
+            f for f in actual_video_files
             if "_with_audio" not in f and "_audio" not in f
         ]
-        
-        print(f"[DEBUG] Found {len(video_files)} videos: {[os.path.basename(v) for v in video_files]}")
 
         if not video_files:
-            # Fallback: list all mp4 files for debugging
-            all_mp4 = [f for f in os.listdir(output_dir) if f.endswith('.mp4')]
-            return f"⚠️ No videos found matching '{clean_filename}_*.mp4'\n🔍 Existing: {', '.join(all_mp4) if all_mp4 else 'None'}"
+            existing_files = [f for f in os.listdir(output_dir) if f.endswith('.mp4')]
+            return f"⚠️ No videos found to generate audio for\n🔍 Existing videos: {', '.join(existing_files) if existing_files else 'None'}"
 
+        # Process all found video files - ONLY generate audio
         for video_path in video_files:
-            try:
-                audio_path = video_path.replace('.mp4', '_audio.mp3')
-                print(f"[DEBUG] Generating audio: {os.path.basename(audio_path)}")
-                self._generate_audio(narration, audio_path, audio_speed)
+            audio_path = video_path.replace('.mp4', '_audio.mp3')
+            self._generate_audio(narration, audio_path, audio_speed)
 
-                if os.path.exists(audio_path):
-                    results.append(os.path.basename(audio_path))
-                    processed += 1
-                else:
-                    results.append(f"❌ Failed: {os.path.basename(audio_path)}")
-            except Exception as e:
-                results.append(f"❌ Error: {e}")
+            if os.path.exists(audio_path):
+                results.append(os.path.basename(audio_path))
+                processed += 1
 
         if processed == 0:
-            return "⚠️ No audio files generated successfully"
+            return "⚠️ No videos found to generate audio for"
 
-        return "🎵 Audio files created:\n" + "\n".join([f"   • {r}" for r in results]) + \
-               f"\n\n📋 Narration: {os.path.basename(text_file_path)}\n" + \
-               f"Preview: \"{narration[:70]}...\""
+        return "🎵 Audio narration files created:\n" + "\n".join([f"   • {r}" for r in results]) + \
+               f"\n\n📋 Narration saved to: {os.path.basename(text_file_path)}\n" + \
+               f"\nNarration preview: \"{narration[:70]}...\""
 
     def _generate_narration(self, topic: str, csv_path: str) -> str:
-        if csv_path and os.path.exists(csv_path):
+        """Generate professional narration following the specified format with dynamic CSV reading"""
+        if os.path.exists(csv_path):
             try:
                 import pandas as pd
                 df = pd.read_csv(csv_path)
+
                 time_col = df.columns[0]
                 data_cols = df.columns[1:]
+
                 years = df[time_col].tolist()
-                start_year, end_year = int(years[0]), int(years[-1])
-                
+                start_year = int(years[0])
+                end_year = int(years[-1])
+
                 yearly_leaders = []
-                for _, row in df.iterrows():
+                for idx, row in df.iterrows():
                     leader = row[data_cols].idxmax()
                     value = row[leader]
                     year = int(row[time_col])
                     yearly_leaders.append((year, leader, value))
-                
-                parts = [
+
+                narration_parts = [
                     "Welcome to @PlayOwnAi.",
                     f"Today, we're exploring {topic} Race from {start_year} to {end_year}.",
                     "Only for basic idea about trending",
                     "Let's see how the landscape evolved over time."
                 ]
-                
+
                 for year, leader, value in yearly_leaders:
                     if value <= 20:
-                        parts.append(f"{year}. The market is forming.")
+                        narration_parts.append(f"{year}. The market is forming.")
                     elif value <= 40:
-                        parts.append(f"{year}. {leader} gains traction.")
+                        narration_parts.append(f"{year}. {leader} gains traction.")
                     elif value <= 70:
-                        parts.append(f"{year}. {leader} shows strength.")
+                        narration_parts.append(f"{year}. {leader} shows strength.")
                     else:
-                        parts.append(f"{year}. {leader} leads the market.")
-                
+                        narration_parts.append(f"{year}. {leader} leads the market.")
+
                 final_year, final_leader, _ = yearly_leaders[-1]
-                parts.append(f"And in {final_year}, {final_leader} continues to lead.")
-                parts.append("The evolution of technology and trends continues.")
-                parts.append("Subscribe to @PlayOwnAi for more insights.")
-                
-                return " ".join(parts)
+                narration_parts.append(f"And in {final_year}, {final_leader} continues to lead.")
+                narration_parts.append("The evolution of technology and trends continues.")
+                narration_parts.append("Subscribe to @PlayOwnAi for more insights.")
+
+                return " ".join(narration_parts)
+
             except Exception as e:
-                print(f"⚠️ CSV error: {e}")
-        
-        return f"Welcome to @PlayOwnAi. Today, we're exploring {topic}. The evolution of technology and trends continues. Subscribe to @PlayOwnAi for more insights."
+                print(f"⚠️ CSV reading failed: {e}")
+
+        return (
+            "Welcome to @PlayOwnAi. Today, we're exploring programming language trends. "
+            "Let's see how the landscape evolved over time. "
+            "The evolution of technology and trends continues. "
+            "Subscribe to @PlayOwnAi for more insights."
+        )
 
     def _generate_audio(self, text: str, output_path: str, speed: float):
         from gtts import gTTS
         import subprocess
+
         tts = gTTS(text=text, lang='en', slow=(speed <= 0.85))
         temp_path = output_path.replace('.mp3', '_temp.mp3')
         tts.save(temp_path)
-        
+
         if abs(speed - 1.0) > 0.05:
             atempo = max(0.5, min(2.0, speed))
-            subprocess.run(['ffmpeg', '-y', '-i', temp_path, '-filter:a', f'atempo={atempo}', output_path], capture_output=True)
+            subprocess.run([
+                'ffmpeg', '-y', '-i', temp_path,
+                '-filter:a', f'atempo={atempo}', output_path
+            ], capture_output=True, check=False)
             if os.path.exists(temp_path):
                 os.remove(temp_path)
         else:

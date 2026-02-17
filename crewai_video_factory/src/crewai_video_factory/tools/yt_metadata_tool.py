@@ -17,7 +17,7 @@ class YouTubeMetadataToolInput(BaseModel):
 
 class YouTubeMetadataTool(BaseTool):
     name: str = "YouTube Metadata Generator"
-    description: str = "Generates narration text file and YouTube metadata (title, description, tags, chapters) with LLM-powered optimization"
+    description: str = "Generates narration text file (_cc_en.txt) and YouTube metadata (title, description, tags, chapters) with SEO optimization"
     args_schema: Type[BaseModel] = YouTubeMetadataToolInput
 
     def _run(
@@ -34,16 +34,18 @@ class YouTubeMetadataTool(BaseTool):
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
 
+        import re
+        clean_words = re.findall(r'\w+', topic)[:3]
+        clean_filename = ''.join(clean_words)
+
         results = []
-        
-        # 🔑 Generate Narration Text File
+
         if generate_narration:
-            narration_result = self._generate_narration_file(topic, filename, start_year, end_year, output_dir)
+            narration_result = self._generate_narration_file(topic, clean_filename, start_year, end_year, output_dir)
             results.append(narration_result)
 
-        # 🔑 Generate YouTube Metadata
         if generate_youtube_metadata:
-            metadata_result = self._generate_youtube_metadata(topic, filename, start_year, end_year, video_duration, output_dir)
+            metadata_result = self._generate_youtube_metadata(topic, clean_filename, start_year, end_year, video_duration, output_dir)
             results.append(metadata_result)
 
         return "\n\n".join(results)
@@ -52,35 +54,33 @@ class YouTubeMetadataTool(BaseTool):
         """Generate professional narration text file from CSV data"""
         csv_path = f"{output_dir}/{filename}.csv"
         narration_text = ""
-        
+
         if os.path.exists(csv_path):
             try:
                 import pandas as pd
                 df = pd.read_csv(csv_path)
-                
+
                 time_col = df.columns[0]
                 data_cols = df.columns[1:]
-                
+
                 years = df[time_col].tolist()
                 start_year = int(years[0])
                 end_year = int(years[-1])
-                
-                # Find yearly leaders
+
                 yearly_leaders = []
                 for idx, row in df.iterrows():
                     leader = row[data_cols].idxmax()
                     value = row[leader]
                     year = int(row[time_col])
                     yearly_leaders.append((year, leader, value))
-                
-                # Build professional narration
+
                 narration_parts = [
                     "Welcome to @PlayOwnAi.",
                     f"Today, we're exploring {topic} Race from {start_year} to {end_year}.",
                     "Only for basic idea about trending",
                     "Let's see how the landscape evolved over time."
                 ]
-                
+
                 for year, leader, value in yearly_leaders:
                     if value <= 20:
                         narration_parts.append(f"{year}. The market is forming.")
@@ -90,43 +90,35 @@ class YouTubeMetadataTool(BaseTool):
                         narration_parts.append(f"{year}. {leader} shows strength.")
                     else:
                         narration_parts.append(f"{year}. {leader} leads the market.")
-                
+
                 final_year, final_leader, _ = yearly_leaders[-1]
                 narration_parts.append(f"And in {final_year}, {final_leader} continues to lead.")
                 narration_parts.append("The evolution of technology and trends continues.")
                 narration_parts.append("Subscribe to @PlayOwnAi for more insights.")
-                
+
                 narration_text = " ".join(narration_parts)
-                
+
             except Exception as e:
-                print(f"⚠️ CSV reading failed: {e}")
+                print(f"[WARN] CSV reading failed: {e}")
                 narration_text = self._get_fallback_narration(topic, start_year, end_year)
         else:
             narration_text = self._get_fallback_narration(topic, start_year, end_year)
-        
-        # Save narration text file
-        narration_file_path = f"{output_dir}/{filename}_Race_Narration_Full.txt"
+
+        # 🔑 Save narration text file with _cc_en.txt naming convention
+        narration_file_path = f"{output_dir}/{filename}_cc_en.txt"
         with open(narration_file_path, 'w', encoding='utf-8') as f:
             f.write(narration_text)
-        
-        return f"📝 Narration text saved to: {filename}_Race_Narration_Full.txt"
+
+        return f"📝 Narration text saved to: {filename}_cc_en.txt"
 
     def _generate_youtube_metadata(self, topic: str, filename: str, start_year: int, end_year: int, video_duration: float, output_dir: str) -> str:
-        """Generate YouTube metadata with LLM-powered optimization"""
-        
-        # Generate SEO-optimized title
+        """Generate YouTube metadata with SEO optimization"""
+
         title = self._generate_youtube_title(topic, start_year, end_year)
-        
-        # Generate description
         description = self._generate_youtube_description(topic, start_year, end_year, video_duration)
-        
-        # Generate tags
         tags = self._generate_youtube_tags(topic)
-        
-        # Generate chapters
-        chapters = self._generate_youtube_chapters(topic, start_year, end_year, video_duration)
-        
-        # Save metadata to JSON file
+        chapters = self._generate_youtube_chapters(start_year, end_year, video_duration)
+
         metadata = {
             "title": title,
             "description": description,
@@ -136,24 +128,23 @@ class YouTubeMetadataTool(BaseTool):
             "language": "en",
             "created_at": datetime.now().isoformat()
         }
-        
-        metadata_file_path = f"{output_dir}/{filename}_YouTube_Metadata.json"
-        with open(metadata_file_path, 'w', encoding='utf-8') as f:
+
+        metadata_json_path = f"{output_dir}/{filename}_YouTube_Metadata.json"
+        with open(metadata_json_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
-        
-        # Also save as TXT for easy copy-paste
+
         metadata_txt_path = f"{output_dir}/{filename}_YouTube_Metadata.txt"
         with open(metadata_txt_path, 'w', encoding='utf-8') as f:
             f.write(f"TITLE:\n{title}\n\n")
             f.write(f"DESCRIPTION:\n{description}\n\n")
             f.write(f"TAGS:\n{', '.join(tags)}\n\n")
             f.write(f"CHAPTERS:\n{chapters}\n")
-        
+
         return f"🎬 YouTube metadata saved to:\n   • {filename}_YouTube_Metadata.json\n   • {filename}_YouTube_Metadata.txt"
 
     def _generate_youtube_title(self, topic: str, start_year: int, end_year: int) -> str:
-        """Generate SEO-optimized YouTube title using LLM-style templates"""
-        
+        """Generate SEO-optimized YouTube title"""
+
         title_templates = [
             f"{topic} Race {start_year}-{end_year}: Complete Evolution & Trends",
             f"The {topic} Evolution ({start_year}-{end_year}): Who Dominates?",
@@ -164,8 +155,7 @@ class YouTubeMetadataTool(BaseTool):
             f"{topic} Trends Explained: {start_year}-{end_year} Analysis",
             f"Watch {topic} Dominate: {start_year}-{end_year} Timeline",
         ]
-        
-        # Select best title based on topic length
+
         if len(topic) > 20:
             return title_templates[3]
         elif len(topic) > 10:
@@ -175,7 +165,7 @@ class YouTubeMetadataTool(BaseTool):
 
     def _generate_youtube_description(self, topic: str, start_year: int, end_year: int, video_duration: float) -> str:
         """Generate SEO-optimized YouTube description"""
-        
+
         description = f"""🎬 {topic} Race {start_year}-{end_year}: Complete Data Visualization
 
 📊 In this video, we explore the evolution of {topic} from {start_year} to {end_year}. Watch how the market leaders changed over time and discover which {topic.lower()} dominated each year!
@@ -198,8 +188,8 @@ This visualization is based on comprehensive market data tracking {topic.lower()
 @PlayOwnAi creates professional data visualizations and insights on technology trends, market analysis, and industry evolution. Subscribe for weekly content!
 
 📱 FOLLOW US:
-• Twitter: @PlayOwnAi
-• LinkedIn: PlayOwnAi
+• YouTube: @PlayOwnAi
+• Facebook: facebook.com/PlayOwnAi
 • Website: playownai.com
 
 #DataVisualization #{topic.replace(' ', '')} #MarketAnalysis #TechTrends #{start_year}To{end_year}
@@ -211,7 +201,7 @@ This visualization is based on comprehensive market data tracking {topic.lower()
 
     def _generate_youtube_tags(self, topic: str) -> list:
         """Generate SEO-optimized YouTube tags"""
-        
+
         base_tags = [
             "data visualization",
             "market analysis",
@@ -222,7 +212,7 @@ This visualization is based on comprehensive market data tracking {topic.lower()
             "data animation",
             "PlayOwnAi",
         ]
-        
+
         topic_tags = [
             topic.lower(),
             f"{topic.lower()} trends",
@@ -233,36 +223,39 @@ This visualization is based on comprehensive market data tracking {topic.lower()
             f"{topic.lower()} ranking",
             f"{topic.lower()} history",
         ]
-        
+
         year_tags = [
-            "2015-2026",
-            "2026",
-            "2025",
-            "2024",
+            f"{datetime.now().year}",
+            f"{datetime.now().year - 1}",
             "trend analysis",
             "market trends",
+            "data driven",
+            "visualization",
         ]
-        
-        all_tags = base_tags + topic_tags + year_tags
-        return all_tags[:25]  # YouTube allows max 500 characters for tags
 
-    def _generate_youtube_chapters(self, topic: str, start_year: int, end_year: int, video_duration: float) -> str:
+        all_tags = base_tags + topic_tags + year_tags
+        return all_tags[:25]
+
+    def _generate_youtube_chapters(self, start_year: int, end_year: int, video_duration: float) -> str:
         """Generate YouTube chapters/timestamps"""
-        
+
         total_years = end_year - start_year + 1
-        seconds_per_year = video_duration / total_years
-        
+        seconds_per_year = video_duration / total_years if total_years > 0 else 5
+
         chapters = []
         chapters.append("0:00 Introduction")
-        
+
         for year in range(start_year, end_year + 1):
             timestamp_seconds = int((year - start_year) * seconds_per_year)
             minutes = timestamp_seconds // 60
             seconds = timestamp_seconds % 60
             chapters.append(f"{minutes:02d}:{seconds:02d} {year}")
-        
-        chapters.append(f"{int(video_duration)//60:02d}:{int(video_duration)%60:02d} Conclusion")
-        
+
+        conclusion_seconds = int(video_duration)
+        minutes = conclusion_seconds // 60
+        seconds = conclusion_seconds % 60
+        chapters.append(f"{minutes:02d}:{seconds:02d} Conclusion")
+
         return "\n".join(chapters)
 
     def _get_fallback_narration(self, topic: str, start_year: int, end_year: int) -> str:

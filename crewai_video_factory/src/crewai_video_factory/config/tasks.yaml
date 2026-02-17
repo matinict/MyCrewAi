@@ -58,24 +58,24 @@ generate_csv:
   agent: csv_generator
   context:
     - research_data
- 
+
 create_video:
   description: >
     Generate visualization videos from the CSV file for {topic}.
     Animation styles: {animation_styles}
     Video formats: {video_formats}
     FPS: {fps}
-    
+
     Use the Video Generation Tool to:
     - Read CSV from output/{filename}.csv
     - Create videos for ALL styles in {animation_styles}
     - Save to output/ directory with naming pattern: {filename}_[style]_[format].mp4
       (where [style] = values from {animation_styles}, [format] = values from {video_formats})
-    
+
     Title format requirement (STRICT):
     - Line 1: Pure topic name only ("Programming Language")
     - Line 2: Visualization type + year ("Race - 2019")
-    
+
     For bar race videos, apply label trimming using data/label_mappings.json
     (e.g., "JavaScript" → "JS", "Microsoft" → "MS")
   expected_output: >
@@ -85,14 +85,17 @@ create_video:
   context:
     - research_data
     - generate_csv
+
 add_audio:
   description: >
-    Generate professional audio narration and merge with videos.
+    Generate professional audio narration files.
     This task will automatically skip if audio is disabled in inputs.
-    When enabled, processes all videos with narration based on {topic}.
+    When enabled, creates audio files for all generated videos based on {topic}.
+    Narration text file: {filename}_cc_en.txt
   expected_output: >
-    List of audio-enhanced videos created, OR skip message if disabled.
-    Example: "✅ Audio added: ProgrammingLanguage_bar_Shorts_with_audio.mp4"
+    List of audio files created, OR skip message if disabled.
+    Example: "✅ Audio narration files created:\n   • ProgrammingLanguage_bar_Shorts_audio.mp3"
+    Narration file: "ProgrammingLanguage_cc_en.txt"
   agent: audio_engineer
   context:
     - create_video
@@ -109,26 +112,32 @@ merge_audio_video:
     Example: "🔄 Audio-video merging completed (1 successful).\n✅ Merged: ProgrammingLanguage_bar_Shorts_with_audio.mp4"
   agent: merge_specialist
   context:
-    - add_audio # Ensure audio files exist before attempting merge
+    - add_audio
 
 generate_youtube_metadata:
   description: >
     Generate YouTube metadata and narration text file for {topic}.
     This includes:
-    - Narration text file ({filename}_Race_Narration_Full.txt)
+    - Narration text file ({filename}_cc_en.txt) - supports future multi-language (_cc_es.txt, _cc_fr.txt, etc.)
     - YouTube title (SEO optimized)
     - YouTube description (with keywords and call-to-action)
     - YouTube tags (25+ SEO tags)
     - YouTube chapters/timestamps
     - Metadata saved as JSON and TXT files
-    
+
     Parameters:
     - Topic: {topic}
     - Year Range: {start} to {end}
     - Video Duration: Calculate from {fps} and data points
+    - Language: English (en) - extensible to other languages
+
+    Social Media Links:
+    - YouTube: @PlayOwnAi
+    - Facebook: facebook.com/PlayOwnAi
+    - Website: playownai.com
   expected_output: >
     Confirmation of metadata files created:
-    - {filename}_Race_Narration_Full.txt
+    - {filename}_cc_en.txt (Narration/Closed Captions)
     - {filename}_YouTube_Metadata.json
     - {filename}_YouTube_Metadata.txt
   agent: youtube_metadata_specialist
