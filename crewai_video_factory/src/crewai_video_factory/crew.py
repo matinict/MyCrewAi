@@ -103,7 +103,8 @@ class CrewaiVideoFactory:
 
     @crew
     def crew(self) -> Crew:
-        """Creates the Video Factory crew"""
+        """Creates the Video Factory crew with ALL potential agents and tasks.
+        Conditional execution is handled in main.py"""
         return Crew(
             agents=self.agents,
             tasks=self.tasks,

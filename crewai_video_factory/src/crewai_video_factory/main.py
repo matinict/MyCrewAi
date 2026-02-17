@@ -21,17 +21,18 @@ DEFAULT_INPUTS = {
     "animation_styles": ["bar"],
     "video_formats": ["Shorts"],
     "fps": 0.5,
-    "use_existing_csv": True,
-    "video_enabled": False,
-    "audio_enabled": False,                  # ✅ Can be False if audio already exists
+    "use_existing_csv":False,
+    "video_enabled": True,
+    "audio_enabled": True,
     "audio_speed": 0.9,
-    "merge_audio_video": True,               # ✅ Can be True even if audio_enabled=False
+    "merge_audio_video": True,
     "generate_youtube_metadata": True,
 }
 
 def run():
     inputs = DEFAULT_INPUTS.copy()
 
+    # Parse CLI arguments
     if len(sys.argv) > 1:
         try:
             custom_inputs = json.loads(sys.argv[1])
@@ -39,25 +40,35 @@ def run():
         except json.JSONDecodeError:
             print("⚠️  Invalid JSON input. Using defaults.")
 
+    # Generate filename from topic
     words = re.findall(r'\w+', inputs['topic'])[:3]
     inputs['filename'] = ''.join(words)
     inputs['original_topic'] = inputs['topic']
 
+    # 🔑 KEY: Set output_dir for ALL tools (topic subdirectory)
+    output_dir = f"output/{inputs['filename']}"
+    os.makedirs(output_dir, exist_ok=True)
+    inputs['output_dir'] = output_dir
+
+    # FPS validation
     fps = float(inputs.get('fps', 1.0))
     if fps < 0.1 or fps > 30.0:
         print(f"⚠️  Invalid FPS {fps}. Clamping to valid range (0.1-30.0)")
         fps = max(0.1, min(30.0, fps))
     inputs['fps'] = fps
 
-    csv_path = f"output/{inputs['filename']}.csv"
+    # ===== USE_EXISTING_CSV HANDLING =====
+    # 🔑 KEY: Define csv_path BEFORE using it in print statements
+    csv_path = f"output/{inputs['filename']}.csv"  # CSV stays flat
     use_existing = inputs.get('use_existing_csv', False)
 
     print("\n" + "="*60)
     print("🎬 VIDEO FACTORY STARTING")
     print("="*60)
     print(f"📊 Topic: {inputs['topic']}")
-    print(f"⏱️  Animation speed: {fps} fps → ~{12/fps:.1f} sec duration (for 12 data points)")
     print(f"📁 CSV File: {csv_path}")
+    print(f"📁 Output Subdirectory: {output_dir}/")
+    print(f"⏱️  Animation speed: {fps} fps → ~{12/fps:.1f} sec duration (for 12 data points)")
 
     if use_existing:
         if not os.path.exists(csv_path):
@@ -95,7 +106,6 @@ def run():
         if inputs.get('video_enabled', True):
             final_tasks.append(full_crew.tasks[2])  # create_video
 
-        # 🔑 KEY FIX: Audio and Merge are now INDEPENDENT
         if inputs.get('audio_enabled', False):
             final_tasks.append(full_crew.tasks[3])  # add_audio
 
@@ -107,7 +117,6 @@ def run():
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
-            print("💡 Fix: Enable video_enabled OR audio_enabled OR merge_audio_video OR generate_youtube_metadata OR disable use_existing_csv")
             sys.exit(1)
 
         full_crew.tasks = final_tasks
@@ -122,44 +131,41 @@ def run():
         print("\n" + "="*60)
         print(f"\n📁 Outputs:")
         print(f"   CSV: {csv_path}")
+        print(f"   Subdirectory: {output_dir}/")
 
         if inputs.get('video_enabled', True):
             print(f"   Videos:")
             for style in inputs['animation_styles']:
                 for fmt in inputs['video_formats']:
-                    video_file = f"output/{inputs['filename']}_{style}_{fmt}.mp4"
+                    video_file = f"{output_dir}/{inputs['filename']}_{style}_{fmt}.mp4"
                     print(f"      - {video_file}")
-        else:
-            print(f"   Videos: SKIPPED (using existing videos)")
 
         if inputs.get('audio_enabled', False):
             print(f"   Audio:")
             for style in inputs['animation_styles']:
                 for fmt in inputs['video_formats']:
-                    audio_file = f"output/{inputs['filename']}_{style}_{fmt}_audio.mp3"
+                    audio_file = f"{output_dir}/{inputs['filename']}_{style}_{fmt}_audio.mp3"
                     if os.path.exists(audio_file):
                         print(f"      - {audio_file}")
-        else:
-            print(f"   Audio: SKIPPED (using existing audio files)")
 
         if inputs.get('merge_audio_video', False):
             print(f"   Merged:")
             for style in inputs['animation_styles']:
                 for fmt in inputs['video_formats']:
-                    merged_file = f"output/{inputs['filename']}_{style}_{fmt}_with_audio.mp4"
+                    merged_file = f"{output_dir}/{inputs['filename']}_{style}_{fmt}_with_audio.mp4"
                     if os.path.exists(merged_file):
                         print(f"      - {merged_file}")
 
         if inputs.get('generate_youtube_metadata', False):
             print(f"   YouTube Metadata:")
             metadata_files = [
-                f"output/{inputs['filename']}_cc_en.txt",
-                f"output/{inputs['filename']}_YouTube_Metadata.json",
-                f"output/{inputs['filename']}_YouTube_Metadata.txt",
+                f"{output_dir}/{inputs['filename']}_cc_en.txt",
+                f"{output_dir}/{inputs['filename']}_YouTube_Metadata.json",
+                f"{output_dir}/{inputs['filename']}_YouTube_Metadata.txt",
             ]
             for mf in metadata_files:
                 if os.path.exists(mf):
-                    print(f"      - {os.path.basename(mf)}")
+                    print(f"      - {mf}")
 
         print(f"\n⏱️  Duration tip: With {fps} fps and {12} data points → ~{12/fps:.1f} seconds")
         print("="*60 + "\n")

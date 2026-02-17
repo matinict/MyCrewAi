@@ -65,12 +65,11 @@ create_video:
     Animation styles: {animation_styles}
     Video formats: {video_formats}
     FPS: {fps}
-
     Use the Video Generation Tool to:
-    - Read CSV from output/{filename}.csv
+    - Read CSV from output/{filename}.csv (flat directory)
     - Create videos for ALL styles in {animation_styles}
-    - Save to output/ directory with naming pattern: {filename}_[style]_[format].mp4
-      (where [style] = values from {animation_styles}, [format] = values from {video_formats})
+    - Save to output/{filename}/ subdirectory with naming pattern: {filename}_[style]_[format].mp4
+    - All video files go to topic subdirectory, CSV stays flat
 
     Title format requirement (STRICT):
     - Line 1: Pure topic name only ("Programming Language")
@@ -91,7 +90,8 @@ add_audio:
     Generate professional audio narration files.
     This task will automatically skip if audio is disabled in inputs.
     When enabled, creates audio files for all generated videos based on {topic}.
-    Narration text file: {filename}_cc_en.txt
+    - Audio files saved to: output/{filename}/[style]_[format]_audio.mp3
+    - Narration text file: output/{filename}/{filename}_cc_en.txt
   expected_output: >
     List of audio files created, OR skip message if disabled.
     Example: "✅ Audio narration files created:\n   • ProgrammingLanguage_bar_Shorts_audio.mp3"
@@ -105,8 +105,11 @@ merge_audio_video:
   description: >
     Merge existing MP4 video files with corresponding MP3 audio files.
     This task will automatically skip if merge_audio_video is disabled in inputs.
-    When enabled, searches for pairs like 'filename_style_format.mp4' and 'filename_style_format_audio.mp3'
-    and creates 'filename_style_format_with_audio.mp4'.
+    When enabled, searches in output/{filename}/ subdirectory for pairs like:
+    - {filename}_[style]_[format].mp4
+    - {filename}_[style]_[format]_audio.mp3
+    And creates: {filename}_[style]_[format]_with_audio.mp4
+    All files remain in topic subdirectory.
   expected_output: >
     Confirmation of successful merges, OR skip message if disabled.
     Example: "🔄 Audio-video merging completed (1 successful).\n✅ Merged: ProgrammingLanguage_bar_Shorts_with_audio.mp4"
@@ -118,12 +121,17 @@ generate_youtube_metadata:
   description: >
     Generate YouTube metadata and narration text file for {topic}.
     This includes:
-    - Narration text file ({filename}_cc_en.txt) - supports future multi-language (_cc_es.txt, _cc_fr.txt, etc.)
+    - Narration text file: output/{filename}/{filename}_cc_en.txt
     - YouTube title (SEO optimized)
     - YouTube description (with keywords and call-to-action)
     - YouTube tags (25+ SEO tags)
     - YouTube chapters/timestamps
-    - Metadata saved as JSON and TXT files
+    - Metadata saved to output/{filename}/ subdirectory:
+      * {filename}_YouTube_Metadata.json
+      * {filename}_YouTube_Metadata.txt
+    Social Media Links:
+    - YouTube: @PlayOwnAi
+    - LinkedIn: playownai | www.linkedin.com/company/playownai/
 
     Parameters:
     - Topic: {topic}

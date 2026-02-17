@@ -4,10 +4,12 @@ from crewai.tools import BaseTool
 from typing import Type
 from pydantic import BaseModel, Field
 
+# NEW
 class AudioGenerationToolInput(BaseModel):
     """Input schema for AudioGenerationTool."""
     topic: str = Field(..., description="Topic/title for narration")
     filename: str = Field(..., description="Base filename (first 3 words of topic)")
+    output_dir: str = Field(..., description="Output directory for audio files")
     animation_styles: list = Field(..., description="List of animation styles used")
     video_formats: list = Field(..., description="List of video formats used")
     audio_enabled: bool = Field(default=False, description="Whether to generate audio")
@@ -22,59 +24,73 @@ class AudioGenerationTool(BaseTool):
         self,
         topic: str,
         filename: str,
+        output_dir: str,
         animation_styles: list,
         video_formats: list,
         audio_enabled: bool = False,
         audio_speed: float = 0.9
     ) -> str:
+        # IMMEDIATE SKIP - zero overhead when disabled
         if not audio_enabled:
             return "🔇 Audio generation skipped (disabled in inputs)"
 
+        # Check dependencies
         try:
             from gtts import gTTS
         except ImportError:
             return "⚠️ gTTS not installed. Run: pip install gTTS"
 
         if not self._ffmpeg_available():
-            return "⚠️ ffmpeg not found. Install: sudo apt install ffmpeg (Linux) or brew install ffmpeg (macOS)"
+            return "⚠️ ffmpeg not found. Install: sudo apt install ffmpeg"
 
-        # 🔑 CRITICAL FIX: CLEAN UP CORRUPTED INPUTS FROM CREWAI
-        import re
-        clean_words = re.findall(r'\w+', topic)[:3]
-        clean_filename = ''.join(clean_words)
+            # 🔑 KEY: Get output_dir from inputs (passed from main.py)
+        if not os.path.exists(output_dir):
+            return f"âŒ Output directory '{output_dir}' not found"
 
-        # Generate narration
-        csv_path = f"output/{clean_filename}.csv"
+        # 🔑 KEY: Get clean_filename from inputs (consistent across all tools)
+        #clean_filename = getattr(self, '_inputs', {}).get('filename', 'ProgrammingLanguage')
+        clean_filename = filename
+
+        # Generate narration - CSV stays in flat output directory
+        # Generate narration - CSV stays in flat output directory
+        csv_path = f"output/{filename}.csv"
         narration = self._generate_narration(topic, csv_path)
 
-        # CREATE NARRATION TEXT FILE (_cc_en.txt for future multi-language support)
-        text_file_path = f"output/{clean_filename}_cc_en.txt"
-        with open(text_file_path, 'w', encoding='utf-8') as f:
+        # 🔑 KEY: Save main narration as cc_en.txt (no prefix)
+        main_text_path = f"{output_dir}/cc_en.txt"
+        with open(main_text_path, 'w', encoding='utf-8') as f:
             f.write(narration)
 
         results = []
         processed = 0
 
-        # 🔑 CRITICAL FIX: SCAN DIRECTORY FOR ACTUAL VIDEO FILES
-        output_dir = "output"
         if not os.path.exists(output_dir):
             return f"❌ Output directory '{output_dir}' not found"
 
         import glob
-        video_pattern = f"output/{clean_filename}_*.mp4"
-        actual_video_files = glob.glob(video_pattern)
-
-        # Filter out audio and already processed files
-        video_files = [
-            f for f in actual_video_files
-            if "_with_audio" not in f and "_audio" not in f
-        ]
+        # 🔑 KEY: Search all .mp4 files in subdirectory (style-based naming)
+        actual_video_files = glob.glob(f"{output_dir}/*_*.mp4")
+        # Filter out merged videos and audio files
+        video_files = [f for f in actual_video_files if "_with_audio" not in f and "_audio" not in f]
 
         if not video_files:
             existing_files = [f for f in os.listdir(output_dir) if f.endswith('.mp4')]
             return f"⚠️ No videos found to generate audio for\n🔍 Existing videos: {', '.join(existing_files) if existing_files else 'None'}"
 
-        # Process all found video files - ONLY generate audio
+        styles = set()
+        for vf in video_files:
+            # Extract style from pattern like "bar_Shorts_bar_Shorts.mp4"
+            parts = os.path.basename(vf).replace('.mp4', '').split('_')
+            if len(parts) >= 2:
+                style = parts[0]
+                styles.add(style)
+
+        # Save per-style narration files
+        for style in styles:
+            style_text_path = f"{output_dir}/{style}_cc_en.txt"
+            with open(style_text_path, 'w', encoding='utf-8') as f:
+                f.write(narration)
+
         for video_path in video_files:
             audio_path = video_path.replace('.mp4', '_audio.mp3')
             self._generate_audio(narration, audio_path, audio_speed)
@@ -87,7 +103,8 @@ class AudioGenerationTool(BaseTool):
             return "⚠️ No videos found to generate audio for"
 
         return "🎵 Audio narration files created:\n" + "\n".join([f"   • {r}" for r in results]) + \
-               f"\n\n📋 Narration saved to: {os.path.basename(text_file_path)}\n" + \
+               f"\n\n📝 Main narration: cc_en.txt\n" + \
+               f"   Per-style narration: {', '.join([f'{s}_cc_en.txt' for s in sorted(styles)])}\n" + \
                f"\nNarration preview: \"{narration[:70]}...\""
 
     def _generate_narration(self, topic: str, csv_path: str) -> str:

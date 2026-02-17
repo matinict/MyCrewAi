@@ -13,6 +13,8 @@ class SmartVideoToolInput(BaseModel):
     """Input schema for SmartVideoTool."""
     csv_filepath: str = Field(..., description="Path to the CSV file")
     topic: str = Field(..., description="Topic/title for the video")
+    output_dir: str = Field(..., description="Output directory for video files")
+    filename: str = Field(..., description="Base filename (first 3 words of topic)")
     animation_styles: list = Field(default=["bar", "line"], description="styles: bar, line, bubble, map, pie, stream")
     video_formats: list = Field(default=["HD"], description="Video formats: HD, 2K, 4K, 8K, Shorts, ShortsHD, Shorts4K")
     fps: float = Field(default=2.0, ge=0.1, le=30.0, description="Frames per second for animation (0.1-30.0)")
@@ -26,12 +28,16 @@ class SmartVideoTool(BaseTool):
         self,
         csv_filepath: str,
         topic: str,
+        output_dir: str,
+        filename: str,
         animation_styles: Optional[list] = None,
         video_formats: Optional[list] = None,
         fps: float = 2.0
     ) -> str:
+        # 🔒 HARD CLEAN TOPIC (single source of truth)
         topic = topic.split("\n")[0].split(" - ")[0].strip()
 
+        # Normalize inputs - remove whitespace and handle single values
         if animation_styles is None:
             animation_styles = ["bar", "line"]
         elif isinstance(animation_styles, str):
@@ -47,33 +53,37 @@ class SmartVideoTool(BaseTool):
             video_formats = [f.strip() for f in video_formats]
 
         try:
+            # Convert to absolute path and validate
             csv_path = os.path.abspath(csv_filepath)
 
             if not os.path.exists(csv_path):
                 return f"ERROR: CSV file not found at {csv_path}"
 
+            # Read CSV
             df = pd.read_csv(csv_path)
 
             if df.empty:
                 return "ERROR: CSV file is empty"
 
+            # Get time column (first column) and data columns
             time_col = df.columns[0]
             data_cols = df.columns[1:].tolist()
 
             if len(data_cols) < 5 or len(data_cols) > 10:
                 return f"WARNING: CSV has {len(data_cols)} data columns (recommended: 5-10)"
 
-            output_dir = "output"
+            # 🔑 KEY: Use parameters passed directly
             os.makedirs(output_dir, exist_ok=True)
-
-            filename = os.path.splitext(os.path.basename(csv_path))[0]
 
             results = []
             errors = []
 
+            # Generate video for each style and format combination
             for style in animation_styles:
                 for video_format in video_formats:
-                    output_path = os.path.join(output_dir, f"{filename}_{style}_{video_format}.mp4")
+                    # 🔑 KEY: Save video with style_format naming (double pattern)
+                    # Example: output/ProgrammingLanguage/bar_Shorts_bar_Shorts.mp4
+                    output_path = os.path.join(output_dir, f"{style}_{video_format}_{style}_{video_format}.mp4")
 
                     try:
                         if style == "bar":
@@ -96,6 +106,7 @@ class SmartVideoTool(BaseTool):
                     except Exception as e:
                         errors.append(f"❌ {style}/{video_format}: {str(e)}")
 
+            # Build summary report
             summary = ["🎬 VIDEO GENERATION COMPLETE"]
             if results:
                 summary.append("\n✅ SUCCESSFUL:")
@@ -112,18 +123,25 @@ class SmartVideoTool(BaseTool):
             return f"🎬 VIDEO GENERATION FAILED: {str(e)}\n💡 Tip: Check CSV format (first column=time, 5-10 data columns)"
 
     def _get_video_dimensions(self, video_format: str):
+        """Get video dimensions based on format."""
         formats = {
-            "HD": (12, 6.75),
-            "2K": (12.8, 7.2),
-            "4K": (19.2, 10.8),
-            "8K": (38.4, 21.6),
-            "Shorts": (4.5, 8),
-            "ShortsHD": (6.75, 12),
-            "Shorts4K": (13.5, 24)
+            # Horizontal formats (16:9 aspect ratio)
+            "HD": (12, 6.75),        # 1920x1080
+            "2K": (12.8, 7.2),       # 2560x1440
+            "4K": (19.2, 10.8),      # 3840x2160
+            "8K": (38.4, 21.6),      # 7680x4320
+            # Vertical formats (9:16 aspect ratio)
+            "Shorts": (4.5, 8),      # 720x1280
+            "ShortsHD": (6.75, 12),  # 1080x1920
+            "Shorts4K": (13.5, 24)   # 2160x3840
         }
         return formats.get(video_format.strip(), (12, 6.75))
 
     def _format_title(self, title: str, time_value, viz_type: str) -> str:
+        """
+        Line 1: CLEAN topic only
+        Line 2: Visualization + year
+        """
         style_names = {
             "bar": "Race",
             "line": "Line Chart",
@@ -132,11 +150,16 @@ class SmartVideoTool(BaseTool):
             "stream": "Streamgraph",
             "map": "Heatmap"
         }
+
+        # CLEAN topic (remove any accidental suffixes)
         clean_title = title.split(" - ")[0].split("\n")[0].strip()
+
         viz_label = style_names.get(viz_type.strip(), viz_type.strip().title())
+
         return f"{clean_title}\n{viz_label} - {time_value}"
 
     def _get_label_mapping(self):
+        """Load label mappings from data/label_mappings.json"""
         import json
         mapping_path = "data/label_mappings.json"
 
@@ -148,6 +171,7 @@ class SmartVideoTool(BaseTool):
             except Exception as e:
                 print(f"⚠️ Failed to load label mappings: {e}")
 
+        # Fallback: minimal mapping for common cases
         return {
             "JavaScript": "JS",
             "Microsoft": "MS",
@@ -162,12 +186,14 @@ class SmartVideoTool(BaseTool):
         }
 
     def _trim_label(self, label: str, style: str) -> str:
+        """Trim labels for bar race videos only"""
         if style == "bar":
             mapping = self._get_label_mapping()
             return mapping.get(label, label)
         return label
 
     def _create_line_chart(self, df, time_col, data_cols, title, output_path, video_format="HD", fps=2.0):
+        """Create animated line chart video"""
         figsize = self._get_video_dimensions(video_format)
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -192,11 +218,16 @@ class SmartVideoTool(BaseTool):
             ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
             return lines
 
-        anim = animation.FuncAnimation(fig, animate, frames=len(df), interval=1000/fps, blit=True, repeat=False)
+        anim = animation.FuncAnimation(
+            fig, animate, frames=len(df),
+            interval=1000/fps, blit=True, repeat=False
+        )
+
         anim.save(output_path, writer='ffmpeg', fps=fps, dpi=150)
         plt.close()
 
     def _create_racing_bars(self, df, time_col, data_cols, title, output_path, video_format="HD", fps=2.0):
+        """Create racing bar chart animation with label trimming for bar race videos"""
         figsize = self._get_video_dimensions(video_format)
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -205,10 +236,14 @@ class SmartVideoTool(BaseTool):
 
         def animate(frame):
             ax.clear()
+
             current_data = df.iloc[frame][data_cols].sort_values(ascending=True)
+
+            # Apply label trimming for bar race only
             trimmed_labels = [self._trim_label(label, "bar") for label in current_data.index]
 
-            bars = ax.barh(range(len(current_data)), current_data.values, color=[color_map[col] for col in current_data.index])
+            bars = ax.barh(range(len(current_data)), current_data.values,
+                           color=[color_map[col] for col in current_data.index])
 
             for i, (idx, val) in enumerate(current_data.items()):
                 ax.text(val, i, f' {val:.1f}', va='center', fontsize=10, fontweight='bold')
@@ -224,11 +259,16 @@ class SmartVideoTool(BaseTool):
 
             return bars
 
-        anim = animation.FuncAnimation(fig, animate, frames=len(df), interval=1000/fps, blit=False, repeat=False)
+        anim = animation.FuncAnimation(
+            fig, animate, frames=len(df),
+            interval=1000/fps, blit=False, repeat=False
+        )
+
         anim.save(output_path, writer='ffmpeg', fps=fps, dpi=150)
         plt.close()
 
     def _create_bubble_race(self, df, time_col, data_cols, title, output_path, video_format="HD", fps=2.0):
+        """Create animated bubble chart race"""
         figsize = self._get_video_dimensions(video_format)
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -237,6 +277,7 @@ class SmartVideoTool(BaseTool):
 
         def animate(frame):
             ax.clear()
+
             current_data = df.iloc[frame][data_cols]
 
             x_pos = np.arange(len(current_data))
@@ -244,8 +285,10 @@ class SmartVideoTool(BaseTool):
             sizes = (current_data.values / current_data.max()) * 3000
 
             for i, col in enumerate(current_data.index):
-                ax.scatter(x_pos[i], y_pos[i], s=sizes[i], color=color_map[col], alpha=0.6, edgecolors='black', linewidth=2)
-                ax.text(x_pos[i], y_pos[i], f'{y_pos[i]:.1f}', ha='center', va='center', fontsize=10, fontweight='bold')
+                ax.scatter(x_pos[i], y_pos[i], s=sizes[i],
+                           color=color_map[col], alpha=0.6, edgecolors='black', linewidth=2)
+                ax.text(x_pos[i], y_pos[i], f'{y_pos[i]:.1f}',
+                       ha='center', va='center', fontsize=10, fontweight='bold')
 
             ax.set_xticks(x_pos)
             ax.set_xticklabels(current_data.index, rotation=45, ha='right', fontsize=10)
@@ -256,11 +299,16 @@ class SmartVideoTool(BaseTool):
             ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
             ax.grid(True, alpha=0.3, axis='y')
 
-        anim = animation.FuncAnimation(fig, animate, frames=len(df), interval=1000/fps, blit=False, repeat=False)
+        anim = animation.FuncAnimation(
+            fig, animate, frames=len(df),
+            interval=1000/fps, blit=False, repeat=False
+        )
+
         anim.save(output_path, writer='ffmpeg', fps=fps, dpi=150)
         plt.close()
 
     def _create_pie_race(self, df, time_col, data_cols, title, output_path, video_format="HD", fps=2.0):
+        """Create animated pie chart race"""
         figsize = self._get_video_dimensions(video_format)
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -268,6 +316,7 @@ class SmartVideoTool(BaseTool):
 
         def animate(frame):
             ax.clear()
+
             current_data = df.iloc[frame][data_cols]
 
             wedges, texts, autotexts = ax.pie(
@@ -286,11 +335,16 @@ class SmartVideoTool(BaseTool):
             formatted_title = self._format_title(title, df[time_col].iloc[frame], "pie")
             ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
 
-        anim = animation.FuncAnimation(fig, animate, frames=len(df), interval=1000/fps, blit=False, repeat=False)
+        anim = animation.FuncAnimation(
+            fig, animate, frames=len(df),
+            interval=1000/fps, blit=False, repeat=False
+        )
+
         anim.save(output_path, writer='ffmpeg', fps=fps, dpi=150)
         plt.close()
 
     def _create_streamgraph(self, df, time_col, data_cols, title, output_path, video_format="HD", fps=2.0):
+        """Create animated streamgraph (stacked area chart)"""
         figsize = self._get_video_dimensions(video_format)
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -298,10 +352,12 @@ class SmartVideoTool(BaseTool):
 
         def animate(frame):
             ax.clear()
+
             current_df = df.iloc[:frame+1]
             x = np.arange(len(current_df))
 
-            ax.stackplot(x, *[current_df[col].values for col in data_cols], labels=data_cols, colors=colors, alpha=0.8)
+            ax.stackplot(x, *[current_df[col].values for col in data_cols],
+                        labels=data_cols, colors=colors, alpha=0.8)
 
             ax.set_xlim(0, len(df) - 1)
             ax.set_ylim(0, df[data_cols].sum(axis=1).max() * 1.1)
@@ -313,11 +369,16 @@ class SmartVideoTool(BaseTool):
             formatted_title = self._format_title(title, df[time_col].iloc[frame], "stream")
             ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
 
-        anim = animation.FuncAnimation(fig, animate, frames=len(df), interval=1000/fps, blit=False, repeat=False)
+        anim = animation.FuncAnimation(
+            fig, animate, frames=len(df),
+            interval=1000/fps, blit=False, repeat=False
+        )
+
         anim.save(output_path, writer='ffmpeg', fps=fps, dpi=150)
         plt.close()
 
     def _create_choropleth(self, df, time_col, data_cols, title, output_path, video_format="HD", fps=2.0):
+        """Create animated choropleth-style heatmap"""
         figsize = self._get_video_dimensions(video_format)
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -325,9 +386,11 @@ class SmartVideoTool(BaseTool):
 
         def animate(frame):
             ax.clear()
+
             current_column = data_matrix[:, :frame+1]
 
-            im = ax.imshow(current_column, aspect='auto', cmap='YlOrRd', interpolation='nearest', vmin=0, vmax=df[data_cols].max().max())
+            im = ax.imshow(current_column, aspect='auto', cmap='YlOrRd',
+                          interpolation='nearest', vmin=0, vmax=df[data_cols].max().max())
 
             ax.set_yticks(np.arange(len(data_cols)))
             ax.set_yticklabels(data_cols, fontsize=10)
@@ -340,11 +403,16 @@ class SmartVideoTool(BaseTool):
 
             for i in range(len(data_cols)):
                 for j in range(frame+1):
-                    text = ax.text(j, i, f'{current_column[i, j]:.0f}', ha="center", va="center", color="black", fontsize=8)
+                    text = ax.text(j, i, f'{current_column[i, j]:.0f}',
+                                 ha="center", va="center", color="black", fontsize=8)
 
             formatted_title = self._format_title(title, df[time_col].iloc[frame], "map")
             ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)
 
-        anim = animation.FuncAnimation(fig, animate, frames=len(df), interval=1000/fps, blit=False, repeat=False)
+        anim = animation.FuncAnimation(
+            fig, animate, frames=len(df),
+            interval=1000/fps, blit=False, repeat=False
+        )
+
         anim.save(output_path, writer='ffmpeg', fps=fps, dpi=150)
         plt.close()

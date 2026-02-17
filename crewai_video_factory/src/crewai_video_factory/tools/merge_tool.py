@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class MergeAudioVideoToolInput(BaseModel):
     """Input schema for MergeAudioVideoTool."""
     filename: str = Field(..., description="Base filename (first 3 words of topic)")
+    output_dir: str = Field(..., description="Output directory for merged files")
     audio_speed: float = Field(default=0.9, ge=0.7, le=1.3, description="Speech speed used for audio generation (info only)")
 
 class MergeAudioVideoTool(BaseTool):
@@ -17,18 +18,19 @@ class MergeAudioVideoTool(BaseTool):
     def _run(
         self,
         filename: str,
+        output_dir: str,
         audio_speed: float = 0.9
     ) -> str:
-        output_dir = "output"
+        # 🔑 KEY: Get output_dir from inputs (passed from main.py)
         if not os.path.exists(output_dir):
-            return f"❌ Output directory '{output_dir}' not found"
+            return f"âŒ Output directory '{output_dir}' not found"
 
-        # 🔑 FIX: Extract base filename (first part before first underscore)
-        import re
-        base_name = filename.split('_')[0] if '_' in filename else filename
+        # 🔑 KEY: Get clean_filename from inputs (consistent across all tools)
+        clean_filename = filename
 
         import glob
-        video_pattern = f"output/{base_name}_*.mp4"
+        # 🔑 KEY: Search in topic subdirectory
+        video_pattern = f"{output_dir}/{clean_filename}_*.mp4"
         video_files = [f for f in glob.glob(video_pattern) if "_with_audio" not in f and "_audio" not in f]
 
         results = []

@@ -9,50 +9,52 @@ class YouTubeMetadataToolInput(BaseModel):
     """Input schema for YouTubeMetadataTool."""
     topic: str = Field(..., description="Topic/title for the video")
     filename: str = Field(..., description="Base filename (first 3 words of topic)")
+    output_dir: str = Field(..., description="Output directory for metadata files")
     start_year: int = Field(default=2015, description="Start year of data")
     end_year: int = Field(default=2026, description="End year of data")
     video_duration: float = Field(default=60.0, description="Video duration in seconds")
     generate_narration: bool = Field(default=True, description="Whether to generate narration text")
     generate_youtube_metadata: bool = Field(default=True, description="Whether to generate YouTube metadata")
 
+
 class YouTubeMetadataTool(BaseTool):
     name: str = "YouTube Metadata Generator"
-    description: str = "Generates narration text file (_cc_en.txt) and YouTube metadata (title, description, tags, chapters) with SEO optimization"
+    description: str = "Generates narration text file (cc_en.txt) and YouTube metadata (title, description, tags, chapters) with SEO optimization"
     args_schema: Type[BaseModel] = YouTubeMetadataToolInput
 
     def _run(
         self,
         topic: str,
         filename: str,
+        output_dir: str,
         start_year: int = 2015,
         end_year: int = 2026,
         video_duration: float = 60.0,
         generate_narration: bool = True,
         generate_youtube_metadata: bool = True
     ) -> str:
-        output_dir = "output"
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
+        # 🔑 KEY: Get output_dir from inputs (passed from main.py)
+        os.makedirs(output_dir, exist_ok=True)
 
-        import re
-        clean_words = re.findall(r'\w+', topic)[:3]
-        clean_filename = ''.join(clean_words)
+        # 🔑 KEY: Get clean_filename from inputs (consistent across all tools)
+        #clean_filename = getattr(self, '_inputs', {}).get('filename', 'ProgrammingLanguage')
+        clean_filename = filename
 
         results = []
 
         if generate_narration:
-            narration_result = self._generate_narration_file(topic, clean_filename, start_year, end_year, output_dir)
+            narration_result = self._generate_narration_file(topic, start_year, end_year, output_dir, clean_filename)
             results.append(narration_result)
 
         if generate_youtube_metadata:
-            metadata_result = self._generate_youtube_metadata(topic, clean_filename, start_year, end_year, video_duration, output_dir)
+            metadata_result = self._generate_youtube_metadata(topic, start_year, end_year, video_duration, output_dir, clean_filename)
             results.append(metadata_result)
 
         return "\n\n".join(results)
 
-    def _generate_narration_file(self, topic: str, filename: str, start_year: int, end_year: int, output_dir: str) -> str:
+    def _generate_narration_file(self, topic: str, start_year: int, end_year: int, output_dir: str, clean_filename: str) -> str:
         """Generate professional narration text file from CSV data"""
-        csv_path = f"{output_dir}/{filename}.csv"
+        csv_path = f"output/{clean_filename}.csv"
         narration_text = ""
 
         if os.path.exists(csv_path):
@@ -104,14 +106,14 @@ class YouTubeMetadataTool(BaseTool):
         else:
             narration_text = self._get_fallback_narration(topic, start_year, end_year)
 
-        # 🔑 Save narration text file with _cc_en.txt naming convention
-        narration_file_path = f"{output_dir}/{filename}_cc_en.txt"
+        # 🔑 KEY: Save in topic subdirectory as cc_en.txt
+        narration_file_path = f"{output_dir}/cc_en.txt"
         with open(narration_file_path, 'w', encoding='utf-8') as f:
             f.write(narration_text)
 
-        return f"📝 Narration text saved to: {filename}_cc_en.txt"
+        return f"📝 Narration text saved to: cc_en.txt"
 
-    def _generate_youtube_metadata(self, topic: str, filename: str, start_year: int, end_year: int, video_duration: float, output_dir: str) -> str:
+    def _generate_youtube_metadata(self, topic: str, start_year: int, end_year: int, video_duration: float, output_dir: str, clean_filename: str) -> str:
         """Generate YouTube metadata with SEO optimization"""
 
         title = self._generate_youtube_title(topic, start_year, end_year)
@@ -129,19 +131,18 @@ class YouTubeMetadataTool(BaseTool):
             "created_at": datetime.now().isoformat()
         }
 
-        metadata_json_path = f"{output_dir}/{filename}_YouTube_Metadata.json"
+        metadata_json_path = f"{output_dir}/YouTube_Metadata.json"
         with open(metadata_json_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-        metadata_txt_path = f"{output_dir}/{filename}_YouTube_Metadata.txt"
+        metadata_txt_path = f"{output_dir}/YouTube_Metadata.txt"
         with open(metadata_txt_path, 'w', encoding='utf-8') as f:
             f.write(f"TITLE:\n{title}\n\n")
             f.write(f"DESCRIPTION:\n{description}\n\n")
             f.write(f"TAGS:\n{', '.join(tags)}\n\n")
             f.write(f"CHAPTERS:\n{chapters}\n")
 
-        return f"🎬 YouTube metadata saved to:\n   • {filename}_YouTube_Metadata.json\n   • {filename}_YouTube_Metadata.txt"
-
+        return f"🎬 YouTube metadata saved to:\n   • YouTube_Metadata.json\n   • YouTube_Metadata.txt"
     def _generate_youtube_title(self, topic: str, start_year: int, end_year: int) -> str:
         """Generate SEO-optimized YouTube title"""
 
@@ -189,7 +190,7 @@ This visualization is based on comprehensive market data tracking {topic.lower()
 
 📱 FOLLOW US:
 • YouTube: @PlayOwnAi
-• Facebook: facebook.com/PlayOwnAi
+• LinkedIn: playownai | www.linkedin.com/company/playownai/
 • Website: playownai.com
 
 #DataVisualization #{topic.replace(' ', '')} #MarketAnalysis #TechTrends #{start_year}To{end_year}
