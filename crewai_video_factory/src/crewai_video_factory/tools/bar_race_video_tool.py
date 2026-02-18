@@ -29,23 +29,33 @@ class BarRaceVideoTool(BaseTool):
     description: str = "Creates a bar chart race video from a prepared CSV file."
     args_schema: Type[BaseModel] = BarRaceInput
 
+
+
     def _run(self, **kwargs) -> str:
-        # Extract Inputs
+        # -------------------------------------------------
+        # Extract Inputs — FIXED: NO TRAILING SPACES
+        # -------------------------------------------------
         csv_filepath = kwargs.get("csv_filepath")
         output_path = kwargs.get("output_path")
         title = kwargs.get("title")
-        mode = kwargs.get("mode", "full")
+        mode = kwargs.get("mode", "full").strip()
         seconds_per_period = kwargs.get("seconds_per_period", 4.0)
         n_bars = kwargs.get("n_bars", 5)
 
+        # -------------------------------------------------
         # Validate
+        # -------------------------------------------------
+        if not csv_filepath:
+            return "❌ Missing csv_filepath"
         csv_path = os.path.abspath(csv_filepath)
         if not os.path.exists(csv_path):
             return "❌ CSV file not found"
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
+        # -------------------------------------------------
         # Load CSV
+        # -------------------------------------------------
         df = pd.read_csv(csv_path)
         if df.empty or len(df.columns) < 2:
             return "❌ Invalid CSV structure"
@@ -58,50 +68,68 @@ class BarRaceVideoTool(BaseTool):
             format="%Y"
         )
 
-        # Mode presets (Shorts vs Full HD)
+        # -------------------------------------------------
+        # Mode presets
+        # -------------------------------------------------
         if mode == "short":
-            figsize = (9.4, 19.0)   # 9:16 YouTube Shorts
+            figsize = (9.4, 19.0)
             title_size = 28
-            year_size = 48
             bar_label_size = 40
             tick_label_size = 40
             bar_size = 0.85
-            title_y = 0.965
-            year_y = 0.92
         else:
-            figsize = (17.4, 10.8)  # 16:9 Full HD
+            figsize = (17.4, 10.8)
             title_size = 36
-            year_size = 56
             bar_label_size = 50
             tick_label_size = 50
             bar_size = 0.75
-            title_y = 0.955
-            year_y = 0.905
 
-                # -------------------------------------------------
+        # -------------------------------------------------
         # Timing
         # -------------------------------------------------
         steps_per_period = int(seconds_per_period * 15)
-        period_length = int(seconds_per_period * 1000)  # ✅ fixed typo: was "perio d_length"
+        period_length = int(seconds_per_period * 1000)
 
         # -------------------------------------------------
-        # Layout — ✅ LEFT PADDING DECREASED TO 0.08
+        # Layout — ✅ TIGHT LEFT + X-AXIS ON TOP
         # -------------------------------------------------
         plt.rcParams.update({
-            "figure.subplot.left": 0.08,   # ← changed from 0.15
+            "figure.subplot.left": 0.05,   # tight left
             "figure.subplot.right": 0.98,
-            "figure.subplot.top": 0.70,
-            "figure.subplot.bottom": 0.08,
+            "figure.subplot.top": 0.40,    # more space at top for title + scale
+            "figure.subplot.bottom": 0.10,
+            "xtick.labeltop": True,        # labels on top
+            "xtick.top": True,             # ticks on top
+            "xtick.labelbottom": False,    # no labels on bottom
+            "xtick.bottom": False,         # no ticks on bottom
+            "axes.spines.top": True,
+            "axes.spines.bottom": False,
+            "axes.titlelocation": "left",
+            "axes.titlepad": 50,
+            "axes.titleweight": "bold",
         })
 
         # -------------------------------------------------
-        # Render bar race — ✅ 2-line title via title + period_fmt
+        # Dynamic year + scale on top: use period_summary_func
         # -------------------------------------------------
-        # To get 2 static lines: use title = "Line 1\nLine 2", and disable period_label
-        # But since period_fmt="\n%Y" adds a 3rd line (year), we instead:
-        #   → Use title = "Main Title\nSubtitle" (2 lines)
-        #   → Set period_label=False (hide dynamic year)
-        final_title = f"{title}\nPopularity Score"
+        def period_summary_func(values, ranks):
+            year = values.name.year
+            return {
+                'x': 0.5,                     # ← CENTERED horizontally
+                'y': 0.965,                   # ← slightly below title (adjust as needed)
+                's': str(year),               # e.g., "2025"
+                'ha': 'center',               # ← critical for center alignment
+                'va': 'top',
+                'size': title_size * 1.1,     # ← slightly larger than title
+                'color': '#FF4500',           # ← bold orange-red (you can change to 'red', 'white', '#00BFFF', etc.)
+                'weight': 'bold',
+                'zorder': 100,                # ensure it draws on top
+                'bbox': dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.7, edgecolor='none')
+            }
+
+        # -------------------------------------------------
+        # Render bar race — ✅ X-AXIS ON TOP, DYNAMIC YEAR, NO SUBTITLE IN TITLE
+        # -------------------------------------------------
 
         bcr.bar_chart_race(
             df=df_viz,
@@ -113,16 +141,19 @@ class BarRaceVideoTool(BaseTool):
             fixed_max=True,
             interpolate_period=True,
             steps_per_period=steps_per_period,
-            period_length=period_length,  # ✅ fixed
+            period_length=period_length,
             figsize=figsize,
             dpi=96,
             bar_size=bar_size,
 
-            title=final_title,           # ✅ 2-line title via \n
-            period_label=False,          # ✅ prevents year from overlapping
+            title=title,                    # e.g., "LLM Popularity Over Time"
+            period_label=False,             # hide default year label
+            period_summary_func=period_summary_func,  # ✅ dynamic year top-right
             bar_label_size=bar_label_size,
             tick_label_size=tick_label_size,
+            title_size=title_size,
         )
+
         if os.path.exists(output_path):
             size_mb = os.path.getsize(output_path) / (1024 * 1024)
             return f"✅ Bar race video created ({size_mb:.1f} MB)"
