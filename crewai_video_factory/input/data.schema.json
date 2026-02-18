@@ -22,7 +22,7 @@
   },
   "animation_styles": {
     "type": "array",
-    "description": "Animation styles to generate",
+    "description": "Animation styles to generate (for standard video_producer)",
     "enum": ["bar", "line", "bubble", "pie", "stream", "map"],
     "example": ["bar", "line"]
   },
@@ -34,7 +34,7 @@
   },
   "fps": {
     "type": "number",
-    "description": "Frames per second (0.1-30.0)",
+    "description": "Speed parameter (seconds per period for bar_race, frames per second for others)",
     "minimum": 0.1,
     "maximum": 30.0,
     "example": 0.5
@@ -46,8 +46,14 @@
   },
   "video_enabled": {
     "type": "boolean",
-    "description": "Enable video generation",
+    "description": "Enable standard video generation (uses smart_video_tool with multiple animation styles)",
     "example": true
+  },
+  "bar_race_video_enabled": {
+    "type": "boolean",
+    "description": "Enable amazing bar race video generation (NEW - uses bar_race_video_tool with professional interpolation)",
+    "example": false,
+    "note": "Set to true to generate amazing smooth bar race animations instead of standard videos. Can be used WITH or WITHOUT video_enabled."
   },
   "audio_enabled": {
     "type": "boolean",

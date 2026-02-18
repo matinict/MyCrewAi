@@ -2,9 +2,10 @@ from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
 from crewai_video_factory.tools.csv_tool import CSVTool
 from crewai_video_factory.tools.smart_video_tool import SmartVideoTool
+from crewai_video_factory.tools.bar_race_video_tool import BarRaceVideoTool  # NEW - Optional bar race
 from crewai_video_factory.tools.audio_tool import AudioGenerationTool
 from crewai_video_factory.tools.merge_tool import MergeAudioVideoTool
-from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool  # NEW IMPORT
+from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool
 import re
 
 @CrewBase
@@ -40,6 +41,15 @@ class CrewaiVideoFactory:
         )
 
     @agent
+    def bar_race_video_producer(self) -> Agent:
+        """NEW - Optional bar race video producer"""
+        return Agent(
+            config=self.agents_config['bar_race_video_producer'],
+            tools=[BarRaceVideoTool()],
+            verbose=True
+        )
+
+    @agent
     def audio_engineer(self) -> Agent:
         return Agent(
             config=self.agents_config['audio_engineer'],
@@ -55,7 +65,6 @@ class CrewaiVideoFactory:
             verbose=True
         )
 
-    # ===== NEW YOUTUBE METADATA AGENT =====
     @agent
     def youtube_metadata_specialist(self) -> Agent:
         return Agent(
@@ -83,6 +92,13 @@ class CrewaiVideoFactory:
         )
 
     @task
+    def create_bar_race_video(self) -> Task:
+        """NEW - Optional bar race video creation"""
+        return Task(
+            config=self.tasks_config['create_bar_race_video'],
+        )
+
+    @task
     def add_audio(self) -> Task:
         return Task(
             config=self.tasks_config['add_audio'],
@@ -94,7 +110,6 @@ class CrewaiVideoFactory:
             config=self.tasks_config['merge_audio_video'],
         )
 
-    # ===== NEW YOUTUBE METADATA TASK =====
     @task
     def generate_youtube_metadata(self) -> Task:
         return Task(
@@ -103,7 +118,7 @@ class CrewaiVideoFactory:
 
     @crew
     def crew(self) -> Crew:
-        """Creates the Video Factory crew with ALL potential agents and tasks.
+        """Creates the Video Factory crew with all potential agents and tasks.
         Conditional execution is handled in main.py"""
         return Crew(
             agents=self.agents,

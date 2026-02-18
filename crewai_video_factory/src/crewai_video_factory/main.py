@@ -5,6 +5,8 @@ Usage via CrewAI CLI:
 crewai run
 Or directly:
 python main.py
+
+Configuration: Edit input/data.json to customize settings
 """
 import os
 import sys
@@ -17,9 +19,33 @@ def load_config():
     config_path = "input/data.json"
     
     if not os.path.exists(config_path):
-        print(f"❌ Configuration file not found: {config_path}")
+        print("❌ Configuration file not found: input/data.json")
         print("📝 Please create input/data.json with your settings")
-        print("📖 See input/data.schema.json for available options")
+        print("📖 See input/data.schema.json for available options\n")
+        
+        # Create example file
+        example_config = {
+            "topic": "Programming Language",
+            "start": 2015,
+            "end": 2026,
+            "granularity": "yearly",
+            "animation_styles": ["bar_race"],
+            "video_formats": ["Shorts"],
+            "fps": 0.5,
+            "use_existing_csv": False,
+            "video_enabled": True,
+            "bar_race_video_enabled": False,
+            "audio_enabled": True,
+            "audio_speed": 0.9,
+            "merge_audio_video": True,
+            "generate_youtube_metadata": True
+        }
+        
+        os.makedirs("input", exist_ok=True)
+        with open(config_path, 'w') as f:
+            json.dump(example_config, f, indent=2)
+        print(f"✅ Created example config at: {config_path}")
+        print("⚠️  Please edit it and run again\n")
         sys.exit(1)
     
     try:
@@ -28,11 +54,13 @@ def load_config():
         return config
     except json.JSONDecodeError as e:
         print(f"❌ Invalid JSON in {config_path}: {e}")
+        print("💡 Check syntax at https://jsonlint.com/")
         sys.exit(1)
     except Exception as e:
         print(f"❌ Error loading config: {e}")
         sys.exit(1)
 
+# Load configuration from input/data.json
 DEFAULT_INPUTS = load_config()
 
 def run():
@@ -47,7 +75,6 @@ def run():
         except json.JSONDecodeError:
             print("⚠️  Invalid JSON in CLI args. Using input/data.json values\n")
 
-
     # Generate filename from topic
     words = re.findall(r'\w+', inputs['topic'])[:3]
     inputs['filename'] = ''.join(words)
@@ -59,44 +86,44 @@ def run():
     inputs['output_dir'] = output_dir
 
     # FPS validation
-    fps = float(inputs.get('fps', 1.0))
+    fps = float(inputs.get('fps', 0.5))
     if fps < 0.1 or fps > 30.0:
         print(f"⚠️  Invalid FPS {fps}. Clamping to valid range (0.1-30.0)")
         fps = max(0.1, min(30.0, fps))
     inputs['fps'] = fps
 
     # ===== USE_EXISTING_CSV HANDLING =====
-    # 🔑 KEY: Define csv_path BEFORE using it in print statements
-    csv_path = f"output/{inputs['filename']}.csv"  # CSV stays flat
+    csv_path = f"output/{inputs['filename']}.csv"
     use_existing = inputs.get('use_existing_csv', False)
 
     print("\n" + "="*60)
     print("🎬 VIDEO FACTORY STARTING")
     print("="*60)
     print(f"📊 Topic: {inputs['topic']}")
-    print(f"📁 CSV File: {csv_path}")
+    print(f"📄 CSV File: {csv_path}")
     print(f"📁 Output Subdirectory: {output_dir}/")
-    print(f"⏱️  Animation speed: {fps} fps → ~{12/fps:.1f} sec duration (for 12 data points)")
+    print(f"⏱️  Speed: {fps} seconds per period")
 
     if use_existing:
         if not os.path.exists(csv_path):
             print(f"❌ ERROR: use_existing_csv=True but CSV not found at {csv_path}")
             print("💡 Fix: Set use_existing_csv=False to generate new data, or create the CSV manually")
             sys.exit(1)
-        print("⏭️  SKIPPING data research & CSV generation (using existing file)")
+        print("⭐️  SKIPPING data research & CSV generation (using existing file)")
         inputs['_skip_research'] = True
         inputs['_skip_csv'] = True
     else:
-        print("🔍 Researching new data & generating CSV")
+        print("📊 Researching new data & generating CSV")
         inputs['_skip_research'] = False
         inputs['_skip_csv'] = False
 
     print(f"🎨 Animations: {', '.join(inputs['animation_styles'])}")
     print(f"📱 Formats: {', '.join(inputs['video_formats'])}")
     print(f"🎬 Video Enabled: {inputs.get('video_enabled', True)}")
+    print(f"✨ Bar Race Video Enabled: {inputs.get('bar_race_video_enabled', False)}")
     print(f"🔊 Audio Enabled: {inputs.get('audio_enabled', False)}")
-    print(f"🔄 Merge Audio-Video: {inputs.get('merge_audio_video', False)}")
-    print(f"📝 YouTube Metadata: {inputs.get('generate_youtube_metadata', False)}")
+    print(f"📹 Merge Audio-Video: {inputs.get('merge_audio_video', False)}")
+    print(f"📺 YouTube Metadata: {inputs.get('generate_youtube_metadata', False)}")
     print("="*60 + "\n")
 
     try:
@@ -114,14 +141,25 @@ def run():
         if inputs.get('video_enabled', True):
             final_tasks.append(full_crew.tasks[2])  # create_video
 
+        # 🆕 NEW: Conditional bar race video
+        if inputs.get('bar_race_video_enabled', False):
+            final_tasks.append(full_crew.tasks[3])  # create_bar_race_video
+            audio_task_index = 4
+            merge_task_index = 5
+            metadata_task_index = 6
+        else:
+            audio_task_index = 3
+            merge_task_index = 4
+            metadata_task_index = 5
+
         if inputs.get('audio_enabled', False):
-            final_tasks.append(full_crew.tasks[3])  # add_audio
+            final_tasks.append(full_crew.tasks[audio_task_index])  # add_audio
 
         if inputs.get('merge_audio_video', False):
-            final_tasks.append(full_crew.tasks[4])  # merge_audio_video
+            final_tasks.append(full_crew.tasks[merge_task_index])  # merge_audio_video
 
         if inputs.get('generate_youtube_metadata', False):
-            final_tasks.append(full_crew.tasks[5])  # generate_youtube_metadata
+            final_tasks.append(full_crew.tasks[metadata_task_index])  # generate_youtube_metadata
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
@@ -142,40 +180,59 @@ def run():
         print(f"   Subdirectory: {output_dir}/")
 
         if inputs.get('video_enabled', True):
-            print(f"   Videos:")
+            print(f"   Videos (Standard):")
             for style in inputs['animation_styles']:
                 for fmt in inputs['video_formats']:
-                    video_file = f"{output_dir}/{inputs['filename']}_{style}_{fmt}.mp4"
-                    print(f"      - {video_file}")
+                    video_file = f"{output_dir}/{style}_{fmt}_{style}_{fmt}.mp4"
+                    if os.path.exists(video_file):
+                        print(f"      ✅ {video_file}")
+
+        if inputs.get('bar_race_video_enabled', False):
+            print(f"   Videos (Bar Race):")
+            for fmt in inputs['video_formats']:
+                video_file = f"{output_dir}/bar_race_{fmt}_bar_race_{fmt}.mp4"
+                if os.path.exists(video_file):
+                    print(f"      ✅ {video_file}")
 
         if inputs.get('audio_enabled', False):
             print(f"   Audio:")
             for style in inputs['animation_styles']:
                 for fmt in inputs['video_formats']:
-                    audio_file = f"{output_dir}/{inputs['filename']}_{style}_{fmt}_audio.mp3"
+                    audio_file = f"{output_dir}/{style}_{fmt}_{style}_{fmt}_audio.mp3"
                     if os.path.exists(audio_file):
-                        print(f"      - {audio_file}")
+                        print(f"      ✅ {audio_file}")
+            # Bar race audio
+            if inputs.get('bar_race_video_enabled', False):
+                for fmt in inputs['video_formats']:
+                    audio_file = f"{output_dir}/bar_race_{fmt}_bar_race_{fmt}_audio.mp3"
+                    if os.path.exists(audio_file):
+                        print(f"      ✅ {audio_file}")
 
         if inputs.get('merge_audio_video', False):
             print(f"   Merged:")
             for style in inputs['animation_styles']:
                 for fmt in inputs['video_formats']:
-                    merged_file = f"{output_dir}/{inputs['filename']}_{style}_{fmt}_with_audio.mp4"
+                    merged_file = f"{output_dir}/{style}_{fmt}_{style}_{fmt}_with_audio.mp4"
                     if os.path.exists(merged_file):
-                        print(f"      - {merged_file}")
+                        print(f"      ✅ {merged_file}")
+            if inputs.get('bar_race_video_enabled', False):
+                for fmt in inputs['video_formats']:
+                    merged_file = f"{output_dir}/bar_race_{fmt}_bar_race_{fmt}_with_audio.mp4"
+                    if os.path.exists(merged_file):
+                        print(f"      ✅ {merged_file}")
 
         if inputs.get('generate_youtube_metadata', False):
             print(f"   YouTube Metadata:")
             metadata_files = [
-                f"{output_dir}/{inputs['filename']}_cc_en.txt",
-                f"{output_dir}/{inputs['filename']}_YouTube_Metadata.json",
-                f"{output_dir}/{inputs['filename']}_YouTube_Metadata.txt",
+                f"{output_dir}/cc_en.txt",
+                f"{output_dir}/YouTube_Metadata.json",
+                f"{output_dir}/YouTube_Metadata.txt",
             ]
             for mf in metadata_files:
                 if os.path.exists(mf):
-                    print(f"      - {mf}")
+                    print(f"      ✅ {mf}")
 
-        print(f"\n⏱️  Duration tip: With {fps} fps and {12} data points → ~{12/fps:.1f} seconds")
+        print(f"\n⏱️  Duration tip: {fps} seconds per period")
         print("="*60 + "\n")
         return result
 

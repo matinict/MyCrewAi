@@ -1,15 +1,16 @@
 {
-  "topic": "BDBL Revenue",
+  "topic": "Programming Language",
   "start": 2015,
   "end": 2026,
   "granularity": "yearly",
-  "animation_styles": ["bar"],
+  "animation_styles": ["bar_race"],
   "video_formats": ["Shorts"],
-  "fps": 0.5,
-  "use_existing_csv": false,
-  "video_enabled": true,
-  "audio_enabled": true,
+  "fps": 1.0,
+  "use_existing_csv": true,
+  "video_enabled": false,
+  "bar_race_video_enabled": true,
+  "audio_enabled": false,
   "audio_speed": 0.9,
-  "merge_audio_video": true,
-  "generate_youtube_metadata": true
+  "merge_audio_video": false,
+  "generate_youtube_metadata": false
 }

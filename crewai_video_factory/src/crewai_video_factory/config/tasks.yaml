@@ -85,6 +85,42 @@ create_video:
     - research_data
     - generate_csv
 
+create_bar_race_video:
+  description: >
+    Generate AMAZING bar race animation videos from the CSV file for {topic}.
+    Animation: Professional bar chart race with smooth interpolation
+    Video formats: {video_formats}
+    FPS (seconds per period): {fps}
+    
+    Use the Bar Race Video Generator Tool to:
+    - Read CSV from output/{filename}.csv (flat directory)
+    - Create professional bar race videos
+    - Save to output/{filename}/ subdirectory
+    - Use advanced bar_chart_race configuration with:
+      * Smooth interpolation (✨ key feature)
+      * Dynamic bar reordering
+      * Professional color scheme (viridis)
+      * Smart name compacting (vowels removed, max 6 chars)
+      * Year display in corner
+    
+    Features:
+    - Bars move smoothly between values (not jumping)
+    - Bars automatically reorder as values change
+    - Professional layout with left-aligned title
+    - Optimized for YouTube/TikTok upload
+    - Multiple format support (Shorts, HD, 2K, 4K)
+    
+    Output files go to topic subdirectory with naming:
+    - bar_race_[format]_bar_race_[format].mp4
+    - All videos go to output/{filename}/ subdirectory
+  expected_output: >
+    Confirmation of successful bar race video creation with exact file paths.
+    Example: "output/ProgrammingLanguage/bar_race_Shorts_bar_race_Shorts.mp4"
+  agent: bar_race_video_producer
+  context:
+    - research_data
+    - generate_csv
+
 add_audio:
   description: >
     Generate professional audio narration files.
@@ -94,7 +130,7 @@ add_audio:
     - Narration text file: output/{filename}/{filename}_cc_en.txt
   expected_output: >
     List of audio files created, OR skip message if disabled.
-    Example: "✅ Audio narration files created:\n   • ProgrammingLanguage_bar_Shorts_audio.mp3"
+    Example: "🎵 Audio narration files created:\n   • ProgrammingLanguage_bar_Shorts_audio.mp3"
     Narration file: "ProgrammingLanguage_cc_en.txt"
   agent: audio_engineer
   context:
@@ -112,7 +148,7 @@ merge_audio_video:
     All files remain in topic subdirectory.
   expected_output: >
     Confirmation of successful merges, OR skip message if disabled.
-    Example: "🔄 Audio-video merging completed (1 successful).\n✅ Merged: ProgrammingLanguage_bar_Shorts_with_audio.mp4"
+    Example: "📹 Audio-video merging completed (1 successful).\n✅ Merged: ProgrammingLanguage_bar_Shorts_with_audio.mp4"
   agent: merge_specialist
   context:
     - add_audio
