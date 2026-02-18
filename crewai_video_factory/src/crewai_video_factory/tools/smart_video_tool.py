@@ -109,18 +109,18 @@ class SmartVideoTool(BaseTool):
             # Build summary report
             summary = ["🎬 VIDEO GENERATION COMPLETE"]
             if results:
-                summary.append("\n✅ SUCCESSFUL:")
+                summary.append("\n✅ SUCCESSFUL: ")
                 summary.extend(results)
             if errors:
-                summary.append("\n⚠️ ERRORS:")
+                summary.append("\n⚠️ ERRORS: ")
                 summary.extend(errors)
-            summary.append(f"\n📊 Data: {len(df)} time periods × {len(data_cols)} items")
-            summary.append(f"⏱️ Animation speed: {fps} fps → ~{len(df)/fps:.1f} seconds duration")
+            summary.append(f"\n📊 Data: {len(df)} time periods × {len(data_cols)} items ")
+            summary.append(f"⏱️ Animation speed: {fps} fps → ~{len(df)/fps:.1f} seconds duration ")
 
             return "\n".join(summary)
 
         except Exception as e:
-            return f"🎬 VIDEO GENERATION FAILED: {str(e)}\n💡 Tip: Check CSV format (first column=time, 5-10 data columns)"
+            return f"🎬 VIDEO GENERATION FAILED: {str(e)}\n💡 Tip: Check CSV format (first column=time, 5-10 data columns) "
 
     def _get_video_dimensions(self, video_format: str):
         """Get video dimensions based on format."""
@@ -156,7 +156,7 @@ class SmartVideoTool(BaseTool):
 
         viz_label = style_names.get(viz_type.strip(), viz_type.strip().title())
 
-        return f"{clean_title}\n{viz_label} - {time_value}"
+        return f"{clean_title}\n{viz_label} - {time_value} "
 
     def _get_label_mapping(self):
         """Load label mappings from data/label_mappings.json"""
@@ -286,7 +286,7 @@ class SmartVideoTool(BaseTool):
 
             for i, col in enumerate(current_data.index):
                 ax.scatter(x_pos[i], y_pos[i], s=sizes[i],
-                           color=color_map[col], alpha=0.6, edgecolors='black', linewidth=2)
+                          color=color_map[col], alpha=0.6, edgecolors='black', linewidth=2)
                 ax.text(x_pos[i], y_pos[i], f'{y_pos[i]:.1f}',
                        ha='center', va='center', fontsize=10, fontweight='bold')
 
@@ -357,7 +357,7 @@ class SmartVideoTool(BaseTool):
             x = np.arange(len(current_df))
 
             ax.stackplot(x, *[current_df[col].values for col in data_cols],
-                        labels=data_cols, colors=colors, alpha=0.8)
+                         labels=data_cols, colors=colors, alpha=0.8)
 
             ax.set_xlim(0, len(df) - 1)
             ax.set_ylim(0, df[data_cols].sum(axis=1).max() * 1.1)
@@ -404,7 +404,7 @@ class SmartVideoTool(BaseTool):
             for i in range(len(data_cols)):
                 for j in range(frame+1):
                     text = ax.text(j, i, f'{current_column[i, j]:.0f}',
-                                 ha="center", va="center", color="black", fontsize=8)
+                                 ha='center', va='center', color='black', fontsize=8)
 
             formatted_title = self._format_title(title, df[time_col].iloc[frame], "map")
             ax.set_title(formatted_title, fontsize=16, fontweight='bold', pad=20)

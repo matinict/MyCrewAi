@@ -4,7 +4,7 @@
   "end": 2026,
   "granularity": "yearly",
   "animation_styles": ["bar_race"],
-  "video_formats": ["Shorts"],
+  "video_formats": ["Shorts","HD"],
   "fps": 1.0,
   "use_existing_csv": true,
   "video_enabled": false,
