@@ -3,22 +3,27 @@ name = "crewai_video_factory"
 version = "0.1.0"
 description = "crewai_video_factory using crewAI"
 authors = [{ name = "Your Name", email = "you@example.com" }]
-requires-python = ">=3.10,<3.13"
+#requires-python = ">=3.10,<3.13"
+requires-python = ">=3.11,<3.12"
 dependencies = [
-    "crewai[anthropic,google-genai]==1.8.1",
-    "crewai-tools>=0.17.0,<1.0.0,!=0.76.0",
-    "pandas>=2.0.0",
-    "matplotlib>=3.7.0",
-    "pillow>=10.0.0",
-    "opencv-python>=4.8.0",
-    "bar_chart_race>=0.1.0",
-    "gtts>=2.3.0",
-    "moviepy>=1.0.3",
-    "numpy>=1.24.0",
-    "litellm>=1.0.0",
-    "ollama>=0.1.0",
-    "moviepy==1.0.3",
+  "crewai[anthropic,google-genai]==1.8.1",
+  "crewai-tools>=0.17.0,<1.0.0",
+  "pydantic>=2.11.9,<2.12.0",
+  "langchain-core==0.3.37",
+  "matplotlib>=3.7.0",
+  "bar_chart_race>=0.1.0",
+  "litellm>=1.60.0",
 ]
+
+[tool.uv]
+environments = [
+  "sys_platform == 'linux'"
+]
+
+override-dependencies = [
+    "langchain-core==0.3.37",
+]
+
 
 [project.scripts]
 crewai_video_factory = "crewai_video_factory.main:run"

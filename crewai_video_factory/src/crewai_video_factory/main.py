@@ -12,17 +12,22 @@ import os
 import sys
 import json
 import re
+import warnings
+
 from crewai_video_factory.crew import CrewaiVideoFactory
+# Silence the specific Pydantic warning that calls the broken 'filtered_warn'
+warnings.filterwarnings("ignore", message=".*skip_file_prefixes.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
 
 def load_config():
     """Load configuration from input/data.json"""
     config_path = "input/data.json"
-    
+
     if not os.path.exists(config_path):
         print("❌ Configuration file not found: input/data.json")
         print("📝 Please create input/data.json with your settings")
         print("📖 See input/data.schema.json for available options\n")
-        
+
         # Create example file
         example_config = {
             "topic": "Programming Language",
@@ -40,14 +45,14 @@ def load_config():
             "merge_audio_video": True,
             "generate_youtube_metadata": True
         }
-        
+
         os.makedirs("input", exist_ok=True)
         with open(config_path, 'w') as f:
             json.dump(example_config, f, indent=2)
         print(f"✅ Created example config at: {config_path}")
         print("⚠️  Please edit it and run again\n")
         sys.exit(1)
-    
+
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)

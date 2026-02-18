@@ -1,3 +1,6 @@
+import re
+import os
+
 from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
 from crewai_video_factory.tools.csv_tool import CSVTool
@@ -6,7 +9,6 @@ from crewai_video_factory.tools.bar_race_video_tool import BarRaceVideoTool  # N
 from crewai_video_factory.tools.audio_tool import AudioGenerationTool
 from crewai_video_factory.tools.merge_tool import MergeAudioVideoTool
 from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool
-import re
 
 @CrewBase
 class CrewaiVideoFactory:
