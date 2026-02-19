@@ -173,8 +173,8 @@ generate_youtube_metadata:
       * {filename}_YouTube_Metadata.json
       * {filename}_YouTube_Metadata.txt
     Social Media Links:
-    - YouTube: @PlayOwnAi
-    - LinkedIn: playownai | www.linkedin.com/company/playownai/
+    - YouTube: @{channel}
+    - LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
 
     Parameters:
     - Topic: {topic}
@@ -183,9 +183,9 @@ generate_youtube_metadata:
     - Language: English (en) - extensible to other languages
 
     Social Media Links:
-    - YouTube: @PlayOwnAi
-    - Facebook: facebook.com/PlayOwnAi
-    - Website: playownai.com
+    - YouTube: @{channel}
+    - Facebook: facebook.com/{channel}
+    - Website: {website}
   expected_output: >
     Confirmation of metadata files created:
     - {filename}_cc_en.txt (Narration/Closed Captions)
@@ -236,9 +236,9 @@ create_intro_clip:
       video_formats: {video_formats}
       intro_enabled: {intro_enabled}
       intro_duration: {intro_duration}
-      channel: "PlayOwnAi"
+      channel: "{channel}"
       watermark_enabled: {watermark_enabled}
-      watermark_text: "@PlayOwnAi"
+      watermark_text: "{watermark_text}"
 
     Output files: {output_dir}/intro_[format].mp4
     Example: output/LLMPopularity/intro_Shorts.mp4, output/LLMPopularity/intro_HD.mp4
