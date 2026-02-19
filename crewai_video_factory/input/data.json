@@ -8,10 +8,14 @@
   "fps": 5.0,
   "use_existing_csv": true,
   "video_enabled": false,
-  "bar_race_video_enabled": true,
-  "bar_race_audio_enabled": true,
+  "bar_race_video_enabled": false,
+  "bar_race_audio_enabled": false,
   "audio_enabled": false,
   "audio_speed": 1.0,
   "merge_audio_video": false,
-  "generate_youtube_metadata": false
+  "generate_youtube_metadata": false,
+  "intro_enabled": true,
+  "intro_duration": 15,
+  "channel": "@PlayOwnAi",
+  "watermark_enabled": false
 }

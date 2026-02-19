@@ -127,6 +127,7 @@ def run():
     print(f"🎬 Video Enabled: {inputs.get('video_enabled', True)}")
     print(f"✨ Bar Race Video Enabled: {inputs.get('bar_race_video_enabled', False)}")
     print(f"🎙️ Bar Race Audio Enabled: {inputs.get('bar_race_audio_enabled', False)}")
+    print(f"🎬 Intro Clip Enabled: {inputs.get('intro_enabled', False)}")
     print(f"🔊 Audio Enabled: {inputs.get('audio_enabled', False)}")
     print(f"📹 Merge Audio-Video: {inputs.get('merge_audio_video', False)}")
     print(f"📺 YouTube Metadata: {inputs.get('generate_youtube_metadata', False)}")
@@ -147,22 +148,32 @@ def run():
         if inputs.get('video_enabled', True):
             final_tasks.append(full_crew.tasks[2])  # create_video
 
+        # crew.py task index map:
+        # [0] research_data  [1] generate_csv     [2] create_video
+        # [3] create_bar_race_video                [4] create_intro_clip
+        # [5] add_bar_race_audio                   [6] add_audio
+        # [7] merge_audio_video                    [8] generate_youtube_metadata
+
         # 🆕 Conditional bar race video
         if inputs.get('bar_race_video_enabled', False):
             final_tasks.append(full_crew.tasks[3])  # create_bar_race_video
 
-        # 🆕 Conditional bar race audio (independent of regular audio)
+        # 🆕 Conditional intro clip
+        if inputs.get('intro_enabled', False):
+            final_tasks.append(full_crew.tasks[4])  # create_intro_clip
+
+        # 🆕 Conditional bar race audio
         if inputs.get('bar_race_audio_enabled', False):
-            final_tasks.append(full_crew.tasks[4])  # add_bar_race_audio
+            final_tasks.append(full_crew.tasks[5])  # add_bar_race_audio
 
         if inputs.get('audio_enabled', False):
-            final_tasks.append(full_crew.tasks[5])  # add_audio
+            final_tasks.append(full_crew.tasks[6])  # add_audio
 
         if inputs.get('merge_audio_video', False):
-            final_tasks.append(full_crew.tasks[6])  # merge_audio_video
+            final_tasks.append(full_crew.tasks[7])  # merge_audio_video
 
         if inputs.get('generate_youtube_metadata', False):
-            final_tasks.append(full_crew.tasks[7])  # generate_youtube_metadata
+            final_tasks.append(full_crew.tasks[8])  # generate_youtube_metadata
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
@@ -189,6 +200,15 @@ def run():
                     video_file = f"{output_dir}/{style}_{fmt}_{style}_{fmt}.mp4"
                     if os.path.exists(video_file):
                         print(f"      ✅ {video_file}")
+
+        if inputs.get('intro_enabled', False):
+            print(f"   Intro Clips:")
+            for fmt in inputs['video_formats']:
+                intro_file = f"{output_dir}/intro_{fmt}.mp4"
+                if os.path.exists(intro_file):
+                    print(f"      ✅ {intro_file}")
+                else:
+                    print(f"      ❌ Not found: {intro_file}")
 
         if inputs.get('bar_race_video_enabled', False):
             print(f"   Videos (Bar Race):")

@@ -221,3 +221,28 @@ add_bar_race_audio:
   agent: bar_race_audio_engineer
   context:
     - create_bar_race_video
+
+create_intro_clip:
+  description: >
+    Generate branded intro screen video clip(s) for bar race videos.
+    This task will automatically skip if intro_enabled is false in inputs.
+    When enabled, creates intro MP4 clips for each format in {video_formats}.
+
+    CRITICAL — call the Intro Clip Tool with EXACTLY these values:
+      topic: "{topic}"
+      start_year: {start}
+      end_year: {end}
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      intro_enabled: {intro_enabled}
+      intro_duration: {intro_duration}
+      channel: "PlayOwnAi"
+      watermark_enabled: {watermark_enabled}
+      watermark_text: "@PlayOwnAi"
+
+    Output files: {output_dir}/intro_[format].mp4
+    Example: output/LLMPopularity/intro_Shorts.mp4, output/LLMPopularity/intro_HD.mp4
+  expected_output: >
+    List of intro clip files created, OR skip message if disabled.
+    Example: "🎬 Intro clips created:\n   • intro_Shorts.mp4 (1024 KB)\n   • intro_HD.mp4 (2048 KB)"
+  agent: intro_clip_producer

@@ -83,3 +83,14 @@ bar_race_audio_engineer:
     Audio production expert specializing in text-to-speech narration specifically for bar chart race
     videos. Reads CSV data to generate dynamic, data-driven commentary that matches the visual
     story being told in the bar race animation. Skips instantly when bar_race_audio_enabled is false.
+
+intro_clip_producer:
+  role: >
+    Intro Clip Video Specialist
+  goal: >
+    Create branded intro screen video clips for bar race videos when intro_enabled=true
+  backstory: >
+    Video production expert specializing in creating professional branded intro screens
+    for data visualization videos. Generates polished intro clips showing the channel name,
+    topic, and year range for each video format (HD, Shorts, 2K, 4K). Supports optional
+    watermark overlay. Skips instantly when intro_enabled is false.
