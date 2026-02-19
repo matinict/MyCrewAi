@@ -54,12 +54,10 @@ class BarRaceVideoTool(BaseTool):
         w_px, h_px = resolutions_px[fmt]
 
         # Ensure pixel dimensions are divisible by 2 (required by ffmpeg h264 codec).
-        # If not even, ffmpeg silently adjusts width — causing the "2568 x 1080" bug.
         w_px = w_px if w_px % 2 == 0 else w_px - 1
         h_px = h_px if h_px % 2 == 0 else h_px - 1
 
         return (w_px / dpi, h_px / dpi)
-
 
     def _trim_label(self, label: str) -> str:
         """Trim labels for bar race videos."""
@@ -109,7 +107,6 @@ class BarRaceVideoTool(BaseTool):
                 # Get figure size (in inches)
                 figsize = self._get_video_dimensions(fmt)
 
-                # Convert to pixel width using dpi=100
                 dpi = 100
                 fig_w, fig_h = figsize
                 width_px = fig_w * dpi
@@ -118,10 +115,12 @@ class BarRaceVideoTool(BaseTool):
                 scale_factor = width_px / 1920
 
                 # Dynamic font scaling
-                title_size = int(70 * scale_factor)
-                bar_label_size = int(75 * scale_factor)
-                tick_label_size = int(75 * scale_factor)
-                period_label_size = int(120 * scale_factor)
+                title_size       = int(80  * scale_factor)
+                bar_label_size   = int(60  * scale_factor)  # value numbers at bar end
+                tick_label_size  = int(30  * scale_factor)  # passed to bcr (will be overridden below)
+                x_tick_label_size= int(60  * scale_factor)  # x-axis scale numbers (0, 25, 50...)
+                bar_name_size    = int(38  * scale_factor)  # y-axis bar names — applied via draw_event
+                period_label_size= int(90  * scale_factor)
 
                 plt.rcParams.update({
                     "axes.titlesize": title_size,
@@ -142,6 +141,50 @@ class BarRaceVideoTool(BaseTool):
                         'weight': 'bold'
                     }
 
+                # Pre-configure figure: x-axis ticks on TOP, y-axis labels large + 45°
+                pre_fig, pre_ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+                # X-axis: move to top with correct size
+                pre_ax.xaxis.set_ticks_position('top')
+                pre_ax.xaxis.set_label_position('top')
+                pre_ax.tick_params(
+                    axis='x',
+                    which='both',
+                    bottom=False,
+                    top=True,
+                    labelbottom=False,
+                    labeltop=True,
+                    labelsize=x_tick_label_size,
+                    pad=-x_tick_label_size * 0.4,
+                )
+
+                # Hook into matplotlib's draw cycle to enforce y-axis label size + rotation
+                # on every frame (bcr resets these each update).
+                def on_draw(event):
+                    ax = pre_fig.axes[0] if pre_fig.axes else None
+                    if ax is None:
+                        return
+                    for lbl in ax.get_yticklabels():
+                        lbl.set_fontsize(bar_name_size)
+                        lbl.set_rotation(45)
+                        lbl.set_ha('right')
+                        lbl.set_va('center')
+                    # Also re-enforce x-axis size in case bcr reset it
+                    for lbl in ax.get_xticklabels():
+                        lbl.set_fontsize(x_tick_label_size)
+
+                pre_fig.canvas.mpl_connect('draw_event', on_draw)
+
+                # Reserve space at top for suptitle
+                pre_fig.subplots_adjust(top=0.82, left=0.18)  # left margin for rotated names
+                pre_fig.suptitle(
+                    title_text,
+                    fontsize=title_size,
+                    fontweight="bold",
+                    y=0.97,
+                    va='top',
+                )
+
                 output_path = os.path.join(output_dir, f"bar_race_{fmt}.mp4")
                 print(f"{fmt} Resolution: {int(fig_w*dpi)} x {int(fig_h*dpi)}")
 
@@ -153,20 +196,19 @@ class BarRaceVideoTool(BaseTool):
                     n_bars=n_bars,
                     steps_per_period=int(seconds_per_period * 15),
                     period_length=int(seconds_per_period * 1000),
-                    figsize=figsize,
-                    dpi=dpi,
+                    fig=pre_fig,
                     title=title_text,
                     period_label=False,
                     period_summary_func=period_summary_func,
                     bar_label_size=bar_label_size,
                     tick_label_size=tick_label_size,
                     title_size=title_size,
-                    writer='ffmpeg'
+                    writer='ffmpeg',
                 )
+                plt.close(pre_fig)
 
                 if os.path.exists(output_path):
-                    # Post-process: re-encode with exact pixel dimensions to fix any
-                    # size drift introduced by matplotlib's layout engine or ffmpeg h264.
+                    # Post-process: re-encode with exact pixel dimensions
                     w_px = int(fig_w * dpi)
                     h_px = int(fig_h * dpi)
                     fixed_path = output_path.replace(".mp4", "_fixed.mp4")
