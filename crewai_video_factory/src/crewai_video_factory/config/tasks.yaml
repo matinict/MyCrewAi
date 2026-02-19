@@ -195,3 +195,29 @@ generate_youtube_metadata:
   context:
     - generate_csv
     - create_video
+
+add_bar_race_audio:
+  description: >
+    Generate professional audio narration files for bar race videos.
+    This task will automatically skip if bar_race_audio_enabled is false in inputs.
+    When enabled, creates audio files for all bar_race_*.mp4 videos based on {topic}.
+
+    CRITICAL — call the Bar Race Audio Tool with EXACTLY these values:
+      topic: "{topic}"
+      filename: "{filename}"
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      bar_race_audio_enabled: {bar_race_audio_enabled}
+      audio_speed: {audio_speed}
+
+    The tool reads the CSV from output/{filename}.csv automatically.
+    DO NOT substitute topic for filename. filename must be the slug: "{filename}" (e.g. "LLMPopularity").
+    - Audio files saved to: {output_dir}/bar_race_[format]_audio.mp3
+    - Narration text: {output_dir}/bar_race_cc_en.txt
+  expected_output: >
+    List of bar race audio files created, OR skip message if disabled.
+    Example: "🎵 Bar race audio files created:\n   • bar_race_Shorts_audio.mp3\n   • bar_race_HD_audio.mp3"
+    Narration file: "bar_race_cc_en.txt"
+  agent: bar_race_audio_engineer
+  context:
+    - create_bar_race_video

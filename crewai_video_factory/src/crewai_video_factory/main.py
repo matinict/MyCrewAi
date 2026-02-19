@@ -126,6 +126,7 @@ def run():
     print(f"📱 Formats: {', '.join(inputs['video_formats'])}")
     print(f"🎬 Video Enabled: {inputs.get('video_enabled', True)}")
     print(f"✨ Bar Race Video Enabled: {inputs.get('bar_race_video_enabled', False)}")
+    print(f"🎙️ Bar Race Audio Enabled: {inputs.get('bar_race_audio_enabled', False)}")
     print(f"🔊 Audio Enabled: {inputs.get('audio_enabled', False)}")
     print(f"📹 Merge Audio-Video: {inputs.get('merge_audio_video', False)}")
     print(f"📺 YouTube Metadata: {inputs.get('generate_youtube_metadata', False)}")
@@ -146,25 +147,22 @@ def run():
         if inputs.get('video_enabled', True):
             final_tasks.append(full_crew.tasks[2])  # create_video
 
-        # 🆕 NEW: Conditional bar race video
+        # 🆕 Conditional bar race video
         if inputs.get('bar_race_video_enabled', False):
             final_tasks.append(full_crew.tasks[3])  # create_bar_race_video
-            audio_task_index = 4
-            merge_task_index = 5
-            metadata_task_index = 6
-        else:
-            audio_task_index = 3
-            merge_task_index = 4
-            metadata_task_index = 5
+
+        # 🆕 Conditional bar race audio (independent of regular audio)
+        if inputs.get('bar_race_audio_enabled', False):
+            final_tasks.append(full_crew.tasks[4])  # add_bar_race_audio
 
         if inputs.get('audio_enabled', False):
-            final_tasks.append(full_crew.tasks[audio_task_index])  # add_audio
+            final_tasks.append(full_crew.tasks[5])  # add_audio
 
         if inputs.get('merge_audio_video', False):
-            final_tasks.append(full_crew.tasks[merge_task_index])  # merge_audio_video
+            final_tasks.append(full_crew.tasks[6])  # merge_audio_video
 
         if inputs.get('generate_youtube_metadata', False):
-            final_tasks.append(full_crew.tasks[metadata_task_index])  # generate_youtube_metadata
+            final_tasks.append(full_crew.tasks[7])  # generate_youtube_metadata
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
@@ -199,17 +197,18 @@ def run():
                 if os.path.exists(video_file):
                     print(f"      ✅ {video_file}")
 
+        if inputs.get('bar_race_audio_enabled', False):
+            print(f"   Audio (Bar Race):")
+            for fmt in inputs['video_formats']:
+                audio_file = f"{output_dir}/bar_race_{fmt}_audio.mp3"
+                if os.path.exists(audio_file):
+                    print(f"      ✅ {audio_file}")
+
         if inputs.get('audio_enabled', False):
-            print(f"   Audio:")
+            print(f"   Audio (Standard):")
             for style in inputs['animation_styles']:
                 for fmt in inputs['video_formats']:
                     audio_file = f"{output_dir}/{style}_{fmt}_{style}_{fmt}_audio.mp3"
-                    if os.path.exists(audio_file):
-                        print(f"      ✅ {audio_file}")
-            # Bar race audio
-            if inputs.get('bar_race_video_enabled', False):
-                for fmt in inputs['video_formats']:
-                    audio_file = f"{output_dir}/bar_race_{fmt}_bar_race_{fmt}_audio.mp3"
                     if os.path.exists(audio_file):
                         print(f"      ✅ {audio_file}")
 
