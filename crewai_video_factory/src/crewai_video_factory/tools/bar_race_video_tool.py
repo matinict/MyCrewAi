@@ -3,7 +3,7 @@
 # Python 3.11.x only this version worked
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
-from typing import Type, List
+from typing import Type, List, Optional
 import os
 import pandas as pd
 import matplotlib
@@ -26,7 +26,7 @@ class BarRaceInput(BaseModel):
         description="Video formats to generate: HD, 2K, 4K, 8K, Shorts, ShortsHD, Shorts4K"
     )
     seconds_per_period: float = Field(default=4.0, description="Animation speed (seconds per period).")
-    n_bars: int = Field(default=9, description="Number of bars to display.")
+    n_bars: Optional[int] = Field(default=None, description="Number of bars to display. None = auto (Shorts:9, HD:7)")
 
 class BarRaceVideoTool(BaseTool):
     name: str = "Bar Race Video Tool"
@@ -99,7 +99,7 @@ class BarRaceVideoTool(BaseTool):
         title_text = kwargs.get("title", "Data Visualization").strip()
         video_formats = kwargs.get("video_formats", ["Shorts"])
         seconds_per_period = kwargs.get("seconds_per_period", 4.0)
-        n_bars_input = kwargs.get("n_bars", None)  # None = use format-based default
+        n_bars_input = kwargs.get("n_bars") or None  # None = use format-based default
 
         if isinstance(video_formats, str):
             video_formats = [video_formats.strip()]
