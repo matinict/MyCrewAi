@@ -27,6 +27,9 @@ class BarRaceInput(BaseModel):
     )
     seconds_per_period: float = Field(default=4.0, description="Animation speed (seconds per period).")
     n_bars: Optional[int] = Field(default=None, description="Number of bars to display. None = auto (Shorts:9, HD:7)")
+    watermark_enabled: bool = Field(default=False, description="Overlay semi-transparent watermark text on video.")
+    watermark_text: str = Field(default="@PlayOwnAi", description="Watermark text to display.")
+    watermark_opacity: int = Field(default=60, ge=0, le=255, description="Watermark opacity (0=invisible, 255=fully opaque).")
 
 class BarRaceVideoTool(BaseTool):
     name: str = "Bar Race Video Tool"
@@ -112,6 +115,9 @@ class BarRaceVideoTool(BaseTool):
         video_formats = kwargs.get("video_formats", ["Shorts"])
         seconds_per_period = kwargs.get("seconds_per_period", 4.0)
         n_bars_input = kwargs.get("n_bars") or None  # None = use format-based default
+        watermark_enabled = kwargs.get("watermark_enabled", False)
+        watermark_text    = kwargs.get("watermark_text", "@PlayOwnAi")
+        watermark_opacity = int(kwargs.get("watermark_opacity", 60))
 
         if isinstance(video_formats, str):
             video_formats = [video_formats.strip()]
@@ -209,6 +215,11 @@ class BarRaceVideoTool(BaseTool):
 
                 pre_fig.canvas.mpl_connect('draw_event', on_draw)
 
+                # --- WATERMARK ---
+                if watermark_enabled:
+                    self._add_watermark(pre_fig, watermark_text, watermark_opacity,
+                                        int(fig_w * dpi), int(fig_h * dpi))
+
                 # Reserve space at top for suptitle
                 # Landscape (HD/2K/4K/8K): tight margins so bars use full width.
                 # Portrait (Shorts): more left room for rotated bar names.
@@ -272,3 +283,59 @@ class BarRaceVideoTool(BaseTool):
                 results.append(f"❌ {fmt}: {str(e)}")
 
         return "\n".join(results)
+
+    def _add_watermark(self, fig, text: str, opacity: int, width_px: int, height_px: int):
+        """
+        Add a semi-transparent centered watermark text to a matplotlib figure
+        using a PIL RGBA image composited as a figimage.
+        """
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            import numpy as np
+
+            # Create transparent RGBA canvas same size as figure
+            wm_img = Image.new('RGBA', (width_px, height_px), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(wm_img)
+
+            # Font size: ~6% of width
+            font_size = max(24, int(width_px * 0.06))
+            font_paths = [
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+                '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+                '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf',
+                '/System/Library/Fonts/Helvetica.ttc',
+                'C:\\Windows\\Fonts\\arialbd.ttf',
+            ]
+            font = None
+            for fp in font_paths:
+                if os.path.exists(fp):
+                    try:
+                        font = ImageFont.truetype(fp, font_size)
+                        break
+                    except Exception:
+                        continue
+            if font is None:
+                font = ImageFont.load_default()
+
+            # Measure text and center it
+            bbox = draw.textbbox((0, 0), text, font=font)
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+            tx = (width_px - tw) // 2
+            ty = (height_px - th) // 2
+
+            # Draw watermark with configured opacity
+            draw.text((tx, ty), text, fill=(180, 180, 180, opacity), font=font)
+
+            # Convert to numpy RGBA array and overlay on figure
+            wm_array = np.array(wm_img).astype(float) / 255.0  # shape: (H, W, 4)
+
+            # figimage: bottom-left origin, so flip vertically
+            wm_array = wm_array[::-1]
+
+            fig.figimage(wm_array, xo=0, yo=0, alpha=1.0, zorder=10, origin='lower')
+
+        except ImportError:
+            print("⚠️  Pillow not installed — watermark skipped. Run: pip install Pillow")
+        except Exception as e:
+            print(f"⚠️  Watermark error: {e}")
