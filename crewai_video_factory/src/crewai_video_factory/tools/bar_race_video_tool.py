@@ -64,8 +64,20 @@ class BarRaceVideoTool(BaseTool):
         import json
         if hasattr(self, '_label_mapping_cache'):
             return self._label_mapping_cache
-        json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "label_mappings.json")
-        if os.path.exists(json_path):
+        # Search for label_mappings.json in multiple locations:
+        # 1. Same dir as this tool file
+        # 2. Project data/ folder (walk up from tool to find project root)
+        tool_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(tool_dir, "label_mappings.json"),                          # next to tool
+            os.path.join(tool_dir, "..", "data", "label_mappings.json"),            # ../data/
+            os.path.join(tool_dir, "..", "..", "data", "label_mappings.json"),      # ../../data/
+            os.path.join(tool_dir, "..", "..", "..", "data", "label_mappings.json"),# ../../../data/
+        ]
+        json_path = next((p for p in candidates if os.path.exists(os.path.normpath(p))), None)
+        if json_path:
+            json_path = os.path.normpath(json_path)
+        if json_path and os.path.exists(json_path):
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     raw = json.load(f)
@@ -76,7 +88,7 @@ class BarRaceVideoTool(BaseTool):
             except Exception as e:
                 print(f"⚠️  Could not load label_mappings.json: {e}. Using empty mapping.")
         else:
-            print(f"⚠️  label_mappings.json not found at {json_path}. No label trimming applied.")
+            print(f"⚠️  label_mappings.json not found in any expected location. No label trimming applied.")
         self._label_mapping_cache = {}
         return self._label_mapping_cache
 

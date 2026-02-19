@@ -34,7 +34,7 @@
   },
   "fps": {
     "type": "number",
-    "description": "Speed parameter (seconds per period for bar_race, frames per second for others)",
+    "description": "Speed parameter (seconds per period for bar_race, frames per second for others) ex 1.0 = 12 sec, 2.0=22 sec , 2.5,3.0=27,33 sce,",
     "minimum": 0.1,
     "maximum": 30.0,
     "example": 0.5

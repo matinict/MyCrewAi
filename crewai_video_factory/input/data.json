@@ -5,12 +5,12 @@
   "granularity": "yearly",
   "animation_styles": ["bar_race"],
   "video_formats": ["Shorts","HD"],
-  "fps": 1.0,
+  "fps": 3.0,
   "use_existing_csv": true,
   "video_enabled": false,
   "bar_race_video_enabled": true,
   "audio_enabled": false,
-  "audio_speed": 0.9,
+  "audio_speed": 1.0,
   "merge_audio_video": false,
   "generate_youtube_metadata": false
 }
