@@ -26,7 +26,7 @@ class BarRaceInput(BaseModel):
         description="Video formats to generate: HD, 2K, 4K, 8K, Shorts, ShortsHD, Shorts4K"
     )
     seconds_per_period: float = Field(default=4.0, description="Animation speed (seconds per period).")
-    n_bars: int = Field(default=5, description="Number of bars to display.")
+    n_bars: int = Field(default=9, description="Number of bars to display.")
 
 class BarRaceVideoTool(BaseTool):
     name: str = "Bar Race Video Tool"
@@ -59,14 +59,30 @@ class BarRaceVideoTool(BaseTool):
 
         return (w_px / dpi, h_px / dpi)
 
+    def _load_label_mappings(self) -> dict:
+        """Load label mappings from label_mappings.json (cached after first load)."""
+        import json
+        if hasattr(self, '_label_mapping_cache'):
+            return self._label_mapping_cache
+        json_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "label_mappings.json")
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    raw = json.load(f)
+                # Support nested {"bar_race_labels": {...}} or flat {"Label": "Short"} format
+                self._label_mapping_cache = raw.get("bar_race_labels", raw)
+                print(f"✅ Loaded {len(self._label_mapping_cache)} label mappings from label_mappings.json")
+                return self._label_mapping_cache
+            except Exception as e:
+                print(f"⚠️  Could not load label_mappings.json: {e}. Using empty mapping.")
+        else:
+            print(f"⚠️  label_mappings.json not found at {json_path}. No label trimming applied.")
+        self._label_mapping_cache = {}
+        return self._label_mapping_cache
+
     def _trim_label(self, label: str) -> str:
-        """Trim labels for bar race videos."""
-        mapping = {
-            "JavaScript": "JS", "Microsoft": "MS", "Google": "Gle", "Amazon": "AMZ",
-            "Apple": "APL", "Meta": "MTA", "NVIDIA": "NVD", "Tesla": "TS",
-            "Transformer": "TFormer", "Shiba Inu": "SHIB"
-        }
-        return mapping.get(label, label)
+        """Trim labels using mappings loaded from label_mappings.json."""
+        return self._load_label_mappings().get(label, label)
 
     def _run(self, **kwargs) -> str:
         # --- 1. SETUP FFMPEG ---
@@ -83,7 +99,7 @@ class BarRaceVideoTool(BaseTool):
         title_text = kwargs.get("title", "Data Visualization").strip()
         video_formats = kwargs.get("video_formats", ["Shorts"])
         seconds_per_period = kwargs.get("seconds_per_period", 4.0)
-        n_bars = kwargs.get("n_bars", 5)
+        n_bars_input = kwargs.get("n_bars", None)  # None = use format-based default
 
         if isinstance(video_formats, str):
             video_formats = [video_formats.strip()]
@@ -118,6 +134,8 @@ class BarRaceVideoTool(BaseTool):
                 # Per-format font multiplier: HD -10%, Shorts/portrait +10%, others neutral
                 is_portrait = fig_h > fig_w
                 font_mult = 1.10 if is_portrait else 0.90
+                # Format-aware n_bars: Shorts=9, HD/landscape=7 (user override takes priority)
+                n_bars = n_bars_input if n_bars_input else (9 if is_portrait else 7)
 
                 title_size       = int(54  * scale_factor * font_mult)
                 bar_label_size   = int(43  * scale_factor * font_mult)  # value numbers at bar end
@@ -170,7 +188,7 @@ class BarRaceVideoTool(BaseTool):
                         return
                     for lbl in ax.get_yticklabels():
                         lbl.set_fontsize(bar_name_size)
-                        lbl.set_rotation(45)
+                        lbl.set_rotation(70)
                         lbl.set_ha('right')
                         lbl.set_va('center')
                     # Also re-enforce x-axis size in case bcr reset it
@@ -182,15 +200,23 @@ class BarRaceVideoTool(BaseTool):
                 # Reserve space at top for suptitle
                 # Landscape (HD/2K/4K/8K): tight margins so bars use full width.
                 # Portrait (Shorts): more left room for rotated bar names.
-                left_margin  = 0.12 if is_portrait else 0.10
-                right_margin = 0.95 if is_portrait else 0.97
-                pre_fig.subplots_adjust(top=0.82, bottom=0.02, left=left_margin, right=right_margin)
+                if is_portrait:
+                    top_margin   = 0.93
+                    left_margin  = 0.12
+                    right_margin = 0.95
+                else:
+                    top_margin   = 0.85
+                    left_margin  = 0.08
+                    right_margin = 0.97
+                pre_fig.subplots_adjust(top=top_margin, bottom=0.02, left=left_margin, right=right_margin)
+                # y set to just above top_margin so title sits ~1px above axes
+                title_y = top_margin + (1.0 - top_margin) * 0.5
                 pre_fig.suptitle(
                     title_text,
                     fontsize=title_size,
                     fontweight="bold",
-                    y=0.97,
-                    va='top',
+                    y=title_y,
+                    va='bottom',
                 )
 
                 output_path = os.path.join(output_dir, f"bar_race_{fmt}.mp4")
