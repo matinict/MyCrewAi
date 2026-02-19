@@ -115,12 +115,16 @@ class BarRaceVideoTool(BaseTool):
                 scale_factor = width_px / 1920
 
                 # Dynamic font scaling
-                title_size       = int(80  * scale_factor)
-                bar_label_size   = int(60  * scale_factor)  # value numbers at bar end
-                tick_label_size  = int(30  * scale_factor)  # passed to bcr (will be overridden below)
-                x_tick_label_size= int(60  * scale_factor)  # x-axis scale numbers (0, 25, 50...)
-                bar_name_size    = int(38  * scale_factor)  # y-axis bar names — applied via draw_event
-                period_label_size= int(90  * scale_factor)
+                # Per-format font multiplier: HD -10%, Shorts/portrait +10%, others neutral
+                is_portrait = fig_h > fig_w
+                font_mult = 1.10 if is_portrait else 0.90
+
+                title_size       = int(54  * scale_factor * font_mult)
+                bar_label_size   = int(43  * scale_factor * font_mult)  # value numbers at bar end
+                tick_label_size  = int(22  * scale_factor * font_mult)  # passed to bcr (will be overridden below)
+                x_tick_label_size= int(43  * scale_factor * font_mult)  # x-axis scale numbers (0, 25, 50...)
+                bar_name_size    = int(27  * scale_factor * font_mult)  # y-axis bar names — applied via draw_event
+                period_label_size= int(65  * scale_factor * font_mult)
 
                 plt.rcParams.update({
                     "axes.titlesize": title_size,
@@ -176,7 +180,11 @@ class BarRaceVideoTool(BaseTool):
                 pre_fig.canvas.mpl_connect('draw_event', on_draw)
 
                 # Reserve space at top for suptitle
-                pre_fig.subplots_adjust(top=0.82, left=0.18)  # left margin for rotated names
+                # Landscape (HD/2K/4K/8K): tight margins so bars use full width.
+                # Portrait (Shorts): more left room for rotated bar names.
+                left_margin  = 0.12 if is_portrait else 0.10
+                right_margin = 0.95 if is_portrait else 0.97
+                pre_fig.subplots_adjust(top=0.82, bottom=0.02, left=left_margin, right=right_margin)
                 pre_fig.suptitle(
                     title_text,
                     fontsize=title_size,
