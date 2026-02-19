@@ -15,6 +15,7 @@ class BarRaceAudioToolInput(BaseModel):
     video_formats: list = Field(..., description="List of video formats used (HD, Shorts, etc.)")
     bar_race_audio_enabled: bool = Field(default=False, description="Whether to generate bar race audio")
     audio_speed: float = Field(default=1.0, ge=0.7, le=1.3, description="Speech speed for HD. Shorts uses audio_speed+0.2.")
+    channel: str = Field(default="PlayOwnAi", description="Channel name for narration (e.g. PlayOwnAi). No @ prefix needed.")
 
 
 class BarRaceAudioTool(BaseTool):
@@ -39,6 +40,7 @@ class BarRaceAudioTool(BaseTool):
         video_formats: list,
         bar_race_audio_enabled: bool = False,
         audio_speed: float = 1.0,
+        channel: str = "PlayOwnAi",
     ) -> str:
 
         # --- IMMEDIATE SKIP ---
@@ -94,7 +96,7 @@ class BarRaceAudioTool(BaseTool):
             print(f"[BarRaceAudioTool]    parent_dir={parent_dir}, cwd={os.getcwd()}")
 
         # --- GENERATE NARRATION ---
-        narration = self._generate_narration(topic, csv_path)
+        narration = self._generate_narration(topic, csv_path, channel=channel)
         print(f"[BarRaceAudioTool] Narration length: {len(narration)} chars")
 
         # --- SAVE NARRATION TEXT (Shorts only) ---
@@ -123,7 +125,7 @@ class BarRaceAudioTool(BaseTool):
 
         # Narration variants
         narration_short = narration  # no points (already generated above)
-        narration_full  = self._generate_narration(topic, csv_path, with_points=True)
+        narration_full  = self._generate_narration(topic, csv_path, with_points=True, channel=channel)
 
         # Save HD cc_en
         if hd_videos:
@@ -180,7 +182,7 @@ class BarRaceAudioTool(BaseTool):
             summary += "\n\n⚠️ Some errors:\n" + "\n".join(errors)
         return summary
 
-    def _generate_narration(self, topic: str, csv_path: str | None, with_points: bool = False) -> str:
+    def _generate_narration(self, topic: str, csv_path: str | None, with_points: bool = False, channel: str = "PlayOwnAi") -> str:
         """Generate narration with one spoken line per year from CSV."""
         if csv_path and os.path.exists(csv_path):
             try:
@@ -196,13 +198,13 @@ class BarRaceAudioTool(BaseTool):
                 # Shorts: concise narration / HD: full narration
                 if not with_points:
                     parts = [
-                        "Welcome to PlayOwnAi.",
+                        f"Welcome to {channel}.",
                         f"{topic} Race {start_year} to {end_year}.",
                         "Basic trending idea. Let's landscape year by year.",
                     ]
                 else:
                     parts = [
-                        "Welcome to PlayOwnAi.",
+                        f"Welcome to {channel}.",
                         f"Today, we're exploring the {topic} Race from {start_year} to {end_year}.",
                         "This is for a basic idea about trending.",
                         "Let's see how the landscape evolved, year by year.",
@@ -242,13 +244,13 @@ class BarRaceAudioTool(BaseTool):
                     parts.extend([
                         f"And that brings us to {end_year}, where {final_leader} continues to lead the pack.",
                         "The evolution of technology and trends never stops.",
-                        "Subscribe to PlayOwnAi for more data-driven insights.",
+                        f"Subscribe to {channel} for more data-driven insights.",
                     ])
                 else:
                     parts.extend([
                         f"{end_year}. {final_leader} leads the pack.",
                         "Evolution of technology trends continuing.",
-                        "Subscribe to PlayOwnAi for more insights.",
+                        f"Subscribe to {channel} for more insights.",
                     ])
                 return " ".join(parts)
 
@@ -257,10 +259,10 @@ class BarRaceAudioTool(BaseTool):
 
         # Fallback
         return (
-            f"Welcome to PlayOwnAi. Today, we're exploring {topic} trends. "
+            f"Welcome to {channel}. Today, we're exploring {topic} trends. "
             "Let's see how the landscape evolved over time. "
             "The evolution of technology and trends continues. "
-            "Subscribe to PlayOwnAi for more insights."
+            f"Subscribe to {channel} for more insights."
         )
 
     def _generate_audio(self, text: str, output_path: str, speed: float):
