@@ -8,11 +8,12 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
   "crewai[anthropic,google-genai]==1.8.1",
   "crewai-tools>=0.17.0,<1.0.0",
-  "pydantic>=2.11.9,<2.12.0",
+  "pandas>=2.0.0,<3.0.0",  # Add this line
   "langchain-core==0.3.37",
   "matplotlib>=3.7.0",
   "bar_chart_race>=0.1.0",
   "litellm>=1.60.0",
+  "static-ffmpeg>=3.0",
 ]
 
 [tool.uv]
