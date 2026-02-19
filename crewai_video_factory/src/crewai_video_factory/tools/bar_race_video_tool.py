@@ -34,15 +34,32 @@ class BarRaceVideoTool(BaseTool):
     args_schema: Type[BaseModel] = BarRaceInput
 
     def _get_video_dimensions(self, video_format: str):
-        """Return figsize in INCHES for target pixel resolution at dpi=96."""
         fmt = video_format.strip()
+
         resolutions_px = {
-            "HD": (1920, 1080), "2K": (2560, 1440), "4K": (3840, 2160), "8K": (7680, 4320),
-            "Shorts": (1080, 1920), "ShortsHD": (1080, 1920), "Shorts4K": (2160, 3840),
+            "HD": (1920, 1080),
+            "2K": (2560, 1440),
+            "4K": (3840, 2160),
+            "8K": (7680, 4320),
+            "Shorts": (1080, 1920),
+            "ShortsHD": (1080, 1920),
+            "Shorts4K": (2160, 3840),
         }
-        dpi = 96
-        w_px, h_px = resolutions_px.get(fmt, (1920, 1080))
+
+        dpi = 100
+
+        if fmt not in resolutions_px:
+            fmt = "HD"
+
+        w_px, h_px = resolutions_px[fmt]
+
+        # Ensure pixel dimensions are divisible by 2 (required by ffmpeg h264 codec).
+        # If not even, ffmpeg silently adjusts width — causing the "2568 x 1080" bug.
+        w_px = w_px if w_px % 2 == 0 else w_px - 1
+        h_px = h_px if h_px % 2 == 0 else h_px - 1
+
         return (w_px / dpi, h_px / dpi)
+
 
     def _trim_label(self, label: str) -> str:
         """Trim labels for bar race videos."""
@@ -86,24 +103,32 @@ class BarRaceVideoTool(BaseTool):
         df_viz.columns = [self._trim_label(col) for col in df_viz.columns]
 
         results = []
+
         for fmt in video_formats:
             try:
-                base_figsize = self._get_video_dimensions(fmt)
-                # Increase physical rendering size for clearer text
-                figsize = (base_figsize[0] * 1.3, base_figsize[1] * 1.3)
-                dpi = 100  # Higher DPI = sharper + bigger text
+                # Get figure size (in inches)
+                figsize = self._get_video_dimensions(fmt)
 
-                is_vertical = fmt.startswith("Shorts")
+                # Convert to pixel width using dpi=100
+                dpi = 100
+                fig_w, fig_h = figsize
+                width_px = fig_w * dpi
 
-                # --- 4. STYLE CONFIGURATION ---
-                title_size = 65 if is_vertical else 85
-                bar_label_size = 55 if is_vertical else 75
-                tick_label_size = 55 if is_vertical else 75
+                # Scale relative to 1920 width
+                scale_factor = width_px / 1920
+
+                # Dynamic font scaling
+                title_size = int(70 * scale_factor)
+                bar_label_size = int(75 * scale_factor)
+                tick_label_size = int(75 * scale_factor)
+                period_label_size = int(120 * scale_factor)
 
                 plt.rcParams.update({
                     "axes.titlesize": title_size,
                     "axes.titleweight": "bold",
-                    "axes.titlepad": 50
+                    "axes.titlepad": 40,
+                    "figure.autolayout": False,
+                    "figure.constrained_layout.use": False,
                 })
 
                 def period_summary_func(values, ranks):
@@ -112,15 +137,14 @@ class BarRaceVideoTool(BaseTool):
                         'y': 0.08,
                         's': str(values.name.year),
                         'ha': 'right',
-                        'size': title_size,
+                        'size': period_label_size,
                         'color': '#FF4500',
                         'weight': 'bold'
                     }
 
-
                 output_path = os.path.join(output_dir, f"bar_race_{fmt}.mp4")
+                print(f"{fmt} Resolution: {int(fig_w*dpi)} x {int(fig_h*dpi)}")
 
-                # --- 5. RENDER ---
                 bcr.bar_chart_race(
                     df=df_viz,
                     filename=output_path,
@@ -136,12 +160,26 @@ class BarRaceVideoTool(BaseTool):
                     period_summary_func=period_summary_func,
                     bar_label_size=bar_label_size,
                     tick_label_size=tick_label_size,
+                    title_size=title_size,
                     writer='ffmpeg'
                 )
 
-
                 if os.path.exists(output_path):
+                    # Post-process: re-encode with exact pixel dimensions to fix any
+                    # size drift introduced by matplotlib's layout engine or ffmpeg h264.
+                    w_px = int(fig_w * dpi)
+                    h_px = int(fig_h * dpi)
+                    fixed_path = output_path.replace(".mp4", "_fixed.mp4")
+                    os.system(
+                        f'ffmpeg -y -i "{output_path}" '
+                        f'-vf "scale={w_px}:{h_px}" '
+                        f'-c:v libx264 -crf 18 -preset fast '
+                        f'"{fixed_path}" -loglevel error'
+                    )
+                    if os.path.exists(fixed_path):
+                        os.replace(fixed_path, output_path)
                     results.append(f"✅ {fmt}: {output_path}")
+
             except Exception as e:
                 results.append(f"❌ {fmt}: {str(e)}")
 
