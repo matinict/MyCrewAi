@@ -94,3 +94,15 @@ intro_clip_producer:
     for data visualization videos. Generates polished intro clips showing the channel name,
     topic, and year range for each video format (HD, Shorts, 2K, 4K). Supports optional
     watermark overlay. Skips instantly when intro_enabled is false.
+
+bar_merge_specialist:
+  role: >
+    Bar Race Final Video Specialist
+  goal: >
+    Concatenate intro clip and bar race video, then merge with audio
+    into a single final MP4 per format when bar_merge_enabled=true
+  backstory: >
+    Multimedia pipeline expert specializing in combining video segments and
+    audio tracks into polished final outputs using ffmpeg. Handles intro
+    concatenation and audio merging in one efficient pass per format.
+    Skips instantly when bar_merge_enabled is false.

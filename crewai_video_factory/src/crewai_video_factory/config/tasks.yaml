@@ -111,7 +111,7 @@ create_bar_race_video:
     - Multiple format support (Shorts, HD, 2K, 4K)
 
     Output files go to topic subdirectory with naming:
-    - bar_race_[format]_bar_race_[format].mp4
+    - bar_race_[format].mp4
     - All videos go to output/{filename}/ subdirectory
   inputs:
     csv_filepath: "{{ inputs.csv_path }}"
@@ -246,3 +246,33 @@ create_intro_clip:
     List of intro clip files created, OR skip message if disabled.
     Example: "🎬 Intro clips created:\n   • intro_Shorts.mp4 (1024 KB)\n   • intro_HD.mp4 (2048 KB)"
   agent: intro_clip_producer
+
+bar_merge:
+  description: >
+    Concatenate intro clip + bar race video, then merge with bar race audio
+    into a single final MP4 per format in {video_formats}.
+    This task will automatically skip if bar_merge_enabled is false in inputs.
+
+    Pipeline per format (where [format] is each entry in {video_formats}):
+      intro_[format].mp4
+        +
+      bar_race_[format].mp4
+        → ffmpeg concat → combined temp file
+        +
+      bar_race_[format]_audio.mp3
+        → ffmpeg merge → Merge_bar_race_[format].mp4
+
+    CRITICAL — call the Bar Merge Tool with EXACTLY these values:
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      bar_merge_enabled: {bar_merge_enabled}
+
+    Output files go to {output_dir}/Merge_bar_race_[format].mp4
+    Example: output/LLMTuningMethods/Merge_bar_race_Shorts.mp4
+             output/LLMTuningMethods/Merge_bar_race_HD.mp4
+  expected_output: >
+    List of final merged files created, OR skip message if disabled.
+    Example: "🎬 Bar merge completed (2/2 formats).
+       • Merge_bar_race_Shorts.mp4 (12.3 MB)
+       • Merge_bar_race_HD.mp4 (48.7 MB)"
+  agent: bar_merge_specialist

@@ -149,10 +149,10 @@ def run():
             final_tasks.append(full_crew.tasks[2])  # create_video
 
         # crew.py task index map:
-        # [0] research_data  [1] generate_csv     [2] create_video
-        # [3] create_bar_race_video                [4] create_intro_clip
-        # [5] add_bar_race_audio                   [6] add_audio
-        # [7] merge_audio_video                    [8] generate_youtube_metadata
+        # [0] research_data       [1] generate_csv          [2] create_video
+        # [3] create_bar_race_video  [4] create_intro_clip  [5] add_bar_race_audio
+        # [6] add_audio           [7] merge_audio_video     [8] generate_youtube_metadata
+        # [9] bar_merge
 
         # 🆕 Conditional bar race video
         if inputs.get('bar_race_video_enabled', False):
@@ -165,6 +165,10 @@ def run():
         # 🆕 Conditional bar race audio
         if inputs.get('bar_race_audio_enabled', False):
             final_tasks.append(full_crew.tasks[5])  # add_bar_race_audio
+
+        # 🆕 Conditional bar merge (intro + bar race video + audio → final)
+        if inputs.get('bar_merge_enabled', False):
+            final_tasks.append(full_crew.tasks[9])  # bar_merge
 
         if inputs.get('audio_enabled', False):
             final_tasks.append(full_crew.tasks[6])  # add_audio
@@ -244,6 +248,15 @@ def run():
                     merged_file = f"{output_dir}/bar_race_{fmt}_bar_race_{fmt}_with_audio.mp4"
                     if os.path.exists(merged_file):
                         print(f"      ✅ {merged_file}")
+
+        if inputs.get('bar_merge_enabled', False):
+            print(f"   Bar Merged (Final):")
+            for fmt in inputs['video_formats']:
+                final_file = f"{output_dir}/bar_race_{fmt}_final.mp4"
+                if os.path.exists(final_file):
+                    print(f"      ✅ {final_file}")
+                else:
+                    print(f"      ❌ Not found: {final_file}")
 
         if inputs.get('generate_youtube_metadata', False):
             print(f"   YouTube Metadata:")

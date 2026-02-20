@@ -206,7 +206,7 @@ class BarRaceVideoTool(BaseTool):
                         return
                     for lbl in ax.get_yticklabels():
                         lbl.set_fontsize(bar_name_size)
-                        lbl.set_rotation(70)
+                        lbl.set_rotation(80)
                         lbl.set_ha('right')
                         lbl.set_va('center')
                     # Also re-enforce x-axis size in case bcr reset it

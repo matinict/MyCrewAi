@@ -11,6 +11,10 @@ from crewai_video_factory.tools.bar_race_audio_tool import BarRaceAudioTool
 from crewai_video_factory.tools.intro_clip_tool import IntroClipTool
 from crewai_video_factory.tools.merge_tool import MergeAudioVideoTool
 from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool
+# crew.py
+from crewai_video_factory.tools.bar_merge_tool import BarMergeTool
+
+
 
 @CrewBase
 class CrewaiVideoFactory:
@@ -94,6 +98,10 @@ class CrewaiVideoFactory:
             tools=[YouTubeMetadataTool()],
             verbose=True
         )
+    @agent
+    def bar_merge_specialist(self) -> Agent:
+        return Agent(config=self.agents_config['bar_merge_specialist'], tools=[BarMergeTool()], verbose=True)
+
 
     @task
     def research_data(self) -> Task:
@@ -151,6 +159,9 @@ class CrewaiVideoFactory:
         return Task(
             config=self.tasks_config['generate_youtube_metadata'],
         )
+    @task
+    def bar_merge(self) -> Task:
+        return Task(config=self.tasks_config['bar_merge'])
 
     @crew
     def crew(self) -> Crew:
