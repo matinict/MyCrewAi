@@ -26,6 +26,7 @@ class BarRaceInput(BaseModel):
         description="Video formats to generate: HD, 2K, 4K, 8K, Shorts, ShortsHD, Shorts4K"
     )
     seconds_per_period: float = Field(default=4.0, description="Animation speed (seconds per period).")
+    fps_hd_offset: float = Field(default=1.0, description="Multiplier for landscape formats (HD/2K/4K/8K). e.g. 1.27 makes HD 27% longer than Shorts.")
     n_bars: Optional[int] = Field(default=None, description="Number of bars to display. None = auto (Shorts:9, HD:7)")
     use_label_mappings: bool = Field(default=True, description="Apply label_mappings.json abbreviations to bar labels. Set false to show full names.")
     watermark_enabled: bool = Field(default=False, description="Overlay semi-transparent watermark text on video.")
@@ -120,6 +121,7 @@ class BarRaceVideoTool(BaseTool):
         title_text = kwargs.get("title", "Data Visualization").strip()
         video_formats = kwargs.get("video_formats", ["Shorts"])
         seconds_per_period = kwargs.get("seconds_per_period", 4.0)
+        fps_hd_offset = float(kwargs.get("fps_hd_offset", 1.0))
         n_bars_input = kwargs.get("n_bars") or None  # None = use format-based default
         use_label_mappings = kwargs.get("use_label_mappings", True)
         watermark_enabled = kwargs.get("watermark_enabled", False)
@@ -251,12 +253,15 @@ class BarRaceVideoTool(BaseTool):
 
                 output_path = os.path.join(output_dir, f"bar_race_{fmt}.mp4")
                 n_periods = len(df_viz)
-                total_frames = n_periods * int(seconds_per_period * 15)
+                fmt_spp = seconds_per_period if is_portrait else seconds_per_period * fps_hd_offset
+                if not is_portrait and fps_hd_offset != 1.0:
+                    print(f"   ⚙️  [{fmt}] spp {seconds_per_period:.2f}s × fps_hd_offset {fps_hd_offset} = {fmt_spp:.2f}s/period")
+                total_frames = n_periods * int(fmt_spp * 15)
                 est_secs = total_frames / 15
                 print(f"")
                 print(f"🎬 [{fmt}] Starting render")
                 print(f"   Resolution : {int(fig_w*dpi)} x {int(fig_h*dpi)}")
-                print(f"   Periods    : {n_periods}  |  spp: {seconds_per_period:.1f}s  |  Frames: {total_frames}")
+                print(f"   Periods    : {n_periods}  |  spp: {fmt_spp:.2f}s  |  Frames: {total_frames}")
                 print(f"   ⏱️  Estimated: ~{est_secs/60:.1f} min ({est_secs:.0f}s) — please wait …")
                 import time as _time
                 import threading as _threading
@@ -322,8 +327,8 @@ class BarRaceVideoTool(BaseTool):
                         orientation="h",
                         sort="desc",
                         n_bars=n_bars,
-                        steps_per_period=int(seconds_per_period * 15),
-                        period_length=int(seconds_per_period * 1000),
+                        steps_per_period=int(fmt_spp * 15),
+                        period_length=int(fmt_spp * 1000),
                         fig=pre_fig,
                         title=title_text,
                         period_label=False,
@@ -343,7 +348,7 @@ class BarRaceVideoTool(BaseTool):
                 if os.path.exists(output_path):
                     w_px = int(fig_w * dpi)
                     h_px = int(fig_h * dpi)
-                    hold_secs = seconds_per_period * 2
+                    hold_secs = fmt_spp * 2
                     print(f"   🔧 Re-encoding {w_px}x{h_px}, holding last frame {hold_secs:.1f}s …")
                     fixed_path = output_path.replace(".mp4", "_fixed.mp4")
                     os.system(
