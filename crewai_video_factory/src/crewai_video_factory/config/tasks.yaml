@@ -168,21 +168,24 @@ generate_youtube_metadata:
     - YouTube: @{channel}
     - LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
 
-    Parameters:
-    - Topic: {topic}
-    - Year Range: {start} to {end}
-    - Video Duration: Calculate from {fps} and data points
-    - Language: English (en) - extensible to other languages
-
-    Social Media Links:
-    - YouTube: @{channel}
-    - Facebook: facebook.com/{channel}
-    - Website: {website}
+    CRITICAL — call the YouTube Metadata Tool with EXACTLY these values:
+      topic: "{topic}"
+      filename: "{filename}"
+      output_dir: "{output_dir}"
+      start_year: {start}
+      end_year: {end}
+      channel: "{channel}"
+      channel_lower: "{channel_lower}"
+      website: "{website}"
+      video_formats: {video_formats}
+      fps: {fps}
+      fps_hd_offset: {fps_hd_offset}
+      generate_youtube_metadata: {generate_youtube_metadata}
   expected_output: >
     Confirmation of metadata files created:
-    - {filename}_cc_en.txt (Narration/Closed Captions)
-    - {filename}_YouTube_Metadata.json
-    - {filename}_YouTube_Metadata.txt
+    - cc_en.txt (Narration/Closed Captions)
+    - YouTube_Metadata.json
+    - YouTube_Metadata.txt
   agent: youtube_metadata_specialist
   context:
     - generate_csv
@@ -260,6 +263,8 @@ bar_merge:
       output_dir: "{output_dir}"
       video_formats: {video_formats}
       bar_merge_enabled: {bar_merge_enabled}
+      channel: "{channel}"
+      topic: "{topic}"
 
     Output files go to {output_dir}/Merge_bar_race_[format].mp4
     Example: output/LLMTuningMethods/Merge_bar_race_Shorts.mp4

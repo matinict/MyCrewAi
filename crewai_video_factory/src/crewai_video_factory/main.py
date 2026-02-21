@@ -149,15 +149,9 @@ def run():
             final_tasks.append(full_crew.tasks[2])  # create_video
 
         # crew.py task index map:
-        # [0] research_data       [1] generate_csv          [2] create_video
-        # [3] create_bar_race_video  [4] create_intro_clip  [5] add_bar_race_audio
-        # [6] add_audio           [7] merge_audio_video     [8] generate_youtube_metadata
-        # [9] bar_merge
-
-        # crew.py task index map:
-        # [0] research_data        [1] generate_csv         [2] create_video
-        # [3] create_bar_race_video [4] create_intro_clip   [5] bar_merge
-        # [6] add_bar_race_audio   [7] add_audio            [8] merge_audio_video
+        # [0] research_data          [1] generate_csv            [2] create_video
+        # [3] create_bar_race_video  [4] create_intro_clip       [5] bar_merge
+        # [6] add_bar_race_audio     [7] add_audio               [8] merge_audio_video
         # [9] generate_youtube_metadata
 
         if inputs.get('bar_race_video_enabled', False):
@@ -253,8 +247,10 @@ def run():
 
         if inputs.get('bar_merge_enabled', False):
             print(f"   Bar Merged (Final):")
+            import re as _re
+            topic_slug = "_".join(_re.findall(r"\w+", inputs["topic"])[:4])
             for fmt in inputs['video_formats']:
-                final_file = f"{output_dir}/bar_race_{fmt}_final.mp4"
+                final_file = f"{output_dir}/{inputs['channel']}_{topic_slug}_{fmt}.mp4"
                 if os.path.exists(final_file):
                     print(f"      ✅ {final_file}")
                 else:
@@ -264,8 +260,8 @@ def run():
             print(f"   YouTube Metadata:")
             metadata_files = [
                 f"{output_dir}/cc_en.txt",
-                f"{output_dir}/YouTube_Metadata.json",
-                f"{output_dir}/YouTube_Metadata.txt",
+                f"{output_dir}/YT_Metadata.json",
+                f"{output_dir}/YT_Metadata.txt",
             ]
             for mf in metadata_files:
                 if os.path.exists(mf):

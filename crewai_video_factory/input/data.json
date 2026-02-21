@@ -1,5 +1,5 @@
 {
-  "topic": "LLM Tuning Methods",
+  "topic": "LLM Trainning Methods",
   "start": 2015,
   "end": 2026,
   "granularity": "yearly",
@@ -7,7 +7,7 @@
     "bar_race"
   ],
   "video_formats": [
-    "HD"
+    "Shorts"
   ],
   "use_label_mappings": false,
   "fps": 4.9,
@@ -15,8 +15,8 @@
   "use_existing_csv": true,
   "bar_race_video_enabled": false,
   "bar_race_audio_enabled": false,
-  "bar_merge_enabled": false,
-  "intro_enabled": false,
+  "bar_merge_enabled": true,
+  "intro_enabled": true,
   "intro_duration": 10,
   "intro_duration_hd": 15,
   "video_enabled": false,
@@ -24,7 +24,7 @@
   "audio_speed": 1.2,
   "audio_speed_hd": 1.1,
   "merge_audio_video": false,
-  "generate_youtube_metadata": true,
+  "generate_youtube_metadata": false,
   "channel": "PlayOwnAi",
   "channel_lower": "playownai",
   "website": "youtube.com/@PlayOwnAi",

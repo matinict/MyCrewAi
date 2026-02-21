@@ -15,6 +15,13 @@ class YouTubeMetadataToolInput(BaseModel):
     video_duration: float = Field(default=60.0, description="Video duration in seconds")
     generate_narration: bool = Field(default=True, description="Whether to generate narration text")
     generate_youtube_metadata: bool = Field(default=True, description="Whether to generate YouTube metadata")
+    channel: str = Field(default="PlayOwnAi", description="YouTube channel name without @ prefix")
+    channel_lower: str = Field(default="playownai", description="Lowercase channel name for LinkedIn/URLs")
+    website: str = Field(default="youtube.com/@PlayOwnAi", description="Website URL for description")
+    video_formats: list = Field(default=[], description="Video formats used (HD, Shorts, etc.) — for cleanup")
+    fps: float = Field(default=4.9, description="Seconds per period (Shorts speed)")
+    fps_hd_offset: float = Field(default=1.0, description="Multiplier for HD duration vs Shorts")
+    n_periods: int = Field(default=0, description="Number of data rows/periods in CSV (0=auto-detect)")
 
 
 class YouTubeMetadataTool(BaseTool):
@@ -31,36 +38,99 @@ class YouTubeMetadataTool(BaseTool):
         end_year: int = 2026,
         video_duration: float = 60.0,
         generate_narration: bool = True,
-        generate_youtube_metadata: bool = True
+        generate_youtube_metadata: bool = True,
+        channel: str = "PlayOwnAi",
+        channel_lower: str = "playownai",
+        website: str = "youtube.com/@PlayOwnAi",
+        video_formats: list = None,
+        fps: float = 4.9,
+        fps_hd_offset: float = 1.0,
+        n_periods: int = 0,
     ) -> str:
-        # 🔑 KEY: Get output_dir from inputs (passed from main.py)
+        import time as _time
+        t0 = _time.time()
+
+        print(f"[YTMetadata] ▶ Starting — topic='{topic}' channel='{channel}'")
+        print(f"[YTMetadata]   output_dir : {output_dir}")
+        print(f"[YTMetadata]   years      : {start_year}–{end_year}")
+        print(f"[YTMetadata]   narration  : {generate_narration}  |  metadata: {generate_youtube_metadata}")
+
         os.makedirs(output_dir, exist_ok=True)
-
-        # 🔑 KEY: Get clean_filename from inputs (consistent across all tools)
-        #clean_filename = getattr(self, '_inputs', {}).get('filename', 'ProgrammingLanguage')
         clean_filename = filename
-
         results = []
 
         if generate_narration:
-            narration_result = self._generate_narration_file(topic, start_year, end_year, output_dir, clean_filename)
+            print(f"[YTMetadata] 📝 Step 1/2 — Generating narration text …")
+            t1 = _time.time()
+            narration_result = self._generate_narration_file(
+                topic, start_year, end_year, output_dir, clean_filename, channel=channel)
+            print(f"[YTMetadata] ✅ Narration done in {_time.time()-t1:.1f}s → {narration_result}")
             results.append(narration_result)
 
         if generate_youtube_metadata:
-            metadata_result = self._generate_youtube_metadata(topic, start_year, end_year, video_duration, output_dir, clean_filename)
+            print(f"[YTMetadata] 🎬 Step 2/2 — Generating YouTube metadata per format …")
+            t2 = _time.time()
+
+            # Auto-detect n_periods from CSV if not provided
+            actual_periods = n_periods
+            if actual_periods <= 0:
+                try:
+                    import pandas as pd
+                    _df = pd.read_csv(f"output/{clean_filename}.csv")
+                    actual_periods = len(_df)
+                    print(f"[YTMetadata]   Auto-detected n_periods={actual_periods} from CSV")
+                except Exception:
+                    actual_periods = end_year - start_year + 1
+                    print(f"[YTMetadata]   Fallback n_periods={actual_periods} from year range")
+
+            fmts = video_formats if video_formats else ["Shorts"]
+            title = self._generate_youtube_title(topic, start_year, end_year, channel=channel)
+            tags  = self._generate_youtube_tags(topic, channel=channel)
+            print(f"[YTMetadata]   • Title: {title}")
+            print(f"[YTMetadata]   • Tags: {len(tags)} tags")
+
+            fmt_results = []
+            for fmt in fmts:
+                fmt = fmt.strip()
+                is_portrait = fmt in ("Shorts", "ShortsHD", "Shorts4K")
+                fmt_spp = fps if is_portrait else fps * fps_hd_offset
+                # Duration = periods * spp + hold (2 * spp)
+                fmt_duration = actual_periods * fmt_spp + fmt_spp * 2
+                print(f"[YTMetadata]   • [{fmt}] spp={fmt_spp:.2f}s × {actual_periods} periods + hold = {fmt_duration:.1f}s")
+
+                description = self._generate_youtube_description(
+                    topic, start_year, end_year, fmt_duration,
+                    channel=channel, channel_lower=channel_lower, website=website)
+                chapters = self._generate_youtube_chapters(start_year, end_year, fmt_duration)
+                print(f"[YTMetadata]   • [{fmt}] Chapters: {chapters.count(chr(10))+1} entries")
+
+                meta_result = self._write_metadata_files(
+                    topic, title, description, tags, chapters, output_dir, fmt=fmt)
+                fmt_results.append(meta_result)
+
+            metadata_result = "\n".join(fmt_results)
+            print(f"[YTMetadata] ✅ Metadata done in {_time.time()-t2:.1f}s")
             results.append(metadata_result)
+
+        print(f"[YTMetadata] 🏁 Metadata done in {_time.time()-t0:.1f}s")
+
+        # --- Final cleanup: delete temp files, rename merged videos ---
+        self._cleanup_and_rename(output_dir, video_formats or [], channel, topic)
 
         return "\n\n".join(results)
 
-    def _generate_narration_file(self, topic: str, start_year: int, end_year: int, output_dir: str, clean_filename: str) -> str:
+    def _generate_narration_file(self, topic: str, start_year: int, end_year: int, output_dir: str, clean_filename: str, channel: str = "PlayOwnAi") -> str:
         """Generate professional narration text file from CSV data"""
         csv_path = f"output/{clean_filename}.csv"
         narration_text = ""
 
+        print(f"[YTMetadata]   CSV path: {csv_path} (exists={os.path.exists(csv_path)})")
         if os.path.exists(csv_path):
             try:
+                print(f"[YTMetadata]   Reading CSV …")
                 import pandas as pd
                 df = pd.read_csv(csv_path)
+                print(f"[YTMetadata]   CSV loaded: {len(df)} rows × {len(df.columns)} cols")
 
                 time_col = df.columns[0]
                 data_cols = df.columns[1:]
@@ -77,7 +147,7 @@ class YouTubeMetadataTool(BaseTool):
                     yearly_leaders.append((year, leader, value))
 
                 narration_parts = [
-                    "Welcome to @PlayOwnAi.",
+                    f"Welcome to @{channel}.",
                     f"Today, we're exploring {topic} Race from {start_year} to {end_year}.",
                     "Only for basic idea about trending",
                     "Let's see how the landscape evolved over time."
@@ -96,15 +166,15 @@ class YouTubeMetadataTool(BaseTool):
                 final_year, final_leader, _ = yearly_leaders[-1]
                 narration_parts.append(f"And in {final_year}, {final_leader} continues to lead.")
                 narration_parts.append("The evolution of technology and trends continues.")
-                narration_parts.append("Subscribe to @PlayOwnAi for more insights.")
+                narration_parts.append(f"Subscribe to @{channel} for more insights.")
 
                 narration_text = " ".join(narration_parts)
 
             except Exception as e:
                 print(f"[WARN] CSV reading failed: {e}")
-                narration_text = self._get_fallback_narration(topic, start_year, end_year)
+                narration_text = self._get_fallback_narration(topic, start_year, end_year, channel=channel)
         else:
-            narration_text = self._get_fallback_narration(topic, start_year, end_year)
+            narration_text = self._get_fallback_narration(topic, start_year, end_year, channel=channel)
 
         # 🔑 KEY: Save in topic subdirectory as cc_en.txt
         narration_file_path = f"{output_dir}/cc_en.txt"
@@ -113,14 +183,16 @@ class YouTubeMetadataTool(BaseTool):
 
         return f"📝 Narration text saved to: cc_en.txt"
 
-    def _generate_youtube_metadata(self, topic: str, start_year: int, end_year: int, video_duration: float, output_dir: str, clean_filename: str) -> str:
-        """Generate YouTube metadata with SEO optimization"""
+    def _generate_youtube_metadata(self, topic: str, start_year: int, end_year: int, video_duration: float, output_dir: str, clean_filename: str, channel: str = "PlayOwnAi", channel_lower: str = "playownai", website: str = "youtube.com/@PlayOwnAi") -> str:
+        """Generate YouTube metadata with SEO optimization (legacy path — called directly)."""
+        title       = self._generate_youtube_title(topic, start_year, end_year, channel=channel)
+        description = self._generate_youtube_description(topic, start_year, end_year, video_duration, channel=channel, channel_lower=channel_lower, website=website)
+        tags        = self._generate_youtube_tags(topic, channel=channel)
+        chapters    = self._generate_youtube_chapters(start_year, end_year, video_duration)
+        return self._write_metadata_files(topic, title, description, tags, chapters, output_dir)
 
-        title = self._generate_youtube_title(topic, start_year, end_year)
-        description = self._generate_youtube_description(topic, start_year, end_year, video_duration)
-        tags = self._generate_youtube_tags(topic)
-        chapters = self._generate_youtube_chapters(start_year, end_year, video_duration)
-
+    def _write_metadata_files(self, topic: str, title: str, description: str, tags: list, chapters: str, output_dir: str, fmt: str = "") -> str:
+        """Write JSON + TXT metadata files to output_dir, with optional per-format suffix."""
         metadata = {
             "title": title,
             "description": description,
@@ -130,20 +202,18 @@ class YouTubeMetadataTool(BaseTool):
             "language": "en",
             "created_at": datetime.now().isoformat()
         }
-
-        metadata_json_path = f"{output_dir}/YouTube_Metadata.json"
+        suffix = f"_{fmt}" if fmt else ""
+        metadata_json_path = f"{output_dir}/YT_Metadata{suffix}.json"
         with open(metadata_json_path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
-
-        metadata_txt_path = f"{output_dir}/YouTube_Metadata.txt"
+        metadata_txt_path = f"{output_dir}/YT_Metadata{suffix}.txt"
         with open(metadata_txt_path, 'w', encoding='utf-8') as f:
             f.write(f"TITLE:\n{title}\n\n")
             f.write(f"DESCRIPTION:\n{description}\n\n")
             f.write(f"TAGS:\n{', '.join(tags)}\n\n")
             f.write(f"CHAPTERS:\n{chapters}\n")
-
-        return f"🎬 YouTube metadata saved to:\n   • YouTube_Metadata.json\n   • YouTube_Metadata.txt"
-    def _generate_youtube_title(self, topic: str, start_year: int, end_year: int) -> str:
+        return f"🎬 [{fmt or'all'}] YT_Metadata{suffix}.json + YT_Metadata{suffix}.txt"
+    def _generate_youtube_title(self, topic: str, start_year: int, end_year: int, channel: str = "PlayOwnAi") -> str:
         """Generate SEO-optimized YouTube title"""
 
         title_templates = [
@@ -164,14 +234,14 @@ class YouTubeMetadataTool(BaseTool):
         else:
             return title_templates[1]
 
-    def _generate_youtube_description(self, topic: str, start_year: int, end_year: int, video_duration: float) -> str:
+    def _generate_youtube_description(self, topic: str, start_year: int, end_year: int, video_duration: float, channel: str = "PlayOwnAi", channel_lower: str = "playownai", website: str = "youtube.com/@PlayOwnAi") -> str:
         """Generate SEO-optimized YouTube description"""
 
         description = f"""🎬 {topic} Race {start_year}-{end_year}: Complete Data Visualization
 
 📊 In this video, we explore the evolution of {topic} from {start_year} to {end_year}. Watch how the market leaders changed over time and discover which {topic.lower()} dominated each year!
 
-🔔 Subscribe to @PlayOwnAi for more data-driven insights and visualizations!
+🔔 Subscribe to @{channel} for more data-driven insights and visualizations!
 
 ⏱️ TIMESTAMPS:
 See chapters below for year-by-year breakdown.
@@ -186,12 +256,12 @@ This visualization is based on comprehensive market data tracking {topic.lower()
 • Competitive landscape evolution
 
 💡 ABOUT THIS CHANNEL:
-@PlayOwnAi creates professional data visualizations and insights on technology trends, market analysis, and industry evolution. Subscribe for weekly content!
+@{channel} creates professional data visualizations and insights on technology trends, market analysis, and industry evolution. Subscribe for weekly content!
 
 📱 FOLLOW US:
-• YouTube: @PlayOwnAi
-• LinkedIn: playownai | www.linkedin.com/company/playownai/
-• Website: playownai.com
+• YouTube: @{channel}
+• LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
+• Website: {website}
 
 #DataVisualization #{topic.replace(' ', '')} #MarketAnalysis #TechTrends #{start_year}To{end_year}
 
@@ -200,7 +270,7 @@ This visualization is based on comprehensive market data tracking {topic.lower()
 """
         return description.strip()
 
-    def _generate_youtube_tags(self, topic: str) -> list:
+    def _generate_youtube_tags(self, topic: str, channel: str = "PlayOwnAi") -> list:
         """Generate SEO-optimized YouTube tags"""
 
         base_tags = [
@@ -211,7 +281,7 @@ This visualization is based on comprehensive market data tracking {topic.lower()
             "animated chart",
             "bar chart race",
             "data animation",
-            "PlayOwnAi",
+            channel,
         ]
 
         topic_tags = [
@@ -259,10 +329,50 @@ This visualization is based on comprehensive market data tracking {topic.lower()
 
         return "\n".join(chapters)
 
-    def _get_fallback_narration(self, topic: str, start_year: int, end_year: int) -> str:
+    def _get_fallback_narration(self, topic: str, start_year: int, end_year: int, channel: str = "PlayOwnAi") -> str:
         """Fallback narration if CSV reading fails"""
         return (
-            f"Welcome to @PlayOwnAi. Today, we're exploring {topic} Race from {start_year} to {end_year}. "
+            f"Welcome to @{channel}. Today, we're exploring {topic} Race from {start_year} to {end_year}. "
             "Only for basic idea about trending. Let's see how the landscape evolved over time. "
-            "The evolution of technology and trends continues. Subscribe to @PlayOwnAi for more insights."
+            f"The evolution of technology and trends continues. Subscribe to @{channel} for more insights."
         )
+
+    def _cleanup_and_rename(self, output_dir: str, video_formats: list, channel: str, topic: str):
+        """
+        After all tasks complete:
+        1. Delete temp files: intro_*, bar_race_* videos & audio
+        2. Rename Merge_bar_race_[fmt].mp4 → {channel}_{topic_slug}_{fmt}.mp4
+        """
+        import re
+        topic_slug = "_".join(re.findall(r"\w+", topic)[:4]) if topic else "Video"
+
+        print(f"[YTMetadata] 🧹 Cleanup starting — formats={video_formats} topic_slug={topic_slug}")
+
+        # Files to delete per format
+        for fmt in video_formats:
+            fmt = fmt.strip()
+            to_delete = [
+                os.path.join(output_dir, f"intro_{fmt}.mp4"),
+                os.path.join(output_dir, f"bar_race_{fmt}.mp4"),
+                os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3"),
+            ]
+            for path in to_delete:
+                if os.path.exists(path):
+                    os.remove(path)
+                    print(f"[YTMetadata] 🗑️  Deleted: {os.path.basename(path)}")
+                else:
+                    print(f"[YTMetadata]    Skip (not found): {os.path.basename(path)}")
+
+        # Rename Merge_bar_race_[fmt].mp4 → {channel}_{topic_slug}_{fmt}.mp4
+        for fmt in video_formats:
+            fmt = fmt.strip()
+            src = os.path.join(output_dir, f"Merge_bar_race_{fmt}.mp4")
+            dst = os.path.join(output_dir, f"{channel}_{topic_slug}_{fmt}.mp4")
+            if os.path.exists(src):
+                os.rename(src, dst)
+                size_mb = os.path.getsize(dst) / (1024 * 1024)
+                print(f"[YTMetadata] ✅ Renamed: Merge_bar_race_{fmt}.mp4 → {os.path.basename(dst)} ({size_mb:.1f} MB)")
+            else:
+                print(f"[YTMetadata]    Skip rename (not found): Merge_bar_race_{fmt}.mp4")
+
+        print(f"[YTMetadata] 🧹 Cleanup done")
