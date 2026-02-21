@@ -154,30 +154,32 @@ def run():
         # [6] add_audio           [7] merge_audio_video     [8] generate_youtube_metadata
         # [9] bar_merge
 
-        # 🆕 Conditional bar race video
+        # crew.py task index map:
+        # [0] research_data        [1] generate_csv         [2] create_video
+        # [3] create_bar_race_video [4] create_intro_clip   [5] bar_merge
+        # [6] add_bar_race_audio   [7] add_audio            [8] merge_audio_video
+        # [9] generate_youtube_metadata
+
         if inputs.get('bar_race_video_enabled', False):
             final_tasks.append(full_crew.tasks[3])  # create_bar_race_video
 
-        # 🆕 Conditional intro clip
         if inputs.get('intro_enabled', False):
             final_tasks.append(full_crew.tasks[4])  # create_intro_clip
 
-        # 🆕 Conditional bar race audio
-        if inputs.get('bar_race_audio_enabled', False):
-            final_tasks.append(full_crew.tasks[5])  # add_bar_race_audio
-
-        # 🆕 Conditional bar merge (intro + bar race video + audio → final)
         if inputs.get('bar_merge_enabled', False):
-            final_tasks.append(full_crew.tasks[9])  # bar_merge
+            final_tasks.append(full_crew.tasks[5])  # bar_merge
+
+        if inputs.get('bar_race_audio_enabled', False):
+            final_tasks.append(full_crew.tasks[6])  # add_bar_race_audio
 
         if inputs.get('audio_enabled', False):
-            final_tasks.append(full_crew.tasks[6])  # add_audio
+            final_tasks.append(full_crew.tasks[7])  # add_audio
 
         if inputs.get('merge_audio_video', False):
-            final_tasks.append(full_crew.tasks[7])  # merge_audio_video
+            final_tasks.append(full_crew.tasks[8])  # merge_audio_video
 
         if inputs.get('generate_youtube_metadata', False):
-            final_tasks.append(full_crew.tasks[8])  # generate_youtube_metadata
+            final_tasks.append(full_crew.tasks[9])  # generate_youtube_metadata
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")

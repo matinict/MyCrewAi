@@ -9,12 +9,9 @@ from crewai_video_factory.tools.bar_race_video_tool import BarRaceVideoTool  # N
 from crewai_video_factory.tools.audio_tool import AudioGenerationTool
 from crewai_video_factory.tools.bar_race_audio_tool import BarRaceAudioTool
 from crewai_video_factory.tools.intro_clip_tool import IntroClipTool
+from crewai_video_factory.tools.bar_merge_tool import BarMergeTool
 from crewai_video_factory.tools.merge_tool import MergeAudioVideoTool
 from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool
-# crew.py
-from crewai_video_factory.tools.bar_merge_tool import BarMergeTool
-
-
 
 @CrewBase
 class CrewaiVideoFactory:
@@ -67,6 +64,15 @@ class CrewaiVideoFactory:
         )
 
     @agent
+    def bar_merge_specialist(self) -> Agent:
+        """Bar merge specialist triggered by bar_merge_enabled"""
+        return Agent(
+            config=self.agents_config['bar_merge_specialist'],
+            tools=[BarMergeTool()],
+            verbose=True
+        )
+
+    @agent
     def bar_race_audio_engineer(self) -> Agent:
         """Bar race audio producer triggered by bar_race_audio_enabled"""
         return Agent(
@@ -98,10 +104,6 @@ class CrewaiVideoFactory:
             tools=[YouTubeMetadataTool()],
             verbose=True
         )
-    @agent
-    def bar_merge_specialist(self) -> Agent:
-        return Agent(config=self.agents_config['bar_merge_specialist'], tools=[BarMergeTool()], verbose=True)
-
 
     @task
     def research_data(self) -> Task:
@@ -136,6 +138,13 @@ class CrewaiVideoFactory:
         )
 
     @task
+    def bar_merge(self) -> Task:
+        """Bar merge task triggered by bar_merge_enabled"""
+        return Task(
+            config=self.tasks_config['bar_merge'],
+        )
+
+    @task
     def add_bar_race_audio(self) -> Task:
         """Bar race audio task triggered by bar_race_audio_enabled"""
         return Task(
@@ -159,9 +168,6 @@ class CrewaiVideoFactory:
         return Task(
             config=self.tasks_config['generate_youtube_metadata'],
         )
-    @task
-    def bar_merge(self) -> Task:
-        return Task(config=self.tasks_config['bar_merge'])
 
     @crew
     def crew(self) -> Crew:

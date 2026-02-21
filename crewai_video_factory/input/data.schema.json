@@ -28,21 +28,41 @@
   },
   "video_formats": {
     "type": "array",
-    "description": "Video formats to generate",
+    "description": "Video formats to generate. Applies to bar race, intro, audio and merge tasks.",
     "enum": ["HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"],
     "example": ["Shorts", "HD"]
   },
   "fps": {
     "type": "number",
-    "description": "Speed parameter (seconds per period for bar_race, frames per second for others) ex 1.0 = 12 sec, 2.0=22 sec , 2.5,3.0=27,33 sce,",
+    "description": "Seconds per period for bar_race videos. Controls animation pace - higher = slower/longer video.",
     "minimum": 0.1,
     "maximum": 30.0,
-    "example": 0.5
+    "examples": {
+      "0.5": "~6s total (12 periods x 0.5s)",
+      "1.0": "~12s total",
+      "2.0": "~24s total",
+      "5.0": "~60s total",
+      "10.0": "~120s total"
+    },
+    "tip": "fps_hd_offset adds extra seconds for HD only. HD duration = (fps + fps_hd_offset) per period."
+  },
+  "fps_hd_offset": {
+    "type": "number",
+    "description": "Extra seconds per period added to HD only. Shorts uses fps, HD uses fps + fps_hd_offset.",
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "example": 0.9,
+    "tip": "fps=5.0 + fps_hd_offset=0.9 => Shorts=5.0s/period, HD=5.9s/period"
   },
   "use_existing_csv": {
     "type": "boolean",
-    "description": "Use existing CSV instead of generating new one",
+    "description": "Use existing CSV instead of generating new one. Skips research_data and generate_csv tasks.",
     "example": false
+  },
+  "use_label_mappings": {
+    "type": "boolean",
+    "description": "Apply label_mappings.json to shorten bar names (e.g. 'JavaScript' => 'JS'). Set false to use raw CSV column names.",
+    "example": true
   },
   "video_enabled": {
     "type": "boolean",
@@ -51,30 +71,97 @@
   },
   "bar_race_video_enabled": {
     "type": "boolean",
-    "description": "Enable amazing bar race video generation (NEW - uses bar_race_video_tool with professional interpolation)",
+    "description": "Enable bar race video generation using bar_race_video_tool with professional interpolation.",
     "example": false,
-    "note": "Set to true to generate amazing smooth bar race animations instead of standard videos. Can be used WITH or WITHOUT video_enabled."
+    "note": "Can be used WITH or WITHOUT video_enabled."
   },
-  "audio_enabled": {
+  "watermark_enabled": {
     "type": "boolean",
-    "description": "Enable audio narration generation",
+    "description": "Overlay semi-transparent watermark text on bar race video frames.",
+    "example": false
+  },
+  "watermark_text": {
+    "type": "string",
+    "description": "Watermark text displayed on video. Usually '@ChannelName'. Change here to update all tools dynamically.",
+    "example": "@PlayOwnAi"
+  },
+  "watermark_opacity": {
+    "type": "integer",
+    "description": "Watermark opacity: 0=invisible, 255=fully opaque. 60=subtle, 160=visible.",
+    "minimum": 0,
+    "maximum": 255,
+    "example": 60
+  },
+  "bar_race_audio_enabled": {
+    "type": "boolean",
+    "description": "Enable audio narration for bar race videos. Independent of audio_enabled.",
     "example": true
   },
   "audio_speed": {
     "type": "number",
-    "description": "Audio speech speed (0.7-1.3)",
-    "minimum": 0.7,
-    "maximum": 1.3,
-    "example": 0.9
+    "description": "Speech speed for Shorts audio via ffmpeg atempo filter. 1.0=normal, <1.0=slower, >1.0=faster.",
+    "minimum": 0.5,
+    "maximum": 2.0,
+    "example": 0.8,
+    "tip": "0.8 = slightly slower. Shorts narration is concise so slower speed helps clarity."
+  },
+  "audio_speed_hd": {
+    "type": "number",
+    "description": "Speech speed for HD audio ONLY via ffmpeg atempo. Set 0.0 to fall back to audio_speed for both formats.",
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "examples": {
+      "0.0": "No override - HD uses same speed as audio_speed",
+      "0.9": "Slightly faster than Shorts - good for longer HD narration",
+      "1.0": "Normal speed for HD"
+    },
+    "tip": "HD narration is longer (includes data points). 0.9-1.0 prevents it feeling too slow."
+  },
+  "intro_enabled": {
+    "type": "boolean",
+    "description": "Generate branded intro clip per format. Shows channel name, topic and year range on dark background.",
+    "example": false
+  },
+  "intro_duration": {
+    "type": "integer",
+    "description": "Duration of intro clip in seconds.",
+    "minimum": 1,
+    "maximum": 60,
+    "example": 5
+  },
+  "bar_merge_enabled": {
+    "type": "boolean",
+    "description": "Concatenate intro_[fmt].mp4 + bar_race_[fmt].mp4 then merge with bar_race_[fmt]_audio.mp3 => Merge_bar_race_[fmt].mp4. Requires all three files to exist.",
+    "example": false
+  },
+  "audio_enabled": {
+    "type": "boolean",
+    "description": "Enable audio narration for standard (non-bar-race) videos.",
+    "example": true
   },
   "merge_audio_video": {
     "type": "boolean",
-    "description": "Merge audio with video files",
+    "description": "Merge standard audio with standard video files.",
     "example": true
   },
   "generate_youtube_metadata": {
     "type": "boolean",
-    "description": "Generate YouTube metadata files",
+    "description": "Generate YouTube metadata files (title, description, tags, chapters, cc_en.txt).",
     "example": true
+  },
+  "channel": {
+    "type": "string",
+    "description": "Channel name used in audio narration ('Welcome to X'), intro clip title, agent backstory, and YouTube metadata. No @ prefix. Change once to update everywhere.",
+    "example": "PlayOwnAi"
+  },
+  "channel_lower": {
+    "type": "string",
+    "description": "Lowercase channel slug used in LinkedIn and other URLs.",
+    "example": "playownai"
+  },
+  "website": {
+    "type": "string",
+    "description": "Channel website or primary URL shown in YouTube metadata.",
+    "example": "youtube.com/@PlayOwnAi"
   }
 }

@@ -96,33 +96,25 @@ create_bar_race_video:
     - Read CSV from output/{filename}.csv (flat directory)
     - Create professional bar race videos
     - Save to output/{filename}/ subdirectory
-    - Use advanced bar_chart_race configuration with:
-      * Smooth interpolation (✨ key feature)
-      * Dynamic bar reordering
-      * Professional color scheme (viridis)
-      * Smart name compacting (vowels removed, max 6 chars)
-      * Year display in corner
+    - Smooth interpolation, dynamic bar reordering, professional color scheme
+    - Output files: bar_race_[format].mp4 in output/{filename}/ subdirectory
 
-    Features:
-    - Bars move smoothly between values (not jumping)
-    - Bars automatically reorder as values change
-    - Professional layout with left-aligned title
-    - Optimized for YouTube/TikTok upload
-    - Multiple format support (Shorts, HD, 2K, 4K)
+    CRITICAL — call the Bar Race Video Tool with EXACTLY these values:
+      csv_filepath: "output/{filename}.csv"
+      output_dir: "{output_dir}"
+      title: "{topic} Race"
+      video_formats: {video_formats}
+      seconds_per_period: {fps}
+      fps_hd_offset: {fps_hd_offset}
+      use_label_mappings: {use_label_mappings}
+      watermark_enabled: {watermark_enabled}
+      watermark_text: "{watermark_text}"
+      watermark_opacity: {watermark_opacity}
 
-    Output files go to topic subdirectory with naming:
-    - bar_race_[format].mp4
-    - All videos go to output/{filename}/ subdirectory
-  inputs:
-    csv_filepath: "{{ inputs.csv_path }}"
-    output_dir: "{{ inputs.output_dir }}"
-    title: "{{ inputs.topic }} Race"
-    video_formats: "{{ inputs.video_formats }}"   # ← must be list
-    seconds_per_period: "{{ inputs.fps }}"
-    n_bars: 5
+    DO NOT change these values. Pass them exactly as shown.
   expected_output: >
     Confirmation of successful bar race video creation with exact file paths.
-    Example: "output/ProgrammingLanguage/bar_race_Shorts_bar_race_Shorts.mp4"
+    Example: "output/LLMTuning/bar_race_Shorts.mp4, output/LLMTuning/bar_race_HD.mp4"
   agent: bar_race_video_producer
   context:
     - research_data
@@ -209,6 +201,8 @@ add_bar_race_audio:
       video_formats: {video_formats}
       bar_race_audio_enabled: {bar_race_audio_enabled}
       audio_speed: {audio_speed}
+      audio_speed_hd: {audio_speed_hd}
+      channel: "{channel}"
 
     The tool reads the CSV from output/{filename}.csv automatically.
     DO NOT substitute topic for filename. filename must be the slug: "{filename}" (e.g. "LLMPopularity").

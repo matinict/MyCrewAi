@@ -27,6 +27,7 @@ class BarRaceInput(BaseModel):
     )
     seconds_per_period: float = Field(default=4.0, description="Animation speed (seconds per period).")
     n_bars: Optional[int] = Field(default=None, description="Number of bars to display. None = auto (Shorts:9, HD:7)")
+    use_label_mappings: bool = Field(default=True, description="Apply label_mappings.json abbreviations to bar labels. Set false to show full names.")
     watermark_enabled: bool = Field(default=False, description="Overlay semi-transparent watermark text on video.")
     watermark_text: str = Field(default="@PlayOwnAi", description="Watermark text to display.")
     watermark_opacity: int = Field(default=60, ge=0, le=255, description="Watermark opacity (0=invisible, 255=fully opaque).")
@@ -62,9 +63,14 @@ class BarRaceVideoTool(BaseTool):
 
         return (w_px / dpi, h_px / dpi)
 
-    def _load_label_mappings(self) -> dict:
+    def _load_label_mappings(self, use_label_mappings: bool = True) -> dict:
         """Load label mappings from label_mappings.json (cached after first load)."""
         import json
+        if not use_label_mappings:
+            if not getattr(self, '_label_disabled_logged', False):
+                print("ℹ️  Label mappings DISABLED (use_label_mappings=false) — showing full bar names.")
+                object.__setattr__(self, '_label_disabled_logged', True)
+            return {}
         if hasattr(self, '_label_mapping_cache'):
             return self._label_mapping_cache
         # Search for label_mappings.json in multiple locations:
@@ -95,9 +101,9 @@ class BarRaceVideoTool(BaseTool):
         self._label_mapping_cache = {}
         return self._label_mapping_cache
 
-    def _trim_label(self, label: str) -> str:
+    def _trim_label(self, label: str, use_label_mappings: bool = True) -> str:
         """Trim labels using mappings loaded from label_mappings.json."""
-        return self._load_label_mappings().get(label, label)
+        return self._load_label_mappings(use_label_mappings).get(label, label)
 
     def _run(self, **kwargs) -> str:
         # --- 1. SETUP FFMPEG ---
@@ -115,6 +121,7 @@ class BarRaceVideoTool(BaseTool):
         video_formats = kwargs.get("video_formats", ["Shorts"])
         seconds_per_period = kwargs.get("seconds_per_period", 4.0)
         n_bars_input = kwargs.get("n_bars") or None  # None = use format-based default
+        use_label_mappings = kwargs.get("use_label_mappings", True)
         watermark_enabled = kwargs.get("watermark_enabled", False)
         watermark_text    = kwargs.get("watermark_text", "@PlayOwnAi")
         watermark_opacity = int(kwargs.get("watermark_opacity", 60))
@@ -132,7 +139,7 @@ class BarRaceVideoTool(BaseTool):
         year_col = df.columns[0]
         df_viz = df.set_index(year_col).select_dtypes(include="number")
         df_viz.index = pd.to_datetime(df_viz.index.astype(str), format="%Y")
-        df_viz.columns = [self._trim_label(col) for col in df_viz.columns]
+        df_viz.columns = [self._trim_label(col, use_label_mappings) for col in df_viz.columns]
 
         results = []
 
@@ -206,7 +213,7 @@ class BarRaceVideoTool(BaseTool):
                         return
                     for lbl in ax.get_yticklabels():
                         lbl.set_fontsize(bar_name_size)
-                        lbl.set_rotation(80)
+                        lbl.set_rotation(70)
                         lbl.set_ha('right')
                         lbl.set_va('center')
                     # Also re-enforce x-axis size in case bcr reset it
@@ -243,35 +250,105 @@ class BarRaceVideoTool(BaseTool):
                 )
 
                 output_path = os.path.join(output_dir, f"bar_race_{fmt}.mp4")
-                print(f"{fmt} Resolution: {int(fig_w*dpi)} x {int(fig_h*dpi)}")
+                n_periods = len(df_viz)
+                total_frames = n_periods * int(seconds_per_period * 15)
+                est_secs = total_frames / 15
+                print(f"")
+                print(f"🎬 [{fmt}] Starting render")
+                print(f"   Resolution : {int(fig_w*dpi)} x {int(fig_h*dpi)}")
+                print(f"   Periods    : {n_periods}  |  spp: {seconds_per_period:.1f}s  |  Frames: {total_frames}")
+                print(f"   ⏱️  Estimated: ~{est_secs/60:.1f} min ({est_secs:.0f}s) — please wait …")
+                import time as _time
+                import threading as _threading
+                t_start = _time.time()
+                _stop_ticker = _threading.Event()
 
-                bcr.bar_chart_race(
-                    df=df_viz,
-                    filename=output_path,
-                    orientation="h",
-                    sort="desc",
-                    n_bars=n_bars,
-                    steps_per_period=int(seconds_per_period * 15),
-                    period_length=int(seconds_per_period * 1000),
-                    fig=pre_fig,
-                    title=title_text,
-                    period_label=False,
-                    period_summary_func=period_summary_func,
-                    bar_label_size=bar_label_size,
-                    tick_label_size=tick_label_size,
-                    title_size=title_size,
-                    writer='ffmpeg',
+                def _progress_bar_thread(stop_event, est_total_secs, label):
+                    """
+                    Time-based tqdm progress bar in a background thread.
+                    Advances by real elapsed time (bcr gives no frame callbacks).
+                    Falls back to plain-text ticker if tqdm not installed.
+                    """
+                    try:
+                        from tqdm import tqdm
+                        bar = tqdm(
+                            total=int(est_total_secs),
+                            desc=f"   🎬 [{label}] Rendering",
+                            unit="s",
+                            bar_format=(
+                                "{desc}: {percentage:3.0f}%|{bar:30}| "
+                                "{n:.0f}/{total:.0f}s "
+                                "[{elapsed}<{remaining}]"
+                            ),
+                            dynamic_ncols=True,
+                            leave=True,
+                        )
+                        last_n = 0
+                        while not stop_event.is_set():
+                            stop_event.wait(0.5)
+                            elapsed = _time.time() - t_start
+                            new_n = min(int(elapsed), int(est_total_secs))
+                            if new_n > last_n:
+                                bar.update(new_n - last_n)
+                                last_n = new_n
+                        # Fill to 100% on completion
+                        if last_n < int(est_total_secs):
+                            bar.update(int(est_total_secs) - last_n)
+                        bar.close()
+                    except ImportError:
+                        # tqdm not installed — plain-text fallback every 5s
+                        while not stop_event.is_set():
+                            stop_event.wait(5)
+                            if not stop_event.is_set():
+                                elapsed = _time.time() - t_start
+                                pct = min(100, int(elapsed / est_total_secs * 100)) if est_total_secs else 0
+                                remaining = max(0, est_total_secs - elapsed)
+                                print(
+                                    f"   ⏳ [{label}] Rendering … {elapsed:.0f}s elapsed "
+                                    f"| ~{pct}% | ~{remaining:.0f}s remaining"
+                                )
+
+                ticker_thread = _threading.Thread(
+                    target=_progress_bar_thread,
+                    args=(_stop_ticker, est_secs, fmt),
+                    daemon=True,
                 )
+                ticker_thread.start()
+
+                try:
+                    bcr.bar_chart_race(
+                        df=df_viz,
+                        filename=output_path,
+                        orientation="h",
+                        sort="desc",
+                        n_bars=n_bars,
+                        steps_per_period=int(seconds_per_period * 15),
+                        period_length=int(seconds_per_period * 1000),
+                        fig=pre_fig,
+                        title=title_text,
+                        period_label=False,
+                        period_summary_func=period_summary_func,
+                        bar_label_size=bar_label_size,
+                        tick_label_size=tick_label_size,
+                        title_size=title_size,
+                        writer='ffmpeg',
+                    )
+                finally:
+                    _stop_ticker.set()
+                    ticker_thread.join(timeout=3)
                 plt.close(pre_fig)
+                elapsed = _time.time() - t_start
+                print(f"   ✅ Render done in {elapsed:.0f}s ({elapsed/60:.1f} min)")
 
                 if os.path.exists(output_path):
-                    # Post-process: re-encode with exact pixel dimensions
                     w_px = int(fig_w * dpi)
                     h_px = int(fig_h * dpi)
+                    hold_secs = seconds_per_period * 2
+                    print(f"   🔧 Re-encoding {w_px}x{h_px}, holding last frame {hold_secs:.1f}s …")
                     fixed_path = output_path.replace(".mp4", "_fixed.mp4")
                     os.system(
                         f'ffmpeg -y -i "{output_path}" '
-                        f'-vf "scale={w_px}:{h_px}" '
+                        f'-vf "scale={w_px}:{h_px},tpad=stop_mode=clone:stop_duration={hold_secs:.2f}" '
                         f'-c:v libx264 -crf 18 -preset fast '
                         f'"{fixed_path}" -loglevel error'
                     )
@@ -325,7 +402,7 @@ class BarRaceVideoTool(BaseTool):
             ty = (height_px - th) // 2
 
             # Draw watermark with configured opacity
-            draw.text((tx, ty), text, fill=(180, 180, 180, opacity), font=font)
+            draw.text((tx, ty), text, fill=(255, 255, 255, opacity), font=font)
 
             # Convert to numpy RGBA array and overlay on figure
             wm_array = np.array(wm_img).astype(float) / 255.0  # shape: (H, W, 4)

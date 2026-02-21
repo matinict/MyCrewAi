@@ -14,7 +14,8 @@ class BarRaceAudioToolInput(BaseModel):
     output_dir: str = Field(..., description="Output directory containing bar race videos")
     video_formats: list = Field(..., description="List of video formats used (HD, Shorts, etc.)")
     bar_race_audio_enabled: bool = Field(default=False, description="Whether to generate bar race audio")
-    audio_speed: float = Field(default=1.0, ge=0.7, le=1.3, description="Speech speed for HD. Shorts uses audio_speed+0.2.")
+    audio_speed: float = Field(default=1.0, ge=0.5, le=2.0, description="Speech speed for Shorts via ffmpeg atempo. 0.5=half speed, 1.0=normal, 2.0=double speed.")
+    audio_speed_hd: float = Field(default=0.0, ge=0.0, le=2.0, description="Speech speed for HD via ffmpeg atempo. 0.0=use audio_speed for both. Set explicitly to override HD independently.")
     channel: str = Field(default="PlayOwnAi", description="Channel name for narration (e.g. PlayOwnAi). No @ prefix needed.")
 
 
@@ -40,6 +41,7 @@ class BarRaceAudioTool(BaseTool):
         video_formats: list,
         bar_race_audio_enabled: bool = False,
         audio_speed: float = 1.0,
+        audio_speed_hd: float = 0.0,
         channel: str = "PlayOwnAi",
     ) -> str:
 
@@ -138,8 +140,9 @@ class BarRaceAudioTool(BaseTool):
         results = []
         errors = []
 
-        shorts_speed = min(1.3, audio_speed + 0.2)  # Shorts: base + 0.2, capped at 1.3
-        print(f"[BarRaceAudioTool] Speed — HD: {audio_speed}, Shorts: {shorts_speed}")
+        shorts_speed = audio_speed  # Shorts uses audio_speed directly
+        hd_speed = audio_speed_hd if audio_speed_hd > 0.0 else audio_speed  # HD: explicit override or fallback
+        print(f"[BarRaceAudioTool] Speed — Shorts: {shorts_speed}, HD: {hd_speed}")
 
         for video_path in shorts_videos:
             audio_path = video_path.replace('.mp4', '_audio.mp3')
@@ -159,7 +162,7 @@ class BarRaceAudioTool(BaseTool):
             audio_path = video_path.replace('.mp4', '_audio.mp3')
             print(f"[BarRaceAudioTool] Generating HD audio: {audio_path}")
             try:
-                self._generate_audio(narration_full, audio_path, audio_speed)
+                self._generate_audio(narration_full, audio_path, hd_speed)
                 if os.path.exists(audio_path):
                     size_kb = os.path.getsize(audio_path) // 1024
                     results.append(f"{os.path.basename(audio_path)} ({size_kb}KB)")
@@ -266,26 +269,60 @@ class BarRaceAudioTool(BaseTool):
         )
 
     def _generate_audio(self, text: str, output_path: str, speed: float):
-        """Generate MP3 from text via gTTS, with ffmpeg speed adjustment."""
+        """Generate MP3 from text via gTTS, with ffmpeg atempo speed adjustment.
+
+        gTTS only has binary slow/normal mode — actual speed is always set via
+        ffmpeg atempo filter so Shorts and HD are always independently controlled.
+        gTTS is always generated at normal speed (slow=False); atempo handles all
+        speed differences including values at exactly 1.0 vs 0.8 etc.
+        """
         from gtts import gTTS
         import subprocess
+        import threading
+        import time
 
-        temp_path = output_path.replace('.mp3', '_temp.mp3')
-        tts = gTTS(text=text, lang='en', slow=(speed <= 0.85))
-        tts.save(temp_path)
+        label = os.path.basename(output_path)
+        char_count = len(text)
+        est_total = max(5, int(char_count * 0.015)) + 3
+        print(f"[BarRaceAudioTool] ⏱  {label} — ~{est_total}s estimated ({char_count} chars)")
 
-        if abs(speed - 1.0) > 0.05:
+        # --- Progress: single line every 5s ---
+        _stop = threading.Event()
+        def _ticker(label, start):
+            while not _stop.is_set():
+                time.sleep(5)
+                if not _stop.is_set():
+                    print(f"[BarRaceAudioTool] ⏳ {label} ... {int(time.time()-start)}s")
+        t_start = time.time()
+        ticker = threading.Thread(target=_ticker, args=(label, t_start), daemon=True)
+        ticker.start()
+
+        try:
+            # --- Step 1: gTTS ---
+            temp_path = output_path.replace('.mp3', '_temp.mp3')
+            tts = gTTS(text=text, lang='en', slow=False)
+            tts.save(temp_path)
+
+            # --- Step 2: ffmpeg atempo ---
             atempo = max(0.5, min(2.0, speed))
             result = subprocess.run([
                 'ffmpeg', '-y', '-i', temp_path,
-                '-filter:a', f'atempo={atempo}', output_path
+                '-filter:a', f'atempo={atempo}',
+                output_path
             ], capture_output=True, check=False)
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            if result.returncode != 0 and not os.path.exists(output_path):
-                raise RuntimeError(f"ffmpeg failed: {result.stderr.decode()[:200]}")
-        else:
-            os.rename(temp_path, output_path)
+        finally:
+            _stop.set()
+            ticker.join(timeout=1)
+
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        total_elapsed = time.time() - t_start
+        if result.returncode != 0 and not os.path.exists(output_path):
+            raise RuntimeError(f"ffmpeg failed: {result.stderr.decode()[:200]}")
+
+        size_kb = os.path.getsize(output_path) // 1024 if os.path.exists(output_path) else 0
+        print(f"[BarRaceAudioTool] ✅ {label} done in {total_elapsed:.1f}s ({size_kb}KB, atempo={atempo})")
 
     def _ffmpeg_available(self) -> bool:
         return shutil.which('ffmpeg') is not None

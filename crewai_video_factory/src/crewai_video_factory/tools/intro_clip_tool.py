@@ -29,7 +29,8 @@ class IntroClipToolInput(BaseModel):
 
     # Intro settings
     intro_enabled: bool = Field(default=True, description="Generate intro clip(s)")
-    intro_duration: int = Field(default=5, description="Duration of intro in seconds")
+    intro_duration: int = Field(default=10, description="Duration of intro in seconds for Shorts/portrait formats")
+    intro_duration_hd: int = Field(default=15, description="Duration of intro in seconds for HD/landscape formats. 0 = use intro_duration for all formats.")
 
     # Branding
     channel: str = Field(default="PlayOwnAi", description="Channel name shown on intro screen")
@@ -98,7 +99,8 @@ class IntroClipTool(BaseTool):
         output_dir: str,
         video_formats: list = None,
         intro_enabled: bool = True,
-        intro_duration: int = 5,
+        intro_duration: int = 10,
+        intro_duration_hd: int = 15,
         channel: str = "PlayOwnAi",
         watermark_enabled: bool = False,
         watermark_text: str = "@PlayOwnAi",
@@ -137,9 +139,17 @@ class IntroClipTool(BaseTool):
                 output_path = os.path.join(output_dir, f"intro_{fmt}.mp4")
                 print(f"[IntroClipTool] Generating {fmt} intro → {output_path}")
 
+                # Per-format duration: landscape formats use intro_duration_hd,
+                # portrait formats use intro_duration
+                is_portrait_fmt = RESOLUTIONS[fmt][1] > RESOLUTIONS[fmt][0]
+                fmt_duration = (
+                    intro_duration if is_portrait_fmt
+                    else (intro_duration_hd if intro_duration_hd > 0 else intro_duration)
+                )
+                print(f"[IntroClipTool] {fmt} duration: {fmt_duration}s ({'portrait' if is_portrait_fmt else 'landscape'})")
                 self._create_intro_clip(
                     fmt=fmt,
-                    duration=intro_duration,
+                    duration=fmt_duration,
                     output_path=output_path,
                     topic=topic,
                     start_year=start_year,
