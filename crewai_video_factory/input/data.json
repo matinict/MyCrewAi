@@ -7,15 +7,15 @@
     "bar_race"
   ],
   "video_formats": [
-    "Shorts"
+    "HD"
   ],
   "use_label_mappings": false,
   "fps": 4.9,
-  "fps_hd_offset": 0.7,
+  "fps_hd_offset": 1.1,
   "use_existing_csv": true,
-  "bar_race_video_enabled": false,
+  "bar_race_video_enabled": true,
   "bar_race_audio_enabled": false,
-  "bar_merge_enabled": true,
+  "bar_merge_enabled": false,
   "intro_enabled": false,
   "intro_duration": 10,
   "intro_duration_hd": 15,
@@ -28,7 +28,7 @@
   "channel": "PlayOwnAi",
   "channel_lower": "playownai",
   "website": "youtube.com/@PlayOwnAi",
-  "watermark_enabled": true,
+  "watermark_enabled": false,
   "watermark_text": "@PlayOwnAi",
   "watermark_opacity": 60
 }
