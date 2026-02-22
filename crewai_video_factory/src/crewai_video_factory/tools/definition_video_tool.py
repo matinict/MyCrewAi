@@ -204,6 +204,8 @@ def run():
         _start_ts  = _time.time()
 
         def _heartbeat():
+            # \r overwrites same line — never pushes tqdm bars onto new lines
+            import sys as _sys
             step = 0
             spinners = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
             while not _crew_done.is_set():
@@ -212,8 +214,13 @@ def run():
                     elapsed = int(_time.time() - _start_ts)
                     spin = spinners[step % len(spinners)]
                     m, s = divmod(elapsed, 60)
-                    print(f"  {spin} Agent working ... {m:02d}:{s:02d} elapsed", flush=True)
+                    msg = f"  {spin} Agent ... {m:02d}:{s:02d}"
+                    _sys.stdout.write(f"\r{msg:<55}")
+                    _sys.stdout.flush()
                     step += 1
+            # clear the line when crew finishes
+            _sys.stdout.write("\r" + " " * 55 + "\r")
+            _sys.stdout.flush()
 
         _hb = threading.Thread(target=_heartbeat, daemon=True)
         _hb.start()

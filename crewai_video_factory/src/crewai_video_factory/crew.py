@@ -13,6 +13,7 @@ from crewai_video_factory.tools.bar_merge_tool import BarMergeTool
 from crewai_video_factory.tools.merge_tool import MergeAudioVideoTool
 from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool
 from crewai_video_factory.tools.definition_tool import DefinitionTool
+from crewai_video_factory.tools.definition_video_tool import DefinitionVideoTool
 
 @CrewBase
 class CrewaiVideoFactory:
@@ -114,6 +115,14 @@ class CrewaiVideoFactory:
             verbose=True
         )
 
+    @agent
+    def definition_video_producer(self) -> Agent:
+        return Agent(
+            config=self.agents_config['definition_video_producer'],
+            tools=[DefinitionVideoTool()],
+            verbose=True
+        )
+
     @task
     def research_data(self) -> Task:
         return Task(
@@ -130,6 +139,12 @@ class CrewaiVideoFactory:
     def define_topic(self) -> Task:
         return Task(
             config=self.tasks_config['define_topic'],
+        )
+
+    @task
+    def create_definition_video(self) -> Task:
+        return Task(
+            config=self.tasks_config['create_definition_video'],
         )
 
     @task

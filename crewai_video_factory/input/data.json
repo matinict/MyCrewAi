@@ -7,7 +7,7 @@
     "bar_race"
   ],
   "video_formats": [
-    "Shorts"
+    "HD"
   ],
   "use_label_mappings": false,
   "fps": 4.9,
@@ -15,7 +15,7 @@
   "use_existing_csv": true,
   "definition_enabled": true,
   "use_existing_definition": true,
-  "definition_video": true,  
+  "definition_video": true,
   "bar_race_video_enabled": false,
   "bar_race_audio_enabled": false,
   "bar_merge_enabled": false,
