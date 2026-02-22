@@ -91,20 +91,44 @@ class DefinitionVideoTool(BaseTool):
 
         results, errors = [], []
 
+        # Build plain spoken text from the parsed lines (for TTS)
+        spoken_text = self._lines_to_spoken(raw_lines, topic, channel)
+
         for fmt in video_formats:
             try:
                 out_path    = os.path.join(output_dir, f"definition_video_{fmt}.mp4")
                 is_portrait = fmt in ("Shorts", "ShortsHD", "Shorts4K")
                 w, h        = (1080, 1920) if is_portrait else (1920, 1080)
                 print(f"\n[DefVideo] [{fmt}] {w}x{h}  secs_per_line={secs_per_line}")
+
+                # 1. Render silent video
                 self._render(raw_lines, out_path, w, h, secs_per_line,
                              channel, watermark_enabled, watermark_text,
                              topic=topic)
-                if os.path.exists(out_path):
+
+                if not os.path.exists(out_path):
+                    errors.append(f"❌ {fmt}: video missing after render")
+                    continue
+
+                # 2. Generate TTS audio matching video duration
+                audio_path  = os.path.join(output_dir, f"definition_video_{fmt}_audio.mp3")
+                final_path  = os.path.join(output_dir, f"definition_video_{fmt}_with_audio.mp4")
+                video_dur   = self._get_duration(out_path)
+                self._generate_tts(spoken_text, audio_path, video_dur)
+
+                # 3. Merge audio into video
+                if os.path.exists(audio_path):
+                    self._merge_audio_video(out_path, audio_path, final_path, video_dur)
+                    merged_kb = os.path.getsize(final_path) // 1024 if os.path.exists(final_path) else 0
                     kb = os.path.getsize(out_path) // 1024
-                    results.append(f"✅ {fmt}: {out_path} ({kb} KB)")
+                    results.append(
+                        f"✅ {fmt}: {out_path} ({kb} KB) "
+                        f"+ audio → definition_video_{fmt}_with_audio.mp4 ({merged_kb} KB)"
+                    )
                 else:
-                    errors.append(f"❌ {fmt}: output file missing after render")
+                    kb = os.path.getsize(out_path) // 1024
+                    results.append(f"✅ {fmt}: {out_path} ({kb} KB) [no audio]")
+
             except Exception as e:
                 import traceback; traceback.print_exc()
                 errors.append(f"❌ {fmt}: {e}")
@@ -116,6 +140,96 @@ class DefinitionVideoTool(BaseTool):
         if errors:
             out += "\n⚠️ Errors:\n" + "\n".join(errors)
         return out
+
+    # ──────────────────────────────────────────────────────────────────
+    def _lines_to_spoken(self, lines: list, topic: str, channel: str) -> str:
+        """Convert display lines to natural spoken narration text for TTS."""
+        import re as _re
+        parts = []
+        for line in lines:
+            # Convert section headers to spoken form
+            line = _re.sub(r'^What Is (.+?)\?\s*$', r'What is \1?', line, flags=_re.I)
+            line = _re.sub(r'^Why Does It Matter\?\s*$', 'Why does it matter?', line, flags=_re.I)
+            line = _re.sub(r'^Key Terms\.?\s*$', 'Key terms.', line, flags=_re.I)
+            line = _re.sub(r'^(\d+):\s*', r'Term \1: ', line)
+            parts.append(line)
+        text = ' '.join(parts)
+        # Append subscribe call at end
+        text += f' Subscribe to {channel} for more insights.'
+        return text
+
+    def _get_duration(self, video_path: str) -> float:
+        """Get video duration in seconds via ffprobe."""
+        import subprocess
+        r = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "csv=p=0", video_path],
+            capture_output=True, text=True
+        )
+        try:
+            return float(r.stdout.strip())
+        except Exception:
+            return 0.0
+
+    def _generate_tts(self, text: str, audio_path: str, video_dur: float):
+        """Generate TTS MP3, then stretch/pad to match video_dur exactly."""
+        import subprocess, tempfile, os
+        try:
+            from gtts import gTTS
+        except ImportError:
+            print("[DefVideo] ⚠️  gTTS not installed — no audio. Run: pip install gTTS")
+            return
+
+        tmp = audio_path.replace('.mp3', '_raw.mp3')
+        try:
+            print(f"[DefVideo] 🔊 Generating TTS ({len(text)} chars) ...")
+            tts = gTTS(text=text, lang='en', slow=False)
+            tts.save(tmp)
+
+            # Get raw TTS duration
+            raw_dur = self._get_duration(tmp)
+            if raw_dur <= 0:
+                os.rename(tmp, audio_path)
+                return
+
+            # Calculate atempo to stretch TTS to fill video duration
+            # atempo range: 0.5–2.0; chain two filters if needed
+            ratio = raw_dur / max(video_dur, 1)
+            ratio = max(0.5, min(2.0, ratio))   # clamp to valid range
+            print(f"[DefVideo] 🔊 TTS {raw_dur:.1f}s → video {video_dur:.1f}s  atempo={ratio:.3f}")
+
+            result = subprocess.run([
+                "ffmpeg", "-y", "-i", tmp,
+                "-filter:a", f"atempo={ratio}",
+                audio_path
+            ], capture_output=True, check=False)
+
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+            if result.returncode != 0:
+                print(f"[DefVideo] ⚠️  atempo failed: {result.stderr.decode()[:100]}")
+        except Exception as e:
+            print(f"[DefVideo] ⚠️  TTS error: {e}")
+            if os.path.exists(tmp):
+                os.rename(tmp, audio_path)
+
+    def _merge_audio_video(self, video_path: str, audio_path: str,
+                           output_path: str, video_dur: float):
+        """Merge audio into video; pad audio with silence if shorter than video."""
+        import subprocess
+        print(f"[DefVideo] 🎬 Merging audio+video → {os.path.basename(output_path)}")
+        result = subprocess.run([
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-i", audio_path,
+            "-c:v", "copy", "-c:a", "aac",
+            "-filter_complex", f"[1:a]apad,atrim=duration={video_dur:.3f}[aout]",
+            "-map", "0:v", "-map", "[aout]",
+            output_path
+        ], capture_output=True, check=False)
+        if result.returncode != 0:
+            print(f"[DefVideo] ⚠️  merge failed: {result.stderr.decode()[:150]}")
 
     # ──────────────────────────────────────────────────────────────────
     def _parse_lines(self, raw: str) -> List[str]:

@@ -24,6 +24,45 @@ create_definition_video:
     Example: "🎬 Definition videos created:\n   • definition_video_Shorts.mp4 (2048 KB)"
   agent: definition_video_producer
 
+define_topic:
+  description: >
+    Research and write a clear, engaging definition of {topic} that explains
+    what it is, why it matters, and key terms. Save it as output/{filename}.txt.
+    When definition_enabled is false, skip instantly.
+
+    YOU MUST OUTPUT EXACTLY THIS FORMAT (no extra sections):
+
+    WHAT IS {topic}?
+    [2-3 short plain sentences. What is it? What does it do? One real example.]
+
+    WHY DOES IT MATTER?
+    [2-3 short plain sentences. What problem does it solve? Why do people use it?]
+
+    KEY TERMS
+    1: [Short term] - [One plain sentence.]
+    2: [Short term] - [One plain sentence.]
+    3: [Short term] - [One plain sentence.]
+
+    STRICT RULES:
+    - ONLY these 3 sections. No TIMELINE. No WHAT YOU WILL SEE.
+    - Total output MUST be under 1200 characters.
+    - Write plain text only — no bullet points, no markdown, no bold.
+    - Term labels must be "1:" not "Term 1:".
+
+    Then call the Definition Tool with:
+      topic: "{topic}"
+      filename: "{filename}"
+      output_dir: "{output_dir}"
+      definition_text: <your written text above>
+      start: {start}
+      end: {end}
+      definition_enabled: {definition_enabled}
+      channel: "{channel}"
+  expected_output: >
+    Confirmation that output/{filename}.txt was saved with the definition text.
+    Example: "Topic definition saved: output/LLMTuningMethods.txt  350 words"
+  agent: definition_specialist
+
 research_data:
   description: >
     Research and compile time-series data for {topic} from {start} to {end}.
@@ -275,69 +314,31 @@ create_intro_clip:
 
 bar_merge:
   description: >
-    Concatenate intro clip + bar race video, then merge with bar race audio
-    into a single final MP4 per format in {video_formats}.
+    Concatenate intro clip + bar race video, merge with bar race audio,
+    then append definition_video_with_audio as the final segment.
     This task will automatically skip if bar_merge_enabled is false in inputs.
 
     Pipeline per format (where [format] is each entry in {video_formats}):
-      intro_[format].mp4
-        +
-      bar_race_[format].mp4
-        → ffmpeg concat → combined temp file
-        +
-      bar_race_[format]_audio.mp3
-        → ffmpeg merge → Merge_bar_race_[format].mp4
+      STAGE 1 - intro + bar_race + audio:
+        intro_[format].mp4 + bar_race_[format].mp4
+          concat then merge with bar_race_[format]_audio.mp3
+          produces Merge_bar_race_[format].mp4
+      STAGE 2 - append definition video last:
+        Merge_bar_race_[format].mp4 + definition_video_[format]_with_audio.mp4
+          concat produces Final_[format].mp4
 
-    CRITICAL — call the Bar Merge Tool with EXACTLY these values:
+    CRITICAL - call the Bar Merge Tool with EXACTLY these values:
       output_dir: "{output_dir}"
       video_formats: {video_formats}
       bar_merge_enabled: {bar_merge_enabled}
 
-    Output files go to {output_dir}/Merge_bar_race_[format].mp4
-    Example: output/LLMTuningMethods/Merge_bar_race_Shorts.mp4
-             output/LLMTuningMethods/Merge_bar_race_HD.mp4
+    Output files go to {output_dir}/Final_[format].mp4
+    Example: output/LLMTuningMethods/Final_HD.mp4
+
+    IMPORTANT: The tool returns "Bar merge completed" with Final_[format].mp4 listed.
+    When you see this the task is DONE. Do NOT call the tool again.
   expected_output: >
-    List of final merged files created, OR skip message if disabled.
-    Example: "🎬 Bar merge completed (2/2 formats).
-       • Merge_bar_race_Shorts.mp4 (12.3 MB)
-       • Merge_bar_race_HD.mp4 (48.7 MB)"
+    Tool returns "Bar merge completed" listing Final_[format].mp4 files.
+    Example: "Bar merge completed (1/1 formats). Final_HD.mp4 (6.5 MB) | Merge_bar_race_HD.mp4 (1.9 MB)"
+    Task is complete when tool output contains "Bar merge completed". Do not retry.
   agent: bar_merge_specialist
-
-define_topic:
-  description: >
-    Write a short, plain-English definition of {topic} for a YouTube audience.
-    Skip instantly if definition_enabled is false.
-
-    STEP 1 — Write the definition yourself using EXACTLY this format:
-
-    WHAT IS {topic}?
-    [2-3 plain sentences. What is it, what does it do, one real example.]
-
-    WHY DOES IT MATTER?
-    [2-3 plain sentences. What problem it solves, why people care.]
-
-    KEY TERMS
-    1: [term] - [one plain-English sentence]
-    2: [term] - [one plain-English sentence]
-    3: [term] - [one plain-English sentence]
-    4: [term] - [one plain-English sentence]
-
-    RULES:
-    - ONLY these 3 sections. NO TIMELINE. NO WHAT YOU WILL SEE.
-    - No bullet points, no markdown, no bold text.
-    - Total text MUST be under 1500 characters.
-    - Term labels must be "1:" not "Term 1:"
-
-    STEP 2 — Call the Definition Tool with:
-      topic: "{topic}"
-      filename: "{filename}"
-      output_dir: "{output_dir}"
-      definition_text: <your full text from STEP 1>
-      start: {start}
-      end: {end}
-      definition_enabled: {definition_enabled}
-      channel: "{channel}"
-  expected_output: >
-    Confirmation that the definition was saved to output/{filename}.txt.
-    Example: "✅ Topic definition saved: output/LLMTuningMethods.txt (280 words)"
-  agent: definition_specialist

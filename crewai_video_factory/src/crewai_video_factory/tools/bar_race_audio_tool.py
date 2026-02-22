@@ -253,9 +253,8 @@ class BarRaceAudioTool(BaseTool):
                 start_year = int(years[0])
                 end_year = int(years[-1])
 
-                # Read definition .txt for intro narration
-                definition_intro = self._read_definition_txt(filename_clean, output_dir) if filename_clean and output_dir else ""
-
+                # Bar race audio covers ONLY intro + bar_race duration
+                # Definition video has its own separate audio — do NOT include here
                 if not with_points:
                     parts = [
                         f"Welcome to {channel}.",
@@ -302,14 +301,10 @@ class BarRaceAudioTool(BaseTool):
                 if with_points:
                     parts.append(f"And that brings us to {end_year}, where {final_leader} continues to lead the pack.")
                     parts.append("The evolution of technology and trends never stops.")
-                    if definition_intro:
-                        parts.append(definition_intro)
                     parts.append(f"Subscribe to {channel} for more data-driven insights.")
                 else:
                     parts.append(f"{end_year}. {final_leader} leads the pack.")
                     parts.append("Evolution of technology trends continuing.")
-                    if definition_intro:
-                        parts.append(definition_intro)
                     parts.append(f"Subscribe to {channel} for more insights.")
                 return " ".join(parts)
 

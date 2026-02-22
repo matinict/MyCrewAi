@@ -224,46 +224,15 @@ def run():
             _crew_done.set()
             _hb.join(timeout=1)
 
-        # Save define_topic task output to file if enabled
+        # Definition tool saves file directly — just verify it exists
         if inputs.get('definition_enabled', False):
-            try:
-                filename_clean = inputs.get('filename', '')
-                txt_path = f"output/{filename_clean}.txt"
-                # Get define_topic task output directly (index 2)
-                def_task_output = ""
-                for t in final_tasks:
-                    if hasattr(t, 'output') and t.output:
-                        raw = str(t.output.raw if hasattr(t.output, 'raw') else t.output).strip()
-                        # definition starts with WHAT IS or section headers
-                        if raw.startswith("WHAT IS") or "WHY DOES IT MATTER" in raw:
-                            def_task_output = raw
-                            break
-
-                if not def_task_output:
-                    # fallback: check all tasks for definition-like content
-                    for t in final_tasks:
-                        if hasattr(t, 'output') and t.output:
-                            raw = str(t.output.raw if hasattr(t.output, 'raw') else t.output).strip()
-                            if "WHAT IS" in raw and "KEY TERMS" in raw:
-                                def_task_output = raw
-                                break
-
-                if def_task_output and not def_task_output.upper().startswith("SKIP"):
-                    channel = inputs.get('channel', 'PlayOwnAi')
-                    start   = inputs.get('start', 2015)
-                    end     = inputs.get('end', 2026)
-                    sep     = "━" * 52
-                    header  = f"{sep}\n📖 TOPIC: {inputs['topic']}\nChannel: @{channel}  |  Period: {start}–{end}\n{sep}\n\n"
-                    footer  = f"\n\n{sep}\nSubscribe to @{channel} for more data-driven insights.\n{sep}\n"
-                    full    = header + def_task_output + footer
-                    os.makedirs("output", exist_ok=True)
-                    with open(txt_path, 'w', encoding='utf-8') as _df:
-                        _df.write(full)
-                    print(f"[Definition] ✅ Saved: {txt_path} ({len(full.split())} words)")
-                else:
-                    print(f"[Definition] ⚠️  No definition content found in task outputs")
-            except Exception as _e:
-                print(f"[Definition] ⚠️  Could not save: {_e}")
+            filename_clean = inputs.get('filename', '')
+            txt_path = f"output/{filename_clean}.txt"
+            if os.path.exists(txt_path):
+                size = os.path.getsize(txt_path)
+                print(f"[Definition] ✅ Saved: {txt_path} ({size} bytes)")
+            else:
+                print(f"[Definition] ⚠️  File not found: {txt_path}")
 
         print("\n" + "="*60)
         print("✅ VIDEO FACTORY COMPLETED")
@@ -332,11 +301,17 @@ def run():
             import re as _re
             topic_slug = "_".join(_re.findall(r"\w+", inputs["topic"])[:4])
             for fmt in inputs['video_formats']:
-                final_file = f"{output_dir}/{inputs['channel']}_{topic_slug}_{fmt}.mp4"
-                if os.path.exists(final_file):
-                    print(f"      ✅ {final_file}")
+                # Check renamed file first, then Final_ fallback
+                renamed   = f"{output_dir}/{inputs['channel']}_{topic_slug}_{fmt}.mp4"
+                final_raw = f"{output_dir}/Final_{fmt}.mp4"
+                if os.path.exists(renamed):
+                    size_mb = os.path.getsize(renamed) / (1024*1024)
+                    print(f"      ✅ {renamed} ({size_mb:.1f} MB)")
+                elif os.path.exists(final_raw):
+                    size_mb = os.path.getsize(final_raw) / (1024*1024)
+                    print(f"      ✅ {final_raw} ({size_mb:.1f} MB)  [yt_metadata not run — not renamed]")
                 else:
-                    print(f"      ❌ Not found: {final_file}")
+                    print(f"      ❌ Not found: {renamed}")
 
         if inputs.get('generate_youtube_metadata', False):
             print(f"   YouTube Metadata:")

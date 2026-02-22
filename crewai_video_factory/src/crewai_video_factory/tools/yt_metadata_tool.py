@@ -355,6 +355,9 @@ This visualization is based on comprehensive market data tracking {topic.lower()
                 os.path.join(output_dir, f"intro_{fmt}.mp4"),
                 os.path.join(output_dir, f"bar_race_{fmt}.mp4"),
                 os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3"),
+                os.path.join(output_dir, f"definition_video_{fmt}.mp4"),
+                os.path.join(output_dir, f"definition_video_{fmt}_audio.mp3"),
+                os.path.join(output_dir, f"definition_video_{fmt}_with_audio.mp4"),
             ]
             for path in to_delete:
                 if os.path.exists(path):
@@ -363,16 +366,21 @@ This visualization is based on comprehensive market data tracking {topic.lower()
                 else:
                     print(f"[YTMetadata]    Skip (not found): {os.path.basename(path)}")
 
-        # Rename Merge_bar_race_[fmt].mp4 → {channel}_{topic_slug}_{fmt}.mp4
+        # Rename final output → {channel}_{topic_slug}_{fmt}.mp4
+        # Priority: Final_[fmt].mp4 (defvid+race combined) → Merge_bar_race_[fmt].mp4 (race only)
         for fmt in video_formats:
             fmt = fmt.strip()
-            src = os.path.join(output_dir, f"Merge_bar_race_{fmt}.mp4")
             dst = os.path.join(output_dir, f"{channel}_{topic_slug}_{fmt}.mp4")
-            if os.path.exists(src):
+            candidates = [
+                os.path.join(output_dir, f"Final_{fmt}.mp4"),
+                os.path.join(output_dir, f"Merge_bar_race_{fmt}.mp4"),
+            ]
+            src = next((p for p in candidates if os.path.exists(p)), None)
+            if src:
                 os.rename(src, dst)
                 size_mb = os.path.getsize(dst) / (1024 * 1024)
-                print(f"[YTMetadata] ✅ Renamed: Merge_bar_race_{fmt}.mp4 → {os.path.basename(dst)} ({size_mb:.1f} MB)")
+                print(f"[YTMetadata] ✅ Renamed: {os.path.basename(src)} → {os.path.basename(dst)} ({size_mb:.1f} MB)")
             else:
-                print(f"[YTMetadata]    Skip rename (not found): Merge_bar_race_{fmt}.mp4")
+                print(f"[YTMetadata]    Skip rename (not found): Final_{fmt}.mp4 or Merge_bar_race_{fmt}.mp4")
 
         print(f"[YTMetadata] 🧹 Cleanup done")
