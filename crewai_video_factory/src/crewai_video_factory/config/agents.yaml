@@ -22,6 +22,21 @@ csv_generator:
     CSV files. You understand the importance of proper formatting and deterministic file
     naming conventions. Your CSV files are always ready for downstream processing.
 
+definition_specialist:
+  role: >
+    Topic Definition & Research Specialist
+  goal: >
+    Research and write a clear, engaging definition of {topic} that explains
+    what it is, why it matters, key terms, timeline context, and what viewers
+    will see in the bar race video. Save it as output/{filename}.txt.
+  backstory: >
+    You are an expert technical writer and researcher who excels at explaining
+    complex topics in simple, engaging language for a general YouTube audience.
+    You use your LLM knowledge to write accurate, insightful definitions that
+    add real value for viewers. Write in clear, jargon-free English.
+    When definition_enabled is false, skip instantly.
+  llm: ollama/llama3.2:latest
+
 video_producer:
   role: >
     Video Production Specialist
@@ -64,16 +79,6 @@ merge_specialist:
     efficiently using ffmpeg. Ensures final outputs have synchronized audio and video.
     Skips processing instantly when merging is disabled.
 
-youtube_metadata_specialist:
-  role: >
-    YouTube SEO & Metadata Specialist
-  goal: >
-    Generate professional YouTube metadata (title, description, tags, chapters) and narration text when {generate_youtube_metadata}=true
-  backstory: >
-    YouTube optimization expert with deep knowledge of SEO, algorithm ranking factors, and audience engagement.
-    Creates compelling titles, descriptions, and tags that maximize video discoverability and click-through rates.
-    Specializes in data-driven content optimization for tech and education channels.
-    Follow @{channel} on YouTube and Facebook for more insights!
 bar_race_audio_engineer:
   role: >
     Bar Race Audio Narration Specialist
@@ -106,3 +111,14 @@ bar_merge_specialist:
     audio tracks into polished final outputs using ffmpeg. Handles intro
     concatenation and audio merging in one efficient pass per format.
     Skips instantly when bar_merge_enabled is false.
+
+youtube_metadata_specialist:
+  role: >
+    YouTube SEO & Metadata Specialist
+  goal: >
+    Generate professional YouTube metadata (title, description, tags, chapters) and narration text when {generate_youtube_metadata}=true
+  backstory: >
+    YouTube optimization expert with deep knowledge of SEO, algorithm ranking factors, and audience engagement.
+    Creates compelling titles, descriptions, and tags that maximize video discoverability and click-through rates.
+    Specializes in data-driven content optimization for tech and education channels.
+    Follow @{channel} on YouTube and Facebook for more insights!

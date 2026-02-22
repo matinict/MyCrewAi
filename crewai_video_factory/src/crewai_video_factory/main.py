@@ -13,11 +13,18 @@ import sys
 import json
 import re
 import warnings
+import logging
 
 from crewai_video_factory.crew import CrewaiVideoFactory
-# Silence the specific Pydantic warning that calls the broken 'filtered_warn'
+# Silence Pydantic warnings
 warnings.filterwarnings("ignore", message=".*skip_file_prefixes.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
+# Silence LiteLLM proxy server import errors (fastapi/uvicorn not needed for client use)
+logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
+warnings.filterwarnings("ignore", message=".*fastapi.*")
+warnings.filterwarnings("ignore", message=".*litellm.*proxy.*")
+import os
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"  # prevents proxy server import
 
 def load_config():
     """Load configuration from input/data.json"""
@@ -131,6 +138,7 @@ def run():
     print(f"🔊 Audio Enabled: {inputs.get('audio_enabled', False)}")
     print(f"📹 Merge Audio-Video: {inputs.get('merge_audio_video', False)}")
     print(f"📺 YouTube Metadata: {inputs.get('generate_youtube_metadata', False)}")
+    print(f"📖 Definition: {inputs.get('definition_enabled', False)}  |  use_existing: {inputs.get('use_existing_definition', False)}")
     print("="*60 + "\n")
 
     try:
@@ -146,22 +154,22 @@ def run():
             final_tasks.append(full_crew.tasks[1])  # generate_csv
 
         if inputs.get('video_enabled', True):
-            final_tasks.append(full_crew.tasks[2])  # create_video
+            final_tasks.append(full_crew.tasks[3])  # create_video
 
         # crew.py task index map:
-        # [0] research_data          [1] generate_csv            [2] create_video
-        # [3] create_bar_race_video  [4] create_intro_clip       [5] bar_merge
+        # [0] research_data          [1] generate_csv            [2] define_topic
+        # [3] create_video           [4] create_bar_race_video   [5] create_intro_clip
         # [6] add_bar_race_audio     [7] add_audio               [8] merge_audio_video
-        # [9] generate_youtube_metadata
+        # [9] bar_merge              [10] generate_youtube_metadata  ← LAST
 
         if inputs.get('bar_race_video_enabled', False):
-            final_tasks.append(full_crew.tasks[3])  # create_bar_race_video
+            final_tasks.append(full_crew.tasks[4])  # create_bar_race_video
 
         if inputs.get('intro_enabled', False):
-            final_tasks.append(full_crew.tasks[4])  # create_intro_clip
+            final_tasks.append(full_crew.tasks[5])  # create_intro_clip
 
         if inputs.get('bar_merge_enabled', False):
-            final_tasks.append(full_crew.tasks[5])  # bar_merge
+            final_tasks.append(full_crew.tasks[9])  # bar_merge
 
         if inputs.get('bar_race_audio_enabled', False):
             final_tasks.append(full_crew.tasks[6])  # add_bar_race_audio
@@ -173,7 +181,12 @@ def run():
             final_tasks.append(full_crew.tasks[8])  # merge_audio_video
 
         if inputs.get('generate_youtube_metadata', False):
-            final_tasks.append(full_crew.tasks[9])  # generate_youtube_metadata
+            final_tasks.append(full_crew.tasks[10])  # generate_youtube_metadata
+
+        if inputs.get('definition_enabled', False) and not inputs.get('use_existing_definition', False):
+            final_tasks.append(full_crew.tasks[2])  # define_topic
+
+
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
@@ -181,7 +194,73 @@ def run():
 
         full_crew.tasks = final_tasks
 
-        result = full_crew.kickoff(inputs=inputs)
+        # ── Heartbeat: print progress every 10s while crew runs ──
+        import threading, time as _time
+
+        _crew_done = threading.Event()
+        _start_ts  = _time.time()
+
+        def _heartbeat():
+            step = 0
+            spinners = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
+            while not _crew_done.is_set():
+                _time.sleep(10)
+                if not _crew_done.is_set():
+                    elapsed = int(_time.time() - _start_ts)
+                    spin = spinners[step % len(spinners)]
+                    m, s = divmod(elapsed, 60)
+                    print(f"  {spin} Agent working ... {m:02d}:{s:02d} elapsed", flush=True)
+                    step += 1
+
+        _hb = threading.Thread(target=_heartbeat, daemon=True)
+        _hb.start()
+
+        try:
+            result = full_crew.kickoff(inputs=inputs)
+        finally:
+            _crew_done.set()
+            _hb.join(timeout=1)
+
+        # Save define_topic task output to file if enabled
+        if inputs.get('definition_enabled', False):
+            try:
+                filename_clean = inputs.get('filename', '')
+                txt_path = f"output/{filename_clean}.txt"
+                # Get define_topic task output directly (index 2)
+                def_task_output = ""
+                for t in final_tasks:
+                    if hasattr(t, 'output') and t.output:
+                        raw = str(t.output.raw if hasattr(t.output, 'raw') else t.output).strip()
+                        # definition starts with WHAT IS or section headers
+                        if raw.startswith("WHAT IS") or "WHY DOES IT MATTER" in raw:
+                            def_task_output = raw
+                            break
+
+                if not def_task_output:
+                    # fallback: check all tasks for definition-like content
+                    for t in final_tasks:
+                        if hasattr(t, 'output') and t.output:
+                            raw = str(t.output.raw if hasattr(t.output, 'raw') else t.output).strip()
+                            if "WHAT IS" in raw and "KEY TERMS" in raw:
+                                def_task_output = raw
+                                break
+
+                if def_task_output and not def_task_output.upper().startswith("SKIP"):
+                    channel = inputs.get('channel', 'PlayOwnAi')
+                    start   = inputs.get('start', 2015)
+                    end     = inputs.get('end', 2026)
+                    sep     = "━" * 52
+                    header  = f"{sep}\n📖 TOPIC: {inputs['topic']}\nChannel: @{channel}  |  Period: {start}–{end}\n{sep}\n\n"
+                    footer  = f"\n\n{sep}\nSubscribe to @{channel} for more data-driven insights.\n{sep}\n"
+                    full    = header + def_task_output + footer
+                    os.makedirs("output", exist_ok=True)
+                    with open(txt_path, 'w', encoding='utf-8') as _df:
+                        _df.write(full)
+                    print(f"[Definition] ✅ Saved: {txt_path} ({len(full.split())} words)")
+                else:
+                    print(f"[Definition] ⚠️  No definition content found in task outputs")
+            except Exception as _e:
+                print(f"[Definition] ⚠️  Could not save: {_e}")
 
         print("\n" + "="*60)
         print("✅ VIDEO FACTORY COMPLETED")
@@ -266,6 +345,14 @@ def run():
             for mf in metadata_files:
                 if os.path.exists(mf):
                     print(f"      ✅ {mf}")
+
+        if inputs.get('definition_enabled', False):
+            print(f"   Topic Definition:")
+            def_file = f"output/{inputs['filename']}.txt"
+            if os.path.exists(def_file):
+                print(f"      ✅ {def_file}")
+            else:
+                print(f"      ❌ Not found: {def_file}")
 
         print(f"\n⏱️  Duration tip: {fps} seconds per period")
         print("="*60 + "\n")
