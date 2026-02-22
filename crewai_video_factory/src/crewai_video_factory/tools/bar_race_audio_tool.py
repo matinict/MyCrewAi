@@ -98,7 +98,8 @@ class BarRaceAudioTool(BaseTool):
             print(f"[BarRaceAudioTool]    parent_dir={parent_dir}, cwd={os.getcwd()}")
 
         # --- GENERATE NARRATION ---
-        narration = self._generate_narration(topic, csv_path, channel=channel)
+        narration = self._generate_narration(topic, csv_path, channel=channel,
+                                               filename_clean=filename_clean, output_dir=output_dir)
         print(f"[BarRaceAudioTool] Narration length: {len(narration)} chars")
 
         # --- SAVE NARRATION TEXT (Shorts only) ---
@@ -127,7 +128,8 @@ class BarRaceAudioTool(BaseTool):
 
         # Narration variants
         narration_short = narration  # no points (already generated above)
-        narration_full  = self._generate_narration(topic, csv_path, with_points=True, channel=channel)
+        narration_full  = self._generate_narration(topic, csv_path, with_points=True, channel=channel,
+                                                    filename_clean=filename_clean, output_dir=output_dir)
 
         # Save HD cc_en
         if hd_videos:
@@ -185,8 +187,61 @@ class BarRaceAudioTool(BaseTool):
             summary += "\n\n⚠️ Some errors:\n" + "\n".join(errors)
         return summary
 
-    def _generate_narration(self, topic: str, csv_path: str | None, with_points: bool = False, channel: str = "PlayOwnAi") -> str:
-        """Generate narration with one spoken line per year from CSV."""
+    def _read_definition_txt(self, filename_clean: str, output_dir: str) -> str:
+        """
+        Read and clean the topic definition .txt file.
+        Returns plain spoken text starting from WHAT IS...
+        Strips ━━━, 📖, Channel:, Subscribe:, [instructions], doubled terms.
+        """
+        parent_dir = os.path.dirname(os.path.abspath(output_dir))
+        candidates = [
+            os.path.join(parent_dir, f"{filename_clean}.txt"),
+            f"output/{filename_clean}.txt",
+        ]
+        txt_path = next((p for p in candidates if os.path.exists(p)), None)
+        if not txt_path:
+            return ""
+
+        import re as _re
+        with open(txt_path, 'r', encoding='utf-8') as f:
+            raw = f.read()
+
+        lines_out = []
+        skip = False
+        for ln in raw.splitlines():
+            s = ln.strip()
+            if not s or s.startswith('━') or s.startswith('─'):
+                continue
+            # Strip emoji icons
+            s = _re.sub(r'^[\U00010000-\U0010ffff\U0001f300-\U0001f9ff\u2600-\u27ff]+\s*', '', s).strip()
+            if not s:
+                continue
+            if _re.match(r'^(TOPIC:|Channel:|Subscribe to)', s, _re.I):
+                continue
+            if _re.match(r'^(TIMELINE|WHAT YOU WILL SEE)', s, _re.I):
+                skip = True
+            if skip:
+                continue
+            # Remove [instruction leakage]
+            s = _re.sub(r'\[.*?\]', '', s).strip()
+            if not s:
+                continue
+            # Fix doubled term numbers
+            s = _re.sub(r'KEY\s+TERMS\s+(\d+):\s*\1:\s*', r'KEY TERMS \1: ', s)
+            s = _re.sub(r'KEY\s+TERMS\s+(\d+):', r'KEY TERMS \1:', s)
+            s = _re.sub(r'\bTerm\s+(\d+):\s*', r'\1: ', s)
+            s = _re.sub(r'\b(\d+):\s+\1:\s*', r'\1: ', s)
+            # Replace section headers with spoken versions
+            s = _re.sub(r'^WHAT IS (.+?)\?\s*$', r'What is \1?', s, flags=_re.I)
+            s = _re.sub(r'^WHY DOES IT MATTER\?\s*$', 'Why does it matter?', s, flags=_re.I)
+            s = _re.sub(r'^KEY TERMS\s*$', 'Key terms.', s, flags=_re.I)
+            s = _re.sub(r'^KEY TERMS\s*(\d+):', r'Term \1:', s)
+            lines_out.append(s)
+
+        return ' '.join(lines_out).strip()
+
+    def _generate_narration(self, topic: str, csv_path: str | None, with_points: bool = False, channel: str = "PlayOwnAi", filename_clean: str = "", output_dir: str = "") -> str:
+        """Generate narration: definition intro + year-by-year race commentary."""
         if csv_path and os.path.exists(csv_path):
             try:
                 import pandas as pd
@@ -198,18 +253,19 @@ class BarRaceAudioTool(BaseTool):
                 start_year = int(years[0])
                 end_year = int(years[-1])
 
-                # Shorts: concise narration / HD: full narration
+                # Read definition .txt for intro narration
+                definition_intro = self._read_definition_txt(filename_clean, output_dir) if filename_clean and output_dir else ""
+
                 if not with_points:
                     parts = [
                         f"Welcome to {channel}.",
                         f"{topic} Race {start_year} to {end_year}.",
-                        "Basic trending idea. Let's landscape year by year.",
+                        "Let's watch the race year by year.",
                     ]
                 else:
                     parts = [
                         f"Welcome to {channel}.",
                         f"Today, we're exploring the {topic} Race from {start_year} to {end_year}.",
-                        "This is for a basic idea about trending.",
                         "Let's see how the landscape evolved, year by year.",
                     ]
 
@@ -244,17 +300,17 @@ class BarRaceAudioTool(BaseTool):
 
                 final_leader = df.iloc[-1][data_cols].idxmax()
                 if with_points:
-                    parts.extend([
-                        f"And that brings us to {end_year}, where {final_leader} continues to lead the pack.",
-                        "The evolution of technology and trends never stops.",
-                        f"Subscribe to {channel} for more data-driven insights.",
-                    ])
+                    parts.append(f"And that brings us to {end_year}, where {final_leader} continues to lead the pack.")
+                    parts.append("The evolution of technology and trends never stops.")
+                    if definition_intro:
+                        parts.append(definition_intro)
+                    parts.append(f"Subscribe to {channel} for more data-driven insights.")
                 else:
-                    parts.extend([
-                        f"{end_year}. {final_leader} leads the pack.",
-                        "Evolution of technology trends continuing.",
-                        f"Subscribe to {channel} for more insights.",
-                    ])
+                    parts.append(f"{end_year}. {final_leader} leads the pack.")
+                    parts.append("Evolution of technology trends continuing.")
+                    if definition_intro:
+                        parts.append(definition_intro)
+                    parts.append(f"Subscribe to {channel} for more insights.")
                 return " ".join(parts)
 
             except Exception as e:

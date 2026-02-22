@@ -305,32 +305,39 @@ bar_merge:
 
 define_topic:
   description: >
-    Research and write a clear, engaging definition of {topic} for a YouTube audience.
-    This task will automatically skip if definition_enabled is false in inputs.
+    Write a short, plain-English definition of {topic} for a YouTube audience.
+    Skip instantly if definition_enabled is false.
 
-    When enabled, write the full definition covering ALL of these sections:
+    STEP 1 — Write the definition yourself using EXACTLY this format:
 
     WHAT IS {topic}?
-    A clear, simple explanation of what this topic is and how it works.
+    [2-3 plain sentences. What is it, what does it do, one real example.]
 
     WHY DOES IT MATTER?
-    Why should viewers care? What real-world impact does it have?
+    [2-3 plain sentences. What problem it solves, why people care.]
 
     KEY TERMS
-    Define 3-5 key terms or concepts that viewers need to understand.
+    1: [term] - [one plain-English sentence]
+    2: [term] - [one plain-English sentence]
+    3: [term] - [one plain-English sentence]
+    4: [term] - [one plain-English sentence]
 
-    TIMELINE CONTEXT
-    What was happening from {start} to {end}? Key milestones and shifts.
+    RULES:
+    - ONLY these 3 sections. NO TIMELINE. NO WHAT YOU WILL SEE.
+    - No bullet points, no markdown, no bold text.
+    - Total text MUST be under 1500 characters.
+    - Term labels must be "1:" not "Term 1:"
 
-    WHAT YOU WILL SEE
-    Describe what viewers will watch in the bar race video — which items
-    compete, how rankings change, and what the data reveals.
-
-    Save the definition to output/{filename}.txt using the Definition Tool.
-    DO NOT skip or summarize — write the full definition text first,
-    then call the Definition Tool with definition_text=<your full text>.
+    STEP 2 — Call the Definition Tool with:
+      topic: "{topic}"
+      filename: "{filename}"
+      output_dir: "{output_dir}"
+      definition_text: <your full text from STEP 1>
+      start: {start}
+      end: {end}
+      definition_enabled: {definition_enabled}
+      channel: "{channel}"
   expected_output: >
-    Confirmation that the definition was saved to output/{filename}.txt,
-    including word count and a preview of the first few lines.
-    Example: "✅ Topic definition saved: output/LLMTuningMethods.txt (312 words)"
+    Confirmation that the definition was saved to output/{filename}.txt.
+    Example: "✅ Topic definition saved: output/LLMTuningMethods.txt (280 words)"
   agent: definition_specialist

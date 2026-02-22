@@ -97,22 +97,80 @@ class DefinitionTool(BaseTool):
         parent_dir = os.path.dirname(os.path.abspath(output_dir))
         txt_path = os.path.join(parent_dir, f"{filename_clean}.txt")
 
-        # Wrap with header/footer if agent didn't include them
-        header = (
-            f"{'━'*52}\n"
-            f"📖 TOPIC: {topic}\n"
-            f"Channel: @{channel}  |  Period: {start}–{end}\n"
-            f"{'━'*52}\n\n"
-        )
-        footer = (
-            f"\n\n{'━'*52}\n"
-            f"Subscribe to @{channel} for more data-driven insights.\n"
-            f"{'━'*52}\n"
-        )
+        # No header/footer — plain text only for clean video & audio output
+        header = ""
+        footer = ""
 
-        full_text = definition_text.strip()
-        if "━━━" not in full_text:
-            full_text = header + full_text + footer
+        # ── Clean & trim the agent output before saving ────────────────
+        import re as _re
+        trimmed = definition_text.strip()
+
+        # 1. Remove prompt instruction leakage like [2-3 plain sentences. ...]
+        trimmed = _re.sub(r'\[.*?\]', '', trimmed)
+
+        # 2. Remove TIMELINE / WHAT YOU WILL SEE sections entirely
+        trimmed = _re.split(r'\nTIMELINE', trimmed, flags=_re.IGNORECASE)[0]
+        trimmed = _re.split(r'\nWHAT YOU WILL SEE', trimmed, flags=_re.IGNORECASE)[0]
+
+        # 3. Fix doubled term numbers: "1: 1:" or "Term 1: 1:" → "1:"
+        trimmed = _re.sub(r'\bTerm\s*(\d+):\s*', r'\1: ', trimmed)
+        trimmed = _re.sub(r'(\d+):\s*\1:\s*', r'\1: ', trimmed)
+
+        # 4. KEY TERMS inline → split to new line
+        trimmed = _re.sub(r'KEY TERMS\s*(\d+):', r'KEY TERMS\n\1:', trimmed)
+
+        # 5. Collapse 3+ blank lines → 1 blank line
+        trimmed = _re.sub(r'\n{3,}', '\n\n', trimmed).strip()
+
+        # 6. Hard cap at 1200 chars
+        if len(trimmed) > 1200:
+            cap = trimmed[:1200]
+            last_break = max(cap.rfind('.'), cap.rfind('\n'))
+            trimmed = cap[:last_break + 1].strip() if last_break > 800 else cap.strip()
+
+        # ── Clean & trim the agent output before saving ────────────────
+        import re as _re
+
+        def clean_definition(text):
+            lines_out = []
+            for ln in text.splitlines():
+                s = ln.strip()
+                if not s or s.startswith('━') or s.startswith('─'):
+                    lines_out.append('')
+                    continue
+                # Strip emoji icons then check for junk header lines
+                s_clean = _re.sub(
+                    r'^[\U00010000-\U0010ffff\U0001f300-\U0001f9ff'
+                    r'\u2600-\u27ff\u2000-\u206f]+\s*', '', s).strip()
+                if _re.match(r'^TOPIC:', s_clean, _re.I):
+                    continue
+                if _re.match(r'^(Channel:|Subscribe to)', s, _re.I):
+                    continue
+                lines_out.append(s)
+            text = '\n'.join(lines_out).strip()
+
+            # Remove [instruction leakage like this]
+            text = _re.sub(r'\[.*?\]', '', text)
+            # Remove TIMELINE / WHAT YOU WILL SEE tails
+            text = _re.split(r'\nTIMELINE', text, flags=_re.IGNORECASE)[0]
+            text = _re.split(r'\nWHAT YOU WILL SEE', text, flags=_re.IGNORECASE)[0]
+            # "KEY TERMS 1: 1:" → "KEY TERMS\n1:"
+            text = _re.sub(r'KEY\s+TERMS\s+(\d+):\s*\1:\s*', r'KEY TERMS\n\1: ', text)
+            text = _re.sub(r'KEY\s+TERMS\s+(\d+):', r'KEY TERMS\n\1:', text)
+            # "Term N:" → "N:"
+            text = _re.sub(r'\bTerm\s+(\d+):\s*', r'\1: ', text)
+            # Any remaining "N: N:" doubled → "N:"
+            text = _re.sub(r'\b(\d+):\s+\1:\s*', r'\1: ', text)
+            # Collapse blank lines
+            text = _re.sub(r'\n{3,}', '\n\n', text).strip()
+            # Hard cap 1200 chars at sentence boundary
+            if len(text) > 1200:
+                cap = text[:1200]
+                cut = max(cap.rfind('.'), cap.rfind('\n'))
+                text = cap[:cut+1].strip() if cut > 800 else cap.strip()
+            return text
+
+        full_text = clean_definition(definition_text)
 
         try:
             os.makedirs(parent_dir, exist_ok=True)

@@ -14,6 +14,7 @@ dependencies = [
   "bar_chart_race>=0.1.0",
   "static-ffmpeg>=3.0",
   "litellm>=1.75.3",
+  "gtts>=2.5.4",
 ]
 
 [tool.uv]
