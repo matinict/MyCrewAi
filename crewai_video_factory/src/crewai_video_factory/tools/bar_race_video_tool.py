@@ -428,13 +428,11 @@ class BarRaceVideoTool(BaseTool):
 
         if not with_points:
             parts = [
-                f"Welcome to {channel}.",
                 f"{topic_str} Race {start_year} to {end_year}.",
                 "Basic trending idea. Let's go year by year.",
             ]
         else:
             parts = [
-                f"Welcome to {channel}.",
                 f"Today, we're exploring the {topic_str} Race from {start_year} to {end_year}.",
                 "This is for a basic idea about trending.",
                 "Let's see how the landscape evolved, year by year.",
