@@ -373,7 +373,22 @@ This visualization is based on comprehensive market data tracking {topic.lower()
         print(f"[YTMetadata] 🧹 Cleanup starting — formats={video_formats} topic_slug={topic_slug}")
 
         # ── Step 1: Rename Final → channel_topic_fmt FIRST (before deleting) ──
-        for fmt in video_formats:
+        # Build full list of formats to process:
+        # - video_formats from inputs (may be incomplete if agent only passed one)
+        # - PLUS any Final_*.mp4 / Merge_bar_race_*.mp4 found via glob (catches all)
+        import glob as _rglob
+        glob_fmts = set()
+        for pat in [f"Final_*.mp4", f"Merge_bar_race_*.mp4"]:
+            for p in _rglob.glob(os.path.join(output_dir, pat)):
+                name = os.path.basename(p)
+                # Extract format: Final_HD.mp4 → HD, Merge_bar_race_Shorts.mp4 → Shorts
+                m = re.search(r"(?:Final_|Merge_bar_race_)(.+)\.mp4$", name)
+                if m:
+                    glob_fmts.add(m.group(1))
+        all_fmts = list(dict.fromkeys(video_formats + sorted(glob_fmts)))  # preserve order, no dupes
+        print(f"[YTMetadata]   Rename targets: {all_fmts} (inputs={video_formats} glob={sorted(glob_fmts)})")
+
+        for fmt in all_fmts:
             fmt = fmt.strip()
             dst = os.path.join(output_dir, f"{channel}_{topic_slug}_{fmt}.mp4")
             # Skip if final renamed file already exists
@@ -391,25 +406,22 @@ This visualization is based on comprehensive market data tracking {topic.lower()
                 size_mb = os.path.getsize(dst) / (1024 * 1024)
                 print(f"[YTMetadata] ✅ Renamed: {os.path.basename(src)} → {os.path.basename(dst)} ({size_mb:.1f} MB)")
             else:
-                print(f"[YTMetadata]    Skip rename: Final_{fmt}.mp4 / Merge_bar_race_{fmt}.mp4 not found")
+                print(f"[YTMetadata]    No source found for fmt={fmt}")
 
-        # ── Step 2: Delete known temp files per format ──
-        for fmt in video_formats:
-            fmt = fmt.strip()
-            to_delete = [
-                f"intro_{fmt}.mp4",
-                f"bar_race_{fmt}.mp4",
-                f"bar_race_{fmt}_audio.mp3",
-                f"Merge_bar_race_{fmt}.mp4",
-                f"definition_video_{fmt}.mp4",
-                f"definition_video_{fmt}_audio.mp3",
-                f"definition_video_{fmt}_with_audio.mp4",
-            ]
-            for name in to_delete:
-                path = os.path.join(output_dir, name)
-                if os.path.exists(path):
-                    os.remove(path)
-                    print(f"[YTMetadata] 🗑️  Deleted: {name}")
+        # ── Step 2: Delete known temp files — scan ALL formats via glob ──
+        _temp_prefixes = [
+            "intro_", "bar_race_", "definition_video_", "Merge_bar_race_", "Final_"
+        ]
+        _temp_exts = (".mp4", ".mp3")
+        for f in os.listdir(output_dir):
+            fpath = os.path.join(output_dir, f)
+            if not os.path.isfile(fpath):
+                continue
+            if not any(f.endswith(ext) for ext in _temp_exts):
+                continue
+            if any(f.startswith(pfx) for pfx in _temp_prefixes):
+                os.remove(fpath)
+                print(f"[YTMetadata] 🗑️  Deleted: {f}")
 
         # ── Step 3: Glob delete any remaining temp/norm/stage files ──
         temp_patterns = [
