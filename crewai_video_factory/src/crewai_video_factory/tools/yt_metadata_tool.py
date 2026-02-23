@@ -1,9 +1,65 @@
 import os
 import json
+import re
+import time
+import urllib.request
+import urllib.parse
 from crewai.tools import BaseTool
 from typing import Type
 from pydantic import BaseModel, Field
 from datetime import datetime
+
+# All target languages for metadata translation
+LANGUAGES = [
+    'ar', 'bn', 'bg', 'bs', 'my', 'zh-cn', 'cs', 'et', 'fr', 'de', 'el',
+    'gu', 'hi', 'id', 'it', 'ja', 'ko', 'mr', 'fa', 'pl', 'pt',
+    'ru', 'sr', 'es', 'ta', 'te', 'th', 'tr', 'uk', 'ur', 'vi'
+]
+
+LANG_NAMES = {
+    'ar':'Arabic','bn':'Bengali','bg':'Bulgarian','bs':'Bosnian','my':'Burmese',
+    'zh-cn':'Chinese','cs':'Czech','et':'Estonian','fr':'French','de':'German',
+    'el':'Greek','gu':'Gujarati','hi':'Hindi','id':'Indonesian','it':'Italian',
+    'ja':'Japanese','ko':'Korean','mr':'Marathi','fa':'Persian','pl':'Polish',
+    'pt':'Portuguese','ru':'Russian','sr':'Serbian','es':'Spanish','ta':'Tamil',
+    'te':'Telugu','th':'Thai','tr':'Turkish','uk':'Ukrainian','ur':'Urdu','vi':'Vietnamese'
+}
+
+def _google_translate(text: str, dest: str, retries: int = 3) -> str:
+    """Translate text using Google Translate free endpoint. No API key needed."""
+    if not text or not text.strip():
+        return text
+    # Chunk long text (Google free endpoint limit ~4000 chars)
+    if len(text) > 4000:
+        # Split on double-newline, translate each chunk
+        chunks = text.split("\n\n")
+        translated = []
+        for chunk in chunks:
+            translated.append(_google_translate(chunk, dest, retries))
+            time.sleep(0.1)
+        return "\n\n".join(translated)
+    try:
+        url = (
+            "https://translate.googleapis.com/translate_a/single"
+            f"?client=gtx&sl=en&tl={urllib.parse.quote(dest)}"
+            f"&dt=t&q={urllib.parse.quote(text)}"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        for attempt in range(retries):
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    result = "".join(part[0] for part in data[0] if part[0])
+                    return result
+            except Exception as e:
+                if attempt < retries - 1:
+                    time.sleep(1.5)
+                else:
+                    print(f"[YTMetadata] ⚠️  Translation failed ({dest}): {e}")
+                    return text  # fallback: return original
+    except Exception as e:
+        print(f"[YTMetadata] ⚠️  Translation error ({dest}): {e}")
+        return text
 
 class YouTubeMetadataToolInput(BaseModel):
     """Input schema for YouTubeMetadataTool."""
@@ -109,10 +165,10 @@ class YouTubeMetadataTool(BaseTool):
             fmt_results = []
             for fmt in fmts:
                 fmt = fmt.strip()
-                # Skip if metadata already exists for this format
-                existing = os.path.join(output_dir, f"YT_Metadata_{fmt}.json")
+                # Skip if English metadata already exists for this format
+                existing = os.path.join(output_dir, "YT", f"Metadata_{fmt}_En.json")
                 if os.path.exists(existing):
-                    print(f"[YTMetadata]   • [{fmt}] ⏭️  Skipping — YT_Metadata_{fmt}.json already exists")
+                    print(f"[YTMetadata]   • [{fmt}] ⏭️  Skipping — YT/Metadata_{fmt}_En.json already exists")
                     fmt_results.append(f"⏭️  [{fmt}] Skipped (already exists)")
                     continue
                 is_portrait = fmt in ("Shorts", "ShortsHD", "Shorts4K")
@@ -215,7 +271,27 @@ class YouTubeMetadataTool(BaseTool):
         return self._write_metadata_files(topic, title, description, tags, chapters, output_dir)
 
     def _write_metadata_files(self, topic: str, title: str, description: str, tags: list, chapters: str, output_dir: str, fmt: str = "") -> str:
-        """Write JSON + TXT metadata files to output_dir, with optional per-format suffix."""
+        """
+        Write metadata files into YT/ subfolder.
+        Structure:
+          output/{topic}/YT/
+            {fmt}_En.json   ← English JSON
+            {fmt}_En.txt    ← English TXT
+            {fmt}_{Lang}.txt  ← one TXT per language (31 languages)
+        """
+        yt_dir = os.path.join(output_dir, "YT")
+        # Auto-migrate old YT/ folder → YT/ if it exists
+        old_yt = os.path.join(output_dir, "YT")
+        if os.path.exists(old_yt) and not os.path.exists(yt_dir):
+            import shutil as _shutil
+            _shutil.move(old_yt, yt_dir)
+            print(f"[YTMetadata]   🔄 Migrated: YT/ → YT/")
+        os.makedirs(yt_dir, exist_ok=True)
+
+        prefix = fmt if fmt else "Video"
+        file_prefix = f"Metadata_{prefix}"  # e.g. Metadata_HD, Metadata_Shorts
+
+        # ── English JSON ──
         metadata = {
             "title": title,
             "description": description,
@@ -225,17 +301,57 @@ class YouTubeMetadataTool(BaseTool):
             "language": "en",
             "created_at": datetime.now().isoformat()
         }
-        suffix = f"_{fmt}" if fmt else ""
-        metadata_json_path = f"{output_dir}/YT_Metadata{suffix}.json"
-        with open(metadata_json_path, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-        metadata_txt_path = f"{output_dir}/YT_Metadata{suffix}.txt"
-        with open(metadata_txt_path, 'w', encoding='utf-8') as f:
-            f.write(f"TITLE:\n{title}\n\n")
-            f.write(f"DESCRIPTION:\n{description}\n\n")
-            f.write(f"TAGS:\n{', '.join(tags)}\n\n")
-            f.write(f"CHAPTERS:\n{chapters}\n")
-        return f"🎬 [{fmt or'all'}] YT_Metadata{suffix}.json + YT_Metadata{suffix}.txt"
+        en_json_path = os.path.join(yt_dir, f"{file_prefix}_En.json")
+        # Skip if already exists
+        if not os.path.exists(en_json_path):
+            with open(en_json_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+            print(f"[YTMetadata]   📄 Saved: {file_prefix}_En.json")
+        else:
+            print(f"[YTMetadata]   ⏭️  Exists: {file_prefix}_En.json")
+
+        # ── English TXT ──
+        en_txt_path = os.path.join(yt_dir, f"{file_prefix}_En.txt")
+        if not os.path.exists(en_txt_path):
+            with open(en_txt_path, 'w', encoding='utf-8') as f:
+                f.write(f"TITLE:\n{title}\n\n")
+                f.write(f"DESCRIPTION:\n{description}\n\n")
+                f.write(f"TAGS:\n{', '.join(tags)}\n\n")
+                f.write(f"CHAPTERS:\n{chapters}\n")
+            print(f"[YTMetadata]   📄 Saved: {file_prefix}_En.txt")
+        else:
+            print(f"[YTMetadata]   ⏭️  Exists: {file_prefix}_En.txt")
+
+        # ── Translated TXT files — one per language ──
+        print(f"[YTMetadata]   🌍 Translating to {len(LANGUAGES)} languages …")
+        ok_count = 0
+        for lang_code in LANGUAGES:
+            lang_suffix = lang_code  # use code directly: bn, ar, zh-cn, fr...
+            txt_path = os.path.join(yt_dir, f"{file_prefix}_{lang_suffix}.txt")
+
+            if os.path.exists(txt_path):
+                print(f"[YTMetadata]     ⏭️  {file_prefix}_{lang_suffix}.txt exists")
+                ok_count += 1
+                continue
+
+            try:
+                t_title       = _google_translate(title, lang_code)
+                t_description = _google_translate(description, lang_code)
+                t_tags_str    = _google_translate(", ".join(tags), lang_code)
+
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(f"TITLE:\n{t_title}\n\n")
+                    f.write(f"DESCRIPTION:\n{t_description}\n\n")
+                    f.write(f"TAGS:\n{t_tags_str}\n\n")
+                    f.write(f"CHAPTERS:\n{chapters}\n")  # chapters keep timestamps (numbers)
+                print(f"[YTMetadata]     ✅ {file_prefix}_{lang_suffix}.txt  ({LANG_NAMES.get(lang_suffix, lang_suffix)})")
+                ok_count += 1
+                time.sleep(0.2)  # be polite to free API
+            except Exception as e:
+                print(f"[YTMetadata]     ❌ {lang_code}: {e}")
+
+        total = len(LANGUAGES) + 2  # +2 for En.json + En.txt
+        return f"🎬 [{file_prefix}] {ok_count+2}/{total} files in YT/"
     def _generate_youtube_title(self, topic: str, start_year: int, end_year: int, channel: str = "PlayOwnAi") -> str:
         """Generate SEO-optimized YouTube title"""
 
