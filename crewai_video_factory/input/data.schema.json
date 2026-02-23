@@ -17,20 +17,45 @@
   "granularity": {
     "type": "string",
     "description": "Data granularity",
-    "enum": ["yearly", "monthly", "daily"],
+    "enum": [
+      "yearly",
+      "monthly",
+      "daily"
+    ],
     "example": "yearly"
   },
   "animation_styles": {
     "type": "array",
     "description": "Animation styles to generate (for standard video_producer)",
-    "enum": ["bar", "line", "bubble", "pie", "stream", "map"],
-    "example": ["bar", "line"]
+    "enum": [
+      "bar",
+      "line",
+      "bubble",
+      "pie",
+      "stream",
+      "map"
+    ],
+    "example": [
+      "bar",
+      "line"
+    ]
   },
   "video_formats": {
     "type": "array",
     "description": "Video formats to generate. Applies to bar race, intro, audio and merge tasks.",
-    "enum": ["HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"],
-    "example": ["Shorts", "HD"]
+    "enum": [
+      "HD",
+      "2K",
+      "4K",
+      "8K",
+      "Shorts",
+      "ShortsHD",
+      "Shorts4K"
+    ],
+    "example": [
+      "Shorts",
+      "HD"
+    ]
   },
   "fps": {
     "type": "number",
@@ -68,6 +93,19 @@
     "type": "boolean",
     "description": "Generate a plain-English topic definition and save to output/{filename}.txt.",
     "example": true
+  },
+  "definition_max_chars": {
+    "type": "integer",
+    "description": "Maximum characters for the topic definition text saved to output/{filename}.txt. Controls how much content the agent writes and the hard cap applied by the Definition Tool.",
+    "minimum": 300,
+    "maximum": 3000,
+    "default": 1200,
+    "examples": {
+      "600": "Very short \u2014 one paragraph per section",
+      "1200": "Default \u2014 balanced length for video display",
+      "2000": "Long \u2014 detailed definition with more key terms",
+      "3000": "Maximum \u2014 full article-style definition"
+    }
   },
   "use_existing_definition": {
     "type": "boolean",
@@ -187,7 +225,10 @@
     "example": "youtube.com/@PlayOwnAi"
   },
   "llm_researcher": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the data_researcher agent (research_data task). null = use project default.",
     "examples": {
       "null": "Use project default model",
@@ -198,11 +239,14 @@
     "example": null
   },
   "llm_definition": {
-    "type": ["string", "null"],
-    "description": "LLM override for the definition_specialist agent (define_topic task). null = use project default. Tip: use a strong model here — this agent must compose text AND call a tool correctly in one shot.",
+    "type": [
+      "string",
+      "null"
+    ],
+    "description": "LLM override for the definition_specialist agent (define_topic task). null = use project default. Tip: use a strong model here \u2014 this agent must compose text AND call a tool correctly in one shot.",
     "examples": {
       "null": "Use project default model",
-      "openai/gpt-4o": "Recommended — reliable tool calling",
+      "openai/gpt-4o": "Recommended \u2014 reliable tool calling",
       "openai/gpt-4o-mini": "Good balance of quality and cost",
       "deepseek/deepseek-chat": "Cost-effective, good instruction following",
       "anthropic/claude-3-haiku": "Fast and reliable for structured output"
@@ -210,7 +254,10 @@
     "example": null
   },
   "llm_csv": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the csv_generator agent (generate_csv task). null = use project default.",
     "examples": {
       "null": "Use project default model",
@@ -220,7 +267,10 @@
     "example": null
   },
   "llm_video": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the video_producer and bar_race_video_producer agents. null = use project default.",
     "examples": {
       "null": "Use project default model",
@@ -229,7 +279,10 @@
     "example": null
   },
   "llm_audio": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the audio_engineer and bar_race_audio_engineer agents. null = use project default.",
     "examples": {
       "null": "Use project default model",
@@ -238,7 +291,10 @@
     "example": null
   },
   "llm_youtube": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the youtube_metadata_specialist agent. null = use project default.",
     "examples": {
       "null": "Use project default model",

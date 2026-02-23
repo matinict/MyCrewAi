@@ -35,6 +35,7 @@ class DefinitionToolInput(BaseModel):
     end: int = Field(default=2026, description="End year of data")
     definition_enabled: bool = Field(default=False, description="Whether to generate topic definition")
     channel: str = Field(default="PlayOwnAi", description="Channel name for branding")
+    definition_max_chars: int = Field(default=1200, description="Hard cap on definition text length in characters")
 
 
 class DefinitionTool(BaseTool):
@@ -65,6 +66,7 @@ class DefinitionTool(BaseTool):
         end: int = 2026,
         definition_enabled: bool = False,
         channel: str = "PlayOwnAi",
+        definition_max_chars: int = 1200,
     ) -> str:
 
         if not definition_enabled:
@@ -122,16 +124,16 @@ class DefinitionTool(BaseTool):
         # 5. Collapse 3+ blank lines → 1 blank line
         trimmed = _re.sub(r'\n{3,}', '\n\n', trimmed).strip()
 
-        # 6. Hard cap at 1200 chars
-        if len(trimmed) > 1200:
-            cap = trimmed[:1200]
+        # 6. Hard cap at definition_max_chars
+        if len(trimmed) > definition_max_chars:
+            cap = trimmed[:definition_max_chars]
             last_break = max(cap.rfind('.'), cap.rfind('\n'))
-            trimmed = cap[:last_break + 1].strip() if last_break > 800 else cap.strip()
+            trimmed = cap[:last_break + 1].strip() if last_break > int(definition_max_chars * 0.67) else cap.strip()
 
         # ── Clean & trim the agent output before saving ────────────────
         import re as _re
 
-        def clean_definition(text):
+        def clean_definition(text, definition_max_chars=1200):
             lines_out = []
             for ln in text.splitlines():
                 s = ln.strip()
@@ -163,14 +165,14 @@ class DefinitionTool(BaseTool):
             text = _re.sub(r'\b(\d+):\s+\1:\s*', r'\1: ', text)
             # Collapse blank lines
             text = _re.sub(r'\n{3,}', '\n\n', text).strip()
-            # Hard cap 1200 chars at sentence boundary
-            if len(text) > 1200:
-                cap = text[:1200]
+            # Hard cap at definition_max_chars
+            if len(text) > definition_max_chars:
+                cap = text[:definition_max_chars]
                 cut = max(cap.rfind('.'), cap.rfind('\n'))
-                text = cap[:cut+1].strip() if cut > 800 else cap.strip()
+                text = cap[:cut+1].strip() if cut > int(definition_max_chars * 0.67) else cap.strip()
             return text
 
-        full_text = clean_definition(definition_text)
+        full_text = clean_definition(definition_text, definition_max_chars)
 
         try:
             os.makedirs(parent_dir, exist_ok=True)

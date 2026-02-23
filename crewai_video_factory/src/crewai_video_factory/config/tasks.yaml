@@ -56,7 +56,7 @@ define_topic:
     - Plain text only: no bullet points, no bold, no markdown, no brackets of any kind.
     - 3 sections only: WHAT IS, WHY DOES IT MATTER, KEY TERMS. Nothing else.
     - Term labels must be numbers: "1:" not "Term 1:".
-    - Total text under 1200 characters.
+    - Total text under {definition_max_chars} characters.
     - You MUST write the full text inside the tool call — do not call the tool with empty definition_text.
   expected_output: >
     Confirmation that output/{filename}.txt was saved with word and character count.

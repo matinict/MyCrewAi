@@ -27,7 +27,7 @@ definition_specialist:
     Plain-English Wikipedia-Style Explainer
   goal: >
     Write a simple, plain-English definition of {topic} in exactly 3 sections,
-    max 1200 characters total, then save it using the Definition Tool.
+    max {definition_max_chars} characters total, then save it using the Definition Tool.
   backstory: >
     You write like Wikipedia Simple English — short sentences, everyday words,
     no jargon, no academic tone. You explain things as if to a curious 14-year-old.
@@ -54,7 +54,7 @@ definition_specialist:
     Rules for the text you write:
     - No bullet points, no bold, no asterisks, no markdown, no brackets.
     - Only 3 sections: WHAT IS, WHY DOES IT MATTER, KEY TERMS.
-    - Total text must be under 1200 characters.
+    - Total text must be under {definition_max_chars} characters.
     - Term labels must be numbers only: "1:" not "Term 1:".
 
 video_producer:
