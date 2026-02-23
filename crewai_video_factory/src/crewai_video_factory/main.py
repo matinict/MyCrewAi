@@ -118,12 +118,14 @@ def run():
 
     if use_existing:
         if not os.path.exists(csv_path):
-            print(f"❌ ERROR: use_existing_csv=True but CSV not found at {csv_path}")
-            print("💡 Fix: Set use_existing_csv=False to generate new data, or create the CSV manually")
-            sys.exit(1)
-        print("⭐️  SKIPPING data research & CSV generation (using existing file)")
-        inputs['_skip_research'] = True
-        inputs['_skip_csv'] = True
+            print(f"⚠️  use_existing_csv=True but CSV not found at {csv_path}")
+            print("🔄 Auto-generating CSV data instead...")
+            inputs['_skip_research'] = False
+            inputs['_skip_csv'] = False
+        else:
+            print("⭐️  SKIPPING data research & CSV generation (using existing file)")
+            inputs['_skip_research'] = True
+            inputs['_skip_csv'] = True
     else:
         print("📊 Researching new data & generating CSV")
         inputs['_skip_research'] = False
@@ -139,11 +141,21 @@ def run():
     print(f"📹 Merge Audio-Video: {inputs.get('merge_audio_video', False)}")
     print(f"📺 YouTube Metadata: {inputs.get('generate_youtube_metadata', False)}")
     print(f"🎬 Definition Video: {inputs.get('definition_video', False)}")
+
+    # LLM overrides banner
+    llm_keys = ['llm_researcher', 'llm_definition', 'llm_csv', 'llm_video', 'llm_audio', 'llm_youtube']
+    llm_overrides = {k: inputs[k] for k in llm_keys if inputs.get(k) and str(inputs[k]).strip().lower() not in ('null','none','')}
+    if llm_overrides:
+        print("🤖 LLM Overrides:")
+        for k, v in llm_overrides.items():
+            print(f"   {k}: {v}")
+    else:
+        print("🤖 LLMs: project default for all agents")
     print("="*60 + "\n")
 
     try:
         crew_instance = CrewaiVideoFactory()
-        full_crew = crew_instance.crew()
+        full_crew = crew_instance.crew(inputs=inputs)
 
         # ===== CONDITIONAL TASK EXECUTION =====
         final_tasks = []
@@ -169,8 +181,16 @@ def run():
             final_tasks.append(full_crew.tasks[6])  # create_intro_clip
 
         # define_topic runs right after generate_csv (early, so definition is ready)
-        if inputs.get('definition_enabled', False) and not inputs.get('use_existing_definition', False):
-            final_tasks.append(full_crew.tasks[2])  # define_topic
+        if inputs.get('definition_enabled', False):
+            definition_txt = f"output/{inputs['filename']}.txt"
+            use_existing_def = inputs.get('use_existing_definition', False)
+            if use_existing_def and not os.path.exists(definition_txt):
+                print(f"⚠️  use_existing_definition=True but .txt not found at {definition_txt}")
+                print("🔄 Auto-generating definition instead...")
+                use_existing_def = False
+                inputs['use_existing_definition'] = False
+            if not use_existing_def:
+                final_tasks.append(full_crew.tasks[2])  # define_topic
 
         if inputs.get('bar_race_audio_enabled', False):
             final_tasks.append(full_crew.tasks[8])  # add_bar_race_audio

@@ -1,5 +1,5 @@
 {
-  "topic": "LLM Trainning Methods",
+  "topic": "LLM Alignment (RLHF)",
   "start": 2015,
   "end": 2026,
   "granularity": "yearly",
@@ -27,11 +27,17 @@
   "audio_speed": 1.2,
   "audio_speed_hd": 1.0,
   "merge_audio_video": false,
-  "generate_youtube_metadata": true,
+  "generate_youtube_metadata": false,
   "channel": "PlayOwnAi",
   "channel_lower": "playownai",
   "website": "youtube.com/@PlayOwnAi",
   "watermark_enabled": false,
   "watermark_text": "@PlayOwnAi",
-  "watermark_opacity": 60
+  "watermark_opacity": 60,
+  "llm_researcher": "deepseek/deepseek-chat",
+  "llm_definition": "deepseek/deepseek-chat",
+  "llm_csv": "deepseek/deepseek-chat",
+  "llm_video": null,
+  "llm_audio": null,
+  "llm_youtube": null
 }

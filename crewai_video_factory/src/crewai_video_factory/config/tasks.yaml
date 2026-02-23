@@ -26,41 +26,41 @@ create_definition_video:
 
 define_topic:
   description: >
-    Research and write a clear, engaging plain-English definition of {topic}.
-    When definition_enabled is false, skip instantly by outputting "SKIP".
-    When use_existing_definition is true, skip instantly by outputting "SKIP".
+    Save a plain-English definition of {topic} by calling the Definition Tool exactly once.
+    When definition_enabled is false, output "SKIP" immediately.
+    When use_existing_definition is true, output "SKIP" immediately.
 
-    YOU MUST OUTPUT EXACTLY THIS FORMAT — no extra sections, no markdown:
-
-    WHAT IS {topic}?
-    [2-3 short plain sentences. What is it? What does it do? One real example.]
-
-    WHY DOES IT MATTER?
-    [2-3 short plain sentences. What problem does it solve? Why do people use it?]
-
-    KEY TERMS
-    1: [Short term] - [One plain sentence. No jargon.]
-    2: [Short term] - [One plain sentence. No jargon.]
-    3: [Short term] - [One plain sentence. No jargon.]
-
-    STRICT RULES:
-    - ONLY these 3 sections. NO TIMELINE. NO WHAT YOU WILL SEE.
-    - Total output MUST be under 1200 characters.
-    - Plain text only — no bullet points, no bold, no markdown.
-    - Term labels must be "1:" not "Term 1:".
-
-    Then call the Definition Tool with EXACTLY:
+    Call the Definition Tool with ALL of these fields filled in:
       topic: "{topic}"
       filename: "{filename}"
       output_dir: "{output_dir}"
-      definition_text: <your written text above>
       start: {start}
       end: {end}
       definition_enabled: {definition_enabled}
       channel: "{channel}"
+      definition_text: |
+        WHAT IS {topic}?
+        <Write 2-3 real plain sentences: what it is, what it does, one real-world example.>
+
+        WHY DOES IT MATTER?
+        <Write 2-3 real plain sentences: what problem it solves, why people use it.>
+
+        KEY TERMS
+        1: <TermName> - <One plain sentence, no jargon.>
+        2: <TermName> - <One plain sentence, no jargon.>
+        3: <TermName> - <One plain sentence, no jargon.>
+        4: <TermName> - <One plain sentence, no jargon.>
+
+    CRITICAL RULES for definition_text you write:
+    - Replace every <...> with your own real words about {topic}. No angle brackets in output.
+    - Plain text only: no bullet points, no bold, no markdown, no brackets of any kind.
+    - 3 sections only: WHAT IS, WHY DOES IT MATTER, KEY TERMS. Nothing else.
+    - Term labels must be numbers: "1:" not "Term 1:".
+    - Total text under 1200 characters.
+    - You MUST write the full text inside the tool call — do not call the tool with empty definition_text.
   expected_output: >
-    Confirmation that output/{filename}.txt was saved.
-    Example: "Topic definition saved: output/LLMTrainningMethods.txt  350 words"
+    Confirmation that output/{filename}.txt was saved with word and character count.
+    Example: "Topic definition saved: output/LLMAlignmentRLHF.txt  42 words | 380 chars"
     Task is COMPLETE when tool confirms save. Do not retry.
   agent: definition_specialist
 

@@ -56,13 +56,28 @@
   },
   "use_existing_csv": {
     "type": "boolean",
-    "description": "Use existing CSV instead of generating new one. Skips research_data and generate_csv tasks.",
+    "description": "Use existing CSV instead of generating new one. Skips research_data and generate_csv tasks. If CSV is missing, auto-generates it instead of erroring.",
     "example": false
   },
   "use_label_mappings": {
     "type": "boolean",
     "description": "Apply label_mappings.json to shorten bar names (e.g. 'JavaScript' => 'JS'). Set false to use raw CSV column names.",
     "example": true
+  },
+  "definition_enabled": {
+    "type": "boolean",
+    "description": "Generate a plain-English topic definition and save to output/{filename}.txt.",
+    "example": true
+  },
+  "use_existing_definition": {
+    "type": "boolean",
+    "description": "Use existing output/{filename}.txt instead of generating a new one. If the .txt is missing, auto-generates it instead of erroring.",
+    "example": false
+  },
+  "definition_video": {
+    "type": "boolean",
+    "description": "Create a line-by-line storytelling video from the definition .txt file.",
+    "example": false
   },
   "video_enabled": {
     "type": "boolean",
@@ -124,10 +139,17 @@
   },
   "intro_duration": {
     "type": "integer",
-    "description": "Duration of intro clip in seconds.",
+    "description": "Duration of intro clip in seconds for Shorts format.",
     "minimum": 1,
     "maximum": 60,
     "example": 5
+  },
+  "intro_duration_hd": {
+    "type": "integer",
+    "description": "Duration of intro clip in seconds for HD format.",
+    "minimum": 1,
+    "maximum": 60,
+    "example": 10
   },
   "bar_merge_enabled": {
     "type": "boolean",
@@ -163,5 +185,66 @@
     "type": "string",
     "description": "Channel website or primary URL shown in YouTube metadata.",
     "example": "youtube.com/@PlayOwnAi"
+  },
+  "llm_researcher": {
+    "type": ["string", "null"],
+    "description": "LLM override for the data_researcher agent (research_data task). null = use project default.",
+    "examples": {
+      "null": "Use project default model",
+      "openai/gpt-4o-mini": "Fast, cheap OpenAI model",
+      "deepseek/deepseek-chat": "Cost-effective research model",
+      "ollama/llama3.2:latest": "Local Ollama model"
+    },
+    "example": null
+  },
+  "llm_definition": {
+    "type": ["string", "null"],
+    "description": "LLM override for the definition_specialist agent (define_topic task). null = use project default. Tip: use a strong model here — this agent must compose text AND call a tool correctly in one shot.",
+    "examples": {
+      "null": "Use project default model",
+      "openai/gpt-4o": "Recommended — reliable tool calling",
+      "openai/gpt-4o-mini": "Good balance of quality and cost",
+      "deepseek/deepseek-chat": "Cost-effective, good instruction following",
+      "anthropic/claude-3-haiku": "Fast and reliable for structured output"
+    },
+    "example": null
+  },
+  "llm_csv": {
+    "type": ["string", "null"],
+    "description": "LLM override for the csv_generator agent (generate_csv task). null = use project default.",
+    "examples": {
+      "null": "Use project default model",
+      "openai/gpt-4o-mini": "Fast and accurate for structured data tasks",
+      "deepseek/deepseek-chat": "Good at following format rules"
+    },
+    "example": null
+  },
+  "llm_video": {
+    "type": ["string", "null"],
+    "description": "LLM override for the video_producer and bar_race_video_producer agents. null = use project default.",
+    "examples": {
+      "null": "Use project default model",
+      "openai/gpt-4o-mini": "Reliable tool calling for video tasks"
+    },
+    "example": null
+  },
+  "llm_audio": {
+    "type": ["string", "null"],
+    "description": "LLM override for the audio_engineer and bar_race_audio_engineer agents. null = use project default.",
+    "examples": {
+      "null": "Use project default model",
+      "openai/gpt-4o-mini": "Fast for audio narration generation"
+    },
+    "example": null
+  },
+  "llm_youtube": {
+    "type": ["string", "null"],
+    "description": "LLM override for the youtube_metadata_specialist agent. null = use project default.",
+    "examples": {
+      "null": "Use project default model",
+      "openai/gpt-4o": "Better SEO-quality metadata",
+      "deepseek/deepseek-chat": "Good creative writing for descriptions"
+    },
+    "example": null
   }
 }

@@ -26,34 +26,36 @@ definition_specialist:
   role: >
     Plain-English Wikipedia-Style Explainer
   goal: >
-    Write a simple, plain-English definition of {topic} in exactly 3 sections.
-    Max 1200 characters total. No TIMELINE. No WHAT YOU WILL SEE.
-    Save it as output/{filename}.txt using the Definition Tool.
+    Write a simple, plain-English definition of {topic} in exactly 3 sections,
+    max 1200 characters total, then save it using the Definition Tool.
   backstory: >
     You write like Wikipedia Simple English — short sentences, everyday words,
-    no jargon, no academic tone. Imagine explaining to a curious 14-year-old.
+    no jargon, no academic tone. You explain things as if to a curious 14-year-old.
 
-    YOU MUST OUTPUT EXACTLY THIS FORMAT — nothing more, nothing less:
+    Your ONLY job is to call the Definition Tool ONE time with all required fields filled in.
+    You must compose the definition_text yourself and pass it directly in the tool call.
+    Never call the tool with an empty definition_text.
+
+    The definition_text you write must follow this exact plain-text structure
+    (no brackets, no placeholders, no markdown — write real sentences):
 
     WHAT IS {topic}?
-    [2-3 short plain sentences. What is it? What does it do? Give one real example.]
+    Two or three short sentences. Say what it is, what it does, and give one real example.
 
     WHY DOES IT MATTER?
-    [2-3 short plain sentences. What problem does it solve? Why do people use it?]
+    Two or three short sentences. Say what problem it solves and why people use it.
 
     KEY TERMS
-    1: [Short term name] - [One plain sentence. No jargon.]
-    2: [Short term name] - [One plain sentence. No jargon.]
-    3: [Short term name] - [One plain sentence. No jargon.]
-    4: [Short term name] - [One plain sentence. No jargon.]
+    1: TermName - One plain sentence explaining this term.
+    2: TermName - One plain sentence explaining this term.
+    3: TermName - One plain sentence explaining this term.
+    4: TermName - One plain sentence explaining this term.
 
-    STRICT RULES:
-    - 3 sections ONLY. Do NOT add TIMELINE or WHAT YOU WILL SEE.
-    - No bullet points. No markdown. No bold. No asterisks.
-    - Total output MUST be under 1200 characters.
-    - Write "Term" label as just a number: "1:" not "Term 1:"
-    - When definition_enabled is false, skip instantly and return skip message.
-  llm: ollama/llama3.2:latest
+    Rules for the text you write:
+    - No bullet points, no bold, no asterisks, no markdown, no brackets.
+    - Only 3 sections: WHAT IS, WHY DOES IT MATTER, KEY TERMS.
+    - Total text must be under 1200 characters.
+    - Term labels must be numbers only: "1:" not "Term 1:".
 
 video_producer:
   role: >

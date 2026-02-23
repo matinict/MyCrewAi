@@ -23,29 +23,30 @@ class CrewaiVideoFactory:
 
     def __init__(self):
         self.filename = None
+        self._inputs = {}
+
+    def _llm(self, key: str):
+        """Return LLM override from inputs, or None to use project default."""
+        val = self._inputs.get(key)
+        return val if val and str(val).strip().lower() not in ('null', 'none', '') else None
 
     @agent
     def data_researcher(self) -> Agent:
-        return Agent(
-            config=self.agents_config['data_researcher'],
-            verbose=True
-        )
+        kwargs = dict(config=self.agents_config['data_researcher'], verbose=True)
+        if self._llm('llm_researcher'): kwargs['llm'] = self._llm('llm_researcher')
+        return Agent(**kwargs)
 
     @agent
     def csv_generator(self) -> Agent:
-        return Agent(
-            config=self.agents_config['csv_generator'],
-            tools=[CSVTool()],
-            verbose=True
-        )
+        kwargs = dict(config=self.agents_config['csv_generator'], tools=[CSVTool()], verbose=True)
+        if self._llm('llm_csv'): kwargs['llm'] = self._llm('llm_csv')
+        return Agent(**kwargs)
 
     @agent
     def video_producer(self) -> Agent:
-        return Agent(
-            config=self.agents_config['video_producer'],
-            tools=[SmartVideoTool()],
-            verbose=True
-        )
+        kwargs = dict(config=self.agents_config['video_producer'], tools=[SmartVideoTool()], verbose=True)
+        if self._llm('llm_video'): kwargs['llm'] = self._llm('llm_video')
+        return Agent(**kwargs)
 
     @agent
     def bar_race_video_producer(self) -> Agent:
@@ -85,11 +86,9 @@ class CrewaiVideoFactory:
 
     @agent
     def audio_engineer(self) -> Agent:
-        return Agent(
-            config=self.agents_config['audio_engineer'],
-            tools=[AudioGenerationTool()],
-            verbose=True
-        )
+        kwargs = dict(config=self.agents_config['audio_engineer'], tools=[AudioGenerationTool()], verbose=True)
+        if self._llm('llm_audio'): kwargs['llm'] = self._llm('llm_audio')
+        return Agent(**kwargs)
 
     @agent
     def merge_specialist(self) -> Agent:
@@ -101,19 +100,15 @@ class CrewaiVideoFactory:
 
     @agent
     def youtube_metadata_specialist(self) -> Agent:
-        return Agent(
-            config=self.agents_config['youtube_metadata_specialist'],
-            tools=[YouTubeMetadataTool()],
-            verbose=True
-        )
+        kwargs = dict(config=self.agents_config['youtube_metadata_specialist'], tools=[YouTubeMetadataTool()], verbose=True)
+        if self._llm('llm_youtube'): kwargs['llm'] = self._llm('llm_youtube')
+        return Agent(**kwargs)
 
     @agent
     def definition_specialist(self) -> Agent:
-        return Agent(
-            config=self.agents_config['definition_specialist'],
-            tools=[],  # no tools — agent writes definition as pure text output
-            verbose=True
-        )
+        kwargs = dict(config=self.agents_config['definition_specialist'], tools=[DefinitionTool()], verbose=True)
+        if self._llm('llm_definition'): kwargs['llm'] = self._llm('llm_definition')
+        return Agent(**kwargs)
 
     @agent
     def definition_video_producer(self) -> Agent:
@@ -200,9 +195,11 @@ class CrewaiVideoFactory:
         )
 
     @crew
-    def crew(self) -> Crew:
+    def crew(self, inputs: dict = None) -> Crew:
         """Creates the Video Factory crew with all potential agents and tasks.
         Conditional execution is handled in main.py"""
+        if inputs:
+            self._inputs = inputs
         return Crew(
             agents=self.agents,
             tasks=self.tasks,
