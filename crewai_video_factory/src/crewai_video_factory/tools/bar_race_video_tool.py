@@ -32,6 +32,10 @@ class BarRaceInput(BaseModel):
     watermark_enabled: bool = Field(default=False, description="Overlay semi-transparent watermark text on video.")
     watermark_text: str = Field(default="@PlayOwnAi", description="Watermark text to display.")
     watermark_opacity: int = Field(default=60, ge=0, le=255, description="Watermark opacity (0=invisible, 255=fully opaque).")
+    topic: str = Field(default="", description="Topic name for narration script.")
+    channel: str = Field(default="PlayOwnAi", description="Channel name for subscribe CTA in narration.")
+    audio_speed: float = Field(default=1.0, description="TTS playback speed for Shorts via atempo (0.5-2.0). 1.0=normal.")
+    audio_speed_hd: float = Field(default=0.0, description="TTS playback speed for HD/landscape formats. 0.0 = fall back to audio_speed.")
 
 class BarRaceVideoTool(BaseTool):
     name: str = "Bar Race Video Tool"
@@ -127,6 +131,10 @@ class BarRaceVideoTool(BaseTool):
         watermark_enabled = kwargs.get("watermark_enabled", False)
         watermark_text    = kwargs.get("watermark_text", "@PlayOwnAi")
         watermark_opacity = int(kwargs.get("watermark_opacity", 60))
+        topic             = kwargs.get("topic", "")
+        channel           = kwargs.get("channel", "PlayOwnAi")
+        audio_speed       = float(kwargs.get("audio_speed", 1.0))
+        audio_speed_hd    = float(kwargs.get("audio_speed_hd", 0.0))
 
         if isinstance(video_formats, str):
             video_formats = [video_formats.strip()]
@@ -359,12 +367,223 @@ class BarRaceVideoTool(BaseTool):
                     )
                     if os.path.exists(fixed_path):
                         os.replace(fixed_path, output_path)
-                    results.append(f"✅ {fmt}: {output_path}")
+
+                    # ── Audio: generate TTS synced to video duration ───────
+                    if os.path.exists(output_path):  # audio always generated with video
+                        video_dur   = self._get_duration(output_path)
+                        audio_path  = os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3")
+                        final_path  = os.path.join(output_dir, f"bar_race_{fmt}_with_audio.mp4")
+
+                        # Shorts = concise narration + audio_speed
+                        # HD/landscape = full narration with data points + audio_speed_hd
+                        _spd = audio_speed if is_portrait else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
+                        narration = self._build_narration(
+                            df_viz, topic, channel,
+                            with_points=not is_portrait   # Shorts=short, HD=full with values
+                        )
+
+                        # Save narration as cc_en.txt alongside video
+                        cc_path = os.path.join(output_dir, f"bar_race_{fmt}_cc_en.txt")
+                        with open(cc_path, 'w', encoding='utf-8') as _f:
+                            _f.write(narration)
+                        print(f"[BarRace] 📝 Narration saved: {cc_path} ({len(narration)} chars)")
+
+                        self._generate_tts(narration, audio_path, video_dur, _spd)
+                        if os.path.exists(audio_path):
+                            self._merge_audio_video(output_path, audio_path, final_path, video_dur)
+                            merged_kb = os.path.getsize(final_path) // 1024 if os.path.exists(final_path) else 0
+                            kb = os.path.getsize(output_path) // 1024
+                            results.append(
+                                f"✅ {fmt}: {output_path} ({kb} KB) "
+                                f"+ audio → bar_race_{fmt}_with_audio.mp4 ({merged_kb} KB) "
+                                f"[{len(narration.split())} words, speed={_spd}]"
+                            )
+                        else:
+                            kb = os.path.getsize(output_path) // 1024
+                            results.append(f"✅ {fmt}: {output_path} ({kb} KB) [audio failed]")
+                    else:
+                        kb = os.path.getsize(output_path) // 1024 if os.path.exists(output_path) else 0
+                        results.append(f"✅ {fmt}: {output_path} ({kb} KB)")
 
             except Exception as e:
                 results.append(f"❌ {fmt}: {str(e)}")
 
         return "\n".join(results)
+
+
+    # ──────────────────────────────────────────────────────────────────
+    def _build_narration(self, df_viz, topic: str, channel: str,
+                         with_points: bool = False) -> str:
+        """
+        Build year-by-year narration matched to audio_tool.py logic.
+        with_points=False → concise Shorts version (fewer words, faster pace)
+        with_points=True  → full HD version (leader + value + context sentence)
+        """
+        topic_str = topic if topic else "this topic"
+
+        # Derive start/end years from index
+        years = [p.year if hasattr(p, 'year') else int(str(p)) for p in df_viz.index]
+        start_year = years[0]
+        end_year   = years[-1]
+
+        if not with_points:
+            parts = [
+                f"Welcome to {channel}.",
+                f"{topic_str} Race {start_year} to {end_year}.",
+                "Basic trending idea. Let's go year by year.",
+            ]
+        else:
+            parts = [
+                f"Welcome to {channel}.",
+                f"Today, we're exploring the {topic_str} Race from {start_year} to {end_year}.",
+                "This is for a basic idea about trending.",
+                "Let's see how the landscape evolved, year by year.",
+            ]
+
+        for period, row in df_viz.iterrows():
+            year       = period.year if hasattr(period, 'year') else int(str(period))
+            sorted_row = row.dropna().sort_values(ascending=False)
+            if sorted_row.empty:
+                continue
+            leader     = sorted_row.index[0]
+            value      = int(sorted_row.iloc[0])
+
+            if value == 0:
+                parts.append(f"{year}. Race not yet begun." if not with_points
+                             else f"{year}. The race has not yet begun.")
+            elif value <= 20:
+                parts.append(f"{year}. {leader} leads. Market forming." if not with_points
+                             else f"{year}. {leader} leads with {value} points. The market is forming.")
+            elif value <= 40:
+                parts.append(f"{year}. {leader} leads. Gaining traction." if not with_points
+                             else f"{year}. {leader} leads with {value} points. Gaining traction.")
+            elif value <= 70:
+                parts.append(f"{year}. {leader} leads. Showing strength." if not with_points
+                             else f"{year}. {leader} leads with {value} points. Showing real strength.")
+            else:
+                parts.append(f"{year}. {leader} dominates." if not with_points
+                             else f"{year}. {leader} dominates with {value} points.")
+
+        final_row  = df_viz.iloc[-1].dropna().sort_values(ascending=False)
+        final_lead = final_row.index[0] if not final_row.empty else "the leader"
+
+        if with_points:
+            parts.extend([
+                f"And that brings us to {end_year}, where {final_lead} continues to lead the pack.",
+                "The evolution of technology and trends never stops.",
+                f"Subscribe to {channel} for more data-driven insights.",
+            ])
+        else:
+            parts.extend([
+                f"{end_year}. {final_lead} leads the pack.",
+                "Evolution continues.",
+                f"Subscribe to {channel} for more insights.",
+            ])
+
+        return " ".join(parts)
+
+    # ──────────────────────────────────────────────────────────────────
+    def _get_duration(self, video_path: str) -> float:
+        """Get video duration in seconds via ffprobe."""
+        import subprocess
+        r = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "csv=p=0", video_path],
+            capture_output=True, text=True
+        )
+        try:
+            return float(r.stdout.strip())
+        except Exception:
+            return 0.0
+
+    # ──────────────────────────────────────────────────────────────────
+    def _generate_tts(self, text: str, audio_path: str, video_dur: float,
+                      audio_speed: float = 1.0):
+        """
+        Generate TTS MP3 and apply audio_speed preference (same as audio_tool.py).
+
+        Strategy:
+        - Apply audio_speed directly as atempo (user clarity preference).
+        - If the resulting audio is longer than video_dur → slow it down
+          a bit more so it fits (avoids cut-off speech).
+        - If shorter → leave it; _merge_audio_video pads with silence.
+        - This avoids the "compounding sync×speed" bug that made Shorts
+          audio impossibly fast.
+        """
+        import subprocess, os
+        try:
+            from gtts import gTTS
+        except ImportError:
+            print("[BarRace] ⚠️  gTTS not installed — no audio. Run: pip install gTTS")
+            return
+
+        def atempo_chain(ratio: float) -> str:
+            """Build atempo filter string, chaining if outside 0.5–2.0."""
+            ratio = max(0.25, min(4.0, ratio))
+            if ratio < 0.5:
+                return f"atempo=0.5000,atempo={ratio/0.5:.4f}"
+            elif ratio > 2.0:
+                return f"atempo=2.0000,atempo={ratio/2.0:.4f}"
+            return f"atempo={ratio:.4f}"
+
+        tmp = audio_path.replace('.mp3', '_raw.mp3')
+        try:
+            print(f"[BarRace] 🔊 Generating TTS ({len(text)} chars, speed={audio_speed}) ...")
+            slow_mode = audio_speed <= 0.85
+            tts = gTTS(text=text, lang='en', slow=slow_mode)
+            tts.save(tmp)
+
+            raw_dur = self._get_duration(tmp)
+            if raw_dur <= 0:
+                os.rename(tmp, audio_path)
+                return
+
+            # Step 1: apply user speed preference
+            final_ratio = audio_speed
+
+            # Step 2: if speech still won't fit in video, slow it down just enough
+            adjusted_dur = raw_dur / max(audio_speed, 0.01)
+            if adjusted_dur > video_dur * 1.05:          # >5% overflow
+                fit_ratio = raw_dur / max(video_dur, 1)  # compress to fit
+                final_ratio = fit_ratio
+                print(f"[BarRace] ⚠️  Narration too long ({adjusted_dur:.1f}s > {video_dur:.1f}s video) "
+                      f"— auto-compressing to fit: atempo={fit_ratio:.3f}")
+            else:
+                print(f"[BarRace] 🔊 TTS {raw_dur:.1f}s, video {video_dur:.1f}s, "
+                      f"atempo={final_ratio:.3f} → est {raw_dur/final_ratio:.1f}s "
+                      f"({'padded with silence' if raw_dur/final_ratio < video_dur else 'fits'})")
+
+            af = atempo_chain(final_ratio)
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", tmp, "-filter:a", af, audio_path],
+                capture_output=True, check=False
+            )
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            if result.returncode != 0:
+                print(f"[BarRace] ⚠️  atempo failed: {result.stderr.decode()[:120]}")
+        except Exception as e:
+            print(f"[BarRace] ⚠️  TTS error: {e}")
+            if os.path.exists(tmp):
+                os.rename(tmp, audio_path)
+
+    # ──────────────────────────────────────────────────────────────────
+    def _merge_audio_video(self, video_path: str, audio_path: str,
+                           output_path: str, video_dur: float):
+        """Merge TTS audio into bar race video; pad audio with silence if shorter."""
+        import subprocess
+        print(f"[BarRace] 🎬 Merging audio+video → {os.path.basename(output_path)}")
+        result = subprocess.run([
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-i", audio_path,
+            "-c:v", "copy", "-c:a", "aac",
+            "-filter_complex", f"[1:a]apad,atrim=duration={video_dur:.3f}[aout]",
+            "-map", "0:v", "-map", "[aout]",
+            output_path
+        ], capture_output=True, check=False)
+        if result.returncode != 0:
+            print(f"[BarRace] ⚠️  merge failed: {result.stderr.decode()[:150]}")
 
     def _add_watermark(self, fig, text: str, opacity: int, width_px: int, height_px: int):
         """

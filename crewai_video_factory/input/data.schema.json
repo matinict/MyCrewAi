@@ -145,11 +145,6 @@
     "maximum": 255,
     "example": 60
   },
-  "bar_race_audio_enabled": {
-    "type": "boolean",
-    "description": "Enable audio narration for bar race videos. Independent of audio_enabled.",
-    "example": true
-  },
   "audio_speed": {
     "type": "number",
     "description": "Speech speed for Shorts audio via ffmpeg atempo filter. 1.0=normal, <1.0=slower, >1.0=faster.",
@@ -160,7 +155,7 @@
   },
   "audio_speed_hd": {
     "type": "number",
-    "description": "Speech speed for HD audio ONLY via ffmpeg atempo. Set 0.0 to fall back to audio_speed for both formats.",
+    "description": "Speech speed for HD/landscape audio ONLY via ffmpeg atempo. Used by both audio_tool (standard videos) and bar_race_video_tool (bar race). Set 0.0 to fall back to audio_speed for all formats.",
     "minimum": 0.0,
     "maximum": 2.0,
     "examples": {

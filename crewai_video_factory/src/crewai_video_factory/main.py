@@ -135,7 +135,6 @@ def run():
     print(f"📱 Formats: {', '.join(inputs['video_formats'])}")
     print(f"🎬 Video Enabled: {inputs.get('video_enabled', True)}")
     print(f"✨ Bar Race Video Enabled: {inputs.get('bar_race_video_enabled', False)}")
-    print(f"🎙️ Bar Race Audio Enabled: {inputs.get('bar_race_audio_enabled', False)}")
     print(f"🎬 Intro Clip Enabled: {inputs.get('intro_enabled', False)}")
     print(f"🔊 Audio Enabled: {inputs.get('audio_enabled', False)}")
     print(f"📹 Merge Audio-Video: {inputs.get('merge_audio_video', False)}")
@@ -192,8 +191,6 @@ def run():
             if not use_existing_def:
                 final_tasks.append(full_crew.tasks[2])  # define_topic
 
-        if inputs.get('bar_race_audio_enabled', False):
-            final_tasks.append(full_crew.tasks[8])  # add_bar_race_audio
 
         if inputs.get('audio_enabled', False):
             final_tasks.append(full_crew.tasks[9])  # add_audio
@@ -287,16 +284,20 @@ def run():
         if inputs.get('bar_race_video_enabled', False):
             print(f"   Videos (Bar Race):")
             for fmt in inputs['video_formats']:
-                video_file = f"{output_dir}/bar_race_{fmt}_bar_race_{fmt}.mp4"
-                if os.path.exists(video_file):
-                    print(f"      ✅ {video_file}")
-
-        if inputs.get('bar_race_audio_enabled', False):
-            print(f"   Audio (Bar Race):")
-            for fmt in inputs['video_formats']:
+                video_file = f"{output_dir}/bar_race_{fmt}.mp4"
                 audio_file = f"{output_dir}/bar_race_{fmt}_audio.mp3"
+                merged_file = f"{output_dir}/bar_race_{fmt}_with_audio.mp4"
+                if os.path.exists(video_file):
+                    kb = os.path.getsize(video_file) // 1024
+                    print(f"      ✅ {video_file} ({kb} KB)")
+                else:
+                    print(f"      ❌ Not found: {video_file}")
                 if os.path.exists(audio_file):
-                    print(f"      ✅ {audio_file}")
+                    kb = os.path.getsize(audio_file) // 1024
+                    print(f"      ✅ {audio_file} ({kb} KB)")
+                if os.path.exists(merged_file):
+                    kb = os.path.getsize(merged_file) // 1024
+                    print(f"      ✅ {merged_file} ({kb} KB)")
 
         if inputs.get('audio_enabled', False):
             print(f"   Audio (Standard):")
@@ -313,11 +314,7 @@ def run():
                     merged_file = f"{output_dir}/{style}_{fmt}_{style}_{fmt}_with_audio.mp4"
                     if os.path.exists(merged_file):
                         print(f"      ✅ {merged_file}")
-            if inputs.get('bar_race_video_enabled', False):
-                for fmt in inputs['video_formats']:
-                    merged_file = f"{output_dir}/bar_race_{fmt}_bar_race_{fmt}_with_audio.mp4"
-                    if os.path.exists(merged_file):
-                        print(f"      ✅ {merged_file}")
+            # bar race merged already reported in the bar_race_video_enabled block above
 
         if inputs.get('bar_merge_enabled', False):
             print(f"   Bar Merged (Final):")
@@ -358,15 +355,27 @@ def run():
         if inputs.get('definition_video', False):
             print(f"   Definition Videos:")
             for fmt in inputs['video_formats']:
-                vid = f"{output_dir}/definition_video_{fmt}.mp4"
+                vid        = f"{output_dir}/definition_video_{fmt}.mp4"
+                vid_audio  = f"{output_dir}/definition_video_{fmt}_audio.mp3"
+                vid_merged = f"{output_dir}/definition_video_{fmt}_with_audio.mp4"
                 if os.path.exists(vid):
-                    print(f"      ✅ {vid}")
+                    kb = os.path.getsize(vid) // 1024
+                    print(f"      ✅ {vid} ({kb} KB)")
                 else:
                     print(f"      ❌ Not found: {vid}")
+                if os.path.exists(vid_audio):
+                    kb = os.path.getsize(vid_audio) // 1024
+                    print(f"      ✅ {vid_audio} ({kb} KB)")
+                if os.path.exists(vid_merged):
+                    kb = os.path.getsize(vid_merged) // 1024
+                    print(f"      ✅ {vid_merged} ({kb} KB)")
 
         print(f"\n⏱️  Duration tip: {fps} seconds per period")
         print("="*60 + "\n")
-        return result
+        sys.exit(0)
+
+    except SystemExit:
+        raise  # preserve sys.exit(0) success and sys.exit(1) errors
 
     except Exception as e:
         print("\n" + "="*60)
