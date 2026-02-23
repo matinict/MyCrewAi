@@ -168,8 +168,9 @@ def run():
         if inputs.get('intro_enabled', False):
             final_tasks.append(full_crew.tasks[6])  # create_intro_clip
 
-        if inputs.get('bar_merge_enabled', False):
-            final_tasks.append(full_crew.tasks[7])  # bar_merge
+        # define_topic runs right after generate_csv (early, so definition is ready)
+        if inputs.get('definition_enabled', False) and not inputs.get('use_existing_definition', False):
+            final_tasks.append(full_crew.tasks[2])  # define_topic
 
         if inputs.get('bar_race_audio_enabled', False):
             final_tasks.append(full_crew.tasks[8])  # add_bar_race_audio
@@ -177,17 +178,19 @@ def run():
         if inputs.get('audio_enabled', False):
             final_tasks.append(full_crew.tasks[9])  # add_audio
 
+        if inputs.get('definition_video', False):
+            final_tasks.append(full_crew.tasks[3])  # create_definition_video
+
+        # bar_merge AFTER definition_video — needs definition_video_with_audio ready
+        if inputs.get('bar_merge_enabled', False):
+            final_tasks.append(full_crew.tasks[7])  # bar_merge
+
+        # merge_audio_video and generate_youtube_metadata run LAST
         if inputs.get('merge_audio_video', False):
             final_tasks.append(full_crew.tasks[10])  # merge_audio_video
 
         if inputs.get('generate_youtube_metadata', False):
             final_tasks.append(full_crew.tasks[11])  # generate_youtube_metadata
-        # After — skips if existing file should be used
-        if inputs.get('definition_enabled', False) and not inputs.get('use_existing_definition', False):
-            final_tasks.append(full_crew.tasks[2])  # define_topic
-
-        if inputs.get('definition_video', False):
-            final_tasks.append(full_crew.tasks[3])  # create_definition_video
 
 
 

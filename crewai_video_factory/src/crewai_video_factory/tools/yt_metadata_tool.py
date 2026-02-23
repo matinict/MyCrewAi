@@ -48,11 +48,28 @@ class YouTubeMetadataTool(BaseTool):
         n_periods: int = 0,
     ) -> str:
         import time as _time
+        import re as _vre
         t0 = _time.time()
 
-        print(f"[YTMetadata] ▶ Starting — topic='{topic}' channel='{channel}'")
+        # ── Normalize video_formats FIRST — used for both metadata and cleanup ──
+        # Agent may pass: None, [], ["HD"], "['HD']", "HD", etc.
+        if not video_formats:
+            # Try to infer from output_dir name or default to ["HD"]
+            video_formats = ["HD"]
+        elif isinstance(video_formats, str):
+            # Parse string representations like "['HD', 'Shorts']" or "HD"
+            video_formats = [v.strip() for v in _vre.findall(r"[A-Za-z0-9]+", video_formats)
+                             if v not in ("true","false","null","list")]
+        # Filter to known valid formats only
+        _valid = {"HD","2K","4K","8K","Shorts","ShortsHD","Shorts4K"}
+        video_formats = [f for f in video_formats if f in _valid] or ["HD"]
+
+        # NEVER correct filename spelling — use exactly as passed from inputs
+        clean_filename = filename.strip().replace("/","").replace("\\","")
+
+        print(f"[YTMetadata] ▶ Starting — topic='{topic}' filename='{clean_filename}' channel='{channel}'")
         print(f"[YTMetadata]   output_dir : {output_dir}")
-        print(f"[YTMetadata]   years      : {start_year}–{end_year}")
+        print(f"[YTMetadata]   years      : {start_year}–{end_year}  formats: {video_formats}")
         print(f"[YTMetadata]   narration  : {generate_narration}  |  metadata: {generate_youtube_metadata}")
 
         os.makedirs(output_dir, exist_ok=True)
@@ -83,7 +100,7 @@ class YouTubeMetadataTool(BaseTool):
                     actual_periods = end_year - start_year + 1
                     print(f"[YTMetadata]   Fallback n_periods={actual_periods} from year range")
 
-            fmts = video_formats if video_formats else ["Shorts"]
+            fmts = video_formats  # already normalized at top of _run
             title = self._generate_youtube_title(topic, start_year, end_year, channel=channel)
             tags  = self._generate_youtube_tags(topic, channel=channel)
             print(f"[YTMetadata]   • Title: {title}")
@@ -92,6 +109,12 @@ class YouTubeMetadataTool(BaseTool):
             fmt_results = []
             for fmt in fmts:
                 fmt = fmt.strip()
+                # Skip if metadata already exists for this format
+                existing = os.path.join(output_dir, f"YT_Metadata_{fmt}.json")
+                if os.path.exists(existing):
+                    print(f"[YTMetadata]   • [{fmt}] ⏭️  Skipping — YT_Metadata_{fmt}.json already exists")
+                    fmt_results.append(f"⏭️  [{fmt}] Skipped (already exists)")
+                    continue
                 is_portrait = fmt in ("Shorts", "ShortsHD", "Shorts4K")
                 fmt_spp = fps if is_portrait else fps * fps_hd_offset
                 # Duration = periods * spp + hold (2 * spp)
@@ -114,10 +137,10 @@ class YouTubeMetadataTool(BaseTool):
 
         print(f"[YTMetadata] 🏁 Metadata done in {_time.time()-t0:.1f}s")
 
-        # --- Final cleanup: delete temp files, rename merged videos ---
-        self._cleanup_and_rename(output_dir, video_formats or [], channel, topic)
+        # --- Final cleanup + rename always runs regardless of metadata flag ---
+        self._cleanup_and_rename(output_dir, video_formats, channel, topic)  # already normalized
 
-        return "\n\n".join(results)
+        return "\n\n".join(results) if results else "✅ Cleanup and rename completed."
 
     def _generate_narration_file(self, topic: str, start_year: int, end_year: int, output_dir: str, clean_filename: str, channel: str = "PlayOwnAi") -> str:
         """Generate professional narration text file from CSV data"""
@@ -339,38 +362,25 @@ This visualization is based on comprehensive market data tracking {topic.lower()
 
     def _cleanup_and_rename(self, output_dir: str, video_formats: list, channel: str, topic: str):
         """
-        After all tasks complete:
-        1. Delete temp files: intro_*, bar_race_* videos & audio
-        2. Rename Merge_bar_race_[fmt].mp4 → {channel}_{topic_slug}_{fmt}.mp4
+        Always runs after crew completes (regardless of generate_youtube_metadata flag).
+        1. Rename Final_[fmt].mp4 → {channel}_{topic_slug}_{fmt}.mp4
+        2. Delete all known temp mp4/mp3 files per format
+        3. Glob delete any remaining _temp_*, _norm_*, _stage_* files
         """
-        import re
-        topic_slug = "_".join(re.findall(r"\w+", topic)[:4]) if topic else "Video"
+        import re, glob as _glob
 
+        topic_slug = "_".join(re.findall(r"\w+", topic)[:4]) if topic else "Video"
         print(f"[YTMetadata] 🧹 Cleanup starting — formats={video_formats} topic_slug={topic_slug}")
 
-        # Files to delete per format
-        for fmt in video_formats:
-            fmt = fmt.strip()
-            to_delete = [
-                os.path.join(output_dir, f"intro_{fmt}.mp4"),
-                os.path.join(output_dir, f"bar_race_{fmt}.mp4"),
-                os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3"),
-                os.path.join(output_dir, f"definition_video_{fmt}.mp4"),
-                os.path.join(output_dir, f"definition_video_{fmt}_audio.mp3"),
-                os.path.join(output_dir, f"definition_video_{fmt}_with_audio.mp4"),
-            ]
-            for path in to_delete:
-                if os.path.exists(path):
-                    os.remove(path)
-                    print(f"[YTMetadata] 🗑️  Deleted: {os.path.basename(path)}")
-                else:
-                    print(f"[YTMetadata]    Skip (not found): {os.path.basename(path)}")
-
-        # Rename final output → {channel}_{topic_slug}_{fmt}.mp4
-        # Priority: Final_[fmt].mp4 (defvid+race combined) → Merge_bar_race_[fmt].mp4 (race only)
+        # ── Step 1: Rename Final → channel_topic_fmt FIRST (before deleting) ──
         for fmt in video_formats:
             fmt = fmt.strip()
             dst = os.path.join(output_dir, f"{channel}_{topic_slug}_{fmt}.mp4")
+            # Skip if final renamed file already exists
+            if os.path.exists(dst):
+                size_mb = os.path.getsize(dst) / (1024 * 1024)
+                print(f"[YTMetadata] ⏭️  Skipping rename — {os.path.basename(dst)} already exists ({size_mb:.1f} MB)")
+                continue
             candidates = [
                 os.path.join(output_dir, f"Final_{fmt}.mp4"),
                 os.path.join(output_dir, f"Merge_bar_race_{fmt}.mp4"),
@@ -381,6 +391,36 @@ This visualization is based on comprehensive market data tracking {topic.lower()
                 size_mb = os.path.getsize(dst) / (1024 * 1024)
                 print(f"[YTMetadata] ✅ Renamed: {os.path.basename(src)} → {os.path.basename(dst)} ({size_mb:.1f} MB)")
             else:
-                print(f"[YTMetadata]    Skip rename (not found): Final_{fmt}.mp4 or Merge_bar_race_{fmt}.mp4")
+                print(f"[YTMetadata]    Skip rename: Final_{fmt}.mp4 / Merge_bar_race_{fmt}.mp4 not found")
+
+        # ── Step 2: Delete known temp files per format ──
+        for fmt in video_formats:
+            fmt = fmt.strip()
+            to_delete = [
+                f"intro_{fmt}.mp4",
+                f"bar_race_{fmt}.mp4",
+                f"bar_race_{fmt}_audio.mp3",
+                f"Merge_bar_race_{fmt}.mp4",
+                f"definition_video_{fmt}.mp4",
+                f"definition_video_{fmt}_audio.mp3",
+                f"definition_video_{fmt}_with_audio.mp4",
+            ]
+            for name in to_delete:
+                path = os.path.join(output_dir, name)
+                if os.path.exists(path):
+                    os.remove(path)
+                    print(f"[YTMetadata] 🗑️  Deleted: {name}")
+
+        # ── Step 3: Glob delete any remaining temp/norm/stage files ──
+        temp_patterns = [
+            "_temp_*.mp4", "_norm_*.mp4", "_stage*.mp4",
+            "_concat_*.txt", "*_cc_en.txt",
+        ]
+        for pat in temp_patterns:
+            for path in _glob.glob(os.path.join(output_dir, pat)):
+                os.remove(path)
+                print(f"[YTMetadata] 🗑️  Glob deleted: {os.path.basename(path)}")
+
+        print(f"[YTMetadata] 🧹 Cleanup done")
 
         print(f"[YTMetadata] 🧹 Cleanup done")
