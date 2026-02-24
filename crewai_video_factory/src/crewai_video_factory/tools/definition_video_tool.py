@@ -106,6 +106,12 @@ class DefinitionVideoTool(BaseTool):
 
         for fmt in video_formats:
             try:
+                # ✅ SKIP if final merged video already exists
+                final_merged = os.path.join(output_dir, f"definition_video_{fmt}_with_audio.mp4")
+                if os.path.exists(final_merged):
+                    results.append(f"⏭️ {fmt}: Skipped (exists: {os.path.basename(final_merged)})")
+                    continue
+
                 # Shorts = what_is_only, HD = full text
                 is_shorts = fmt in ("Shorts", "ShortsHD", "Shorts4K")
                 fmt_what_is_only = what_is_only and is_shorts
