@@ -106,10 +106,14 @@ class DefinitionVideoTool(BaseTool):
 
         for fmt in video_formats:
             try:
-                # ✅ SKIP if final merged video already exists
+                # ✅ SMART SKIP — check what already exists
+                silent_video = os.path.join(output_dir, f"definition_video_{fmt}.mp4")
+                audio_file   = os.path.join(output_dir, f"definition_video_{fmt}_audio.mp3")
                 final_merged = os.path.join(output_dir, f"definition_video_{fmt}_with_audio.mp4")
+
+                # Skip everything if final merged exists
                 if os.path.exists(final_merged):
-                    results.append(f"⏭️ {fmt}: Skipped (exists: {os.path.basename(final_merged)})")
+                    results.append(f"⏭️ {fmt}: Skipped (final exists: {os.path.basename(final_merged)})")
                     continue
 
                 # Shorts = what_is_only, HD = full text
@@ -122,27 +126,32 @@ class DefinitionVideoTool(BaseTool):
 
                 print(f"[DefVideo] [{fmt}] Parsed {len(raw_lines)} lines (what_is_only={fmt_what_is_only})")
 
-                out_path = os.path.join(output_dir, f"definition_video_{fmt}.mp4")
-                is_portrait = fmt in ("Shorts", "ShortsHD", "Shorts4K")
-                w, h = (1080, 1920) if is_portrait else (1920, 1080)
-                print(f"\n[DefVideo] [{fmt}] {w}x{h}  secs_per_line={secs_per_line}  what_is_only={fmt_what_is_only}")
+                # If silent video exists but merged doesn't, skip rendering
+                if os.path.exists(silent_video):
+                    print(f"[DefVideo] ⏭️ {fmt}: Silent video exists — skipping render")
+                    out_path = silent_video
+                else:
+                    # Render silent video (missing)
+                    out_path = silent_video
+                    is_portrait = fmt in ("Shorts", "ShortsHD", "Shorts4K")
+                    w, h = (1080, 1920) if is_portrait else (1920, 1080)
+                    print(f"\n[DefVideo] [{fmt}] {w}x{h}  secs_per_line={secs_per_line}  what_is_only={fmt_what_is_only}")
 
-                # 1. Render silent video
-                self._render(raw_lines, out_path, w, h, secs_per_line,
-                             channel, watermark_enabled, watermark_text,
-                             topic=topic)
+                    self._render(raw_lines, out_path, w, h, secs_per_line,
+                                 channel, watermark_enabled, watermark_text,
+                                 topic=topic)
 
-                if not os.path.exists(out_path):
-                    errors.append(f"❌ {fmt}: video missing after render")
-                    continue
+                    if not os.path.exists(out_path):
+                        errors.append(f"❌ {fmt}: video missing after render")
+                        continue
 
-                # 2. Generate TTS audio matching video duration
+                # Generate TTS audio matching video duration
                 audio_path = os.path.join(output_dir, f"definition_video_{fmt}_audio.mp3")
                 final_path = os.path.join(output_dir, f"definition_video_{fmt}_with_audio.mp4")
-                video_dur = self._get_duration(out_path)
+                video_dur  = self._get_duration(out_path)
                 self._generate_tts(spoken_text, audio_path, video_dur)
 
-                # 3. Merge audio into video
+                # Merge audio into video
                 if os.path.exists(audio_path):
                     self._merge_audio_video(out_path, audio_path, final_path, video_dur)
                     merged_kb = os.path.getsize(final_path) // 1024 if os.path.exists(final_path) else 0
