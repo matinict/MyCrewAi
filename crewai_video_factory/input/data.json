@@ -7,7 +7,8 @@
     "bar_race"
   ],
   "video_formats": [
-    "Shorts"
+    "Shorts",
+    "HD"
   ],
   "use_label_mappings": false,
   "fps": 4.9,
@@ -16,7 +17,7 @@
   "definition_enabled": true,
   "use_existing_definition": true,
   "definition_max_chars": 1500,
-  "definition_video": false,
+  "definition_video": true,
   "intro_enabled": false,
   "intro_duration": 10,
   "intro_duration_hd": 15,
@@ -27,7 +28,7 @@
   "audio_speed": 1.2,
   "audio_speed_hd": 1.0,
   "merge_audio_video": false,
-  "generate_youtube_metadata": true,
+  "generate_youtube_metadata": false,
   "channel": "PlayOwnAi",
   "channel_lower": "playownai",
   "website": "youtube.com/@PlayOwnAi",

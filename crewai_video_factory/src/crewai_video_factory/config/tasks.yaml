@@ -99,11 +99,12 @@ create_definition_video:
     This task will automatically skip if definition_video is false in inputs.
 
     CRITICAL — call the Definition Video Tool with EXACTLY these values:
-      topic: "{topic}"
+      topic:  "{topic}"
       filename: "{filename}"
       output_dir: "{output_dir}"
       video_formats: {video_formats}
       definition_video: {definition_video}
+      what_is_only: true
       secs_per_line: 3.5
       channel: "{channel}"
       watermark_enabled: {watermark_enabled}
