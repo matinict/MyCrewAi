@@ -1,6 +1,3 @@
-# source .venv/bin/activate
-# python --version
-# Python 3.11.x only this version worked
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 from typing import Type, List, Optional
@@ -32,7 +29,7 @@ class BarRaceInput(BaseModel):
     watermark_enabled: bool = Field(default=False, description="Overlay semi-transparent watermark text on video.")
     watermark_text: str = Field(default="@PlayOwnAi", description="Watermark text to display.")
     watermark_opacity: int = Field(default=60, ge=0, le=255, description="Watermark opacity (0=invisible, 255=fully opaque).")
-    topic: str = Field(default="", description="Topic name for narration script.")
+    topic: str = Field(default=" ", description="Topic name for narration script.")
     channel: str = Field(default="PlayOwnAi", description="Channel name for subscribe CTA in narration.")
     audio_speed: float = Field(default=1.0, description="TTS playback speed for Shorts via atempo (0.5-2.0). 1.0=normal.")
     audio_speed_hd: float = Field(default=0.0, description="TTS playback speed for HD/landscape formats. 0.0 = fall back to audio_speed.")
@@ -95,7 +92,7 @@ class BarRaceVideoTool(BaseTool):
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     raw = json.load(f)
-                # Support nested {"bar_race_labels": {...}} or flat {"Label": "Short"} format
+                # Support nested { "bar_race_labels": {...}} or flat { "Label": "Short" } format
                 self._label_mapping_cache = raw.get("bar_race_labels", raw)
                 print(f"✅ Loaded {len(self._label_mapping_cache)} label mappings from label_mappings.json")
                 return self._label_mapping_cache
@@ -131,7 +128,7 @@ class BarRaceVideoTool(BaseTool):
         watermark_enabled = kwargs.get("watermark_enabled", False)
         watermark_text    = kwargs.get("watermark_text", "@PlayOwnAi")
         watermark_opacity = int(kwargs.get("watermark_opacity", 60))
-        topic             = kwargs.get("topic", "")
+        topic             = kwargs.get("topic", " ")
         channel           = kwargs.get("channel", "PlayOwnAi")
         audio_speed       = float(kwargs.get("audio_speed", 1.0))
         audio_speed_hd    = float(kwargs.get("audio_speed_hd", 0.0))
@@ -155,6 +152,16 @@ class BarRaceVideoTool(BaseTool):
 
         for fmt in video_formats:
             try:
+                # ✅ SMART SKIP — check what already exists
+                silent_video = os.path.join(output_dir, f"bar_race_{fmt}.mp4")
+                audio_file   = os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3")
+                final_merged = os.path.join(output_dir, f"bar_race_{fmt}_with_audio.mp4")
+
+                # Skip everything if final merged exists
+                if os.path.exists(final_merged):
+                    results.append(f"⏭️ {fmt}: Skipped (final exists: {os.path.basename(final_merged)})")
+                    continue
+
                 # Get figure size (in inches)
                 figsize = self._get_video_dimensions(fmt)
 
@@ -223,7 +230,7 @@ class BarRaceVideoTool(BaseTool):
                         return
                     for lbl in ax.get_yticklabels():
                         lbl.set_fontsize(bar_name_size)
-                        lbl.set_rotation(70)
+                        lbl.set_rotation(77)
                         lbl.set_ha('right')
                         lbl.set_va('center')
                     # Also re-enforce x-axis size in case bcr reset it
@@ -271,145 +278,150 @@ class BarRaceVideoTool(BaseTool):
                 print(f"   Resolution : {int(fig_w*dpi)} x {int(fig_h*dpi)}")
                 print(f"   Periods    : {n_periods}  |  spp: {fmt_spp:.2f}s  |  Frames: {total_frames}")
                 print(f"   ⏱️  Estimated: ~{est_secs/60:.1f} min ({est_secs:.0f}s) — please wait …")
-                import time as _time
-                import threading as _threading
-                t_start = _time.time()
-                _stop_ticker = _threading.Event()
 
-                def _progress_bar_thread(stop_event, est_total_secs, label):
-                    """
-                    Time-based tqdm progress bar in a background thread.
-                    Advances by real elapsed time (bcr gives no frame callbacks).
-                    Falls back to plain-text ticker if tqdm not installed.
-                    """
-                    try:
-                        from tqdm import tqdm
-                        bar = tqdm(
-                            total=int(est_total_secs),
-                            desc=f"   🎬 [{label}] Rendering",
-                            unit="s",
-                            bar_format=(
-                                "{desc}: {percentage:3.0f}%|{bar:30}| "
-                                "{n:.0f}/{total:.0f}s "
-                                "[{elapsed}<{remaining}]"
-                            ),
-                            dynamic_ncols=True,
-                            leave=True,
-                        )
-                        last_n = 0
-                        while not stop_event.is_set():
-                            stop_event.wait(0.5)
-                            elapsed = _time.time() - t_start
-                            new_n = min(int(elapsed), int(est_total_secs))
-                            if new_n > last_n:
-                                bar.update(new_n - last_n)
-                                last_n = new_n
-                        # Fill to 100% on completion
-                        if last_n < int(est_total_secs):
-                            bar.update(int(est_total_secs) - last_n)
-                        bar.close()
-                    except ImportError:
-                        # tqdm not installed — plain-text fallback every 5s
-                        while not stop_event.is_set():
-                            stop_event.wait(5)
-                            if not stop_event.is_set():
-                                elapsed = _time.time() - t_start
-                                pct = min(100, int(elapsed / est_total_secs * 100)) if est_total_secs else 0
-                                remaining = max(0, est_total_secs - elapsed)
-                                print(
-                                    f"   ⏳ [{label}] Rendering … {elapsed:.0f}s elapsed "
-                                    f"| ~{pct}% | ~{remaining:.0f}s remaining"
-                                )
+                # If silent video exists but merged doesn't, skip rendering
+                if os.path.exists(silent_video):
+                    print(f"   ⏭️ [{fmt}] Silent video exists — skipping render")
+                    output_path = silent_video
+                else:
+                    import time as _time
+                    import threading as _threading
+                    t_start = _time.time()
+                    _stop_ticker = _threading.Event()
 
-                ticker_thread = _threading.Thread(
-                    target=_progress_bar_thread,
-                    args=(_stop_ticker, est_secs, fmt),
-                    daemon=True,
-                )
-                ticker_thread.start()
-
-                try:
-                    bcr.bar_chart_race(
-                        df=df_viz,
-                        filename=output_path,
-                        orientation="h",
-                        sort="desc",
-                        n_bars=n_bars,
-                        steps_per_period=int(fmt_spp * 15),
-                        period_length=int(fmt_spp * 1000),
-                        fig=pre_fig,
-                        title=title_text,
-                        period_label=False,
-                        period_summary_func=period_summary_func,
-                        bar_label_size=bar_label_size,
-                        tick_label_size=tick_label_size,
-                        title_size=title_size,
-                        writer='ffmpeg',
-                    )
-                finally:
-                    _stop_ticker.set()
-                    ticker_thread.join(timeout=3)
-                plt.close(pre_fig)
-                elapsed = _time.time() - t_start
-                print(f"   ✅ Render done in {elapsed:.0f}s ({elapsed/60:.1f} min)")
-
-                if os.path.exists(output_path):
-                    w_px = int(fig_w * dpi)
-                    h_px = int(fig_h * dpi)
-                    hold_secs = fmt_spp * 2
-                    print(f"   🔧 Re-encoding {w_px}x{h_px}, holding last frame {hold_secs:.1f}s …")
-                    fixed_path = output_path.replace(".mp4", "_fixed.mp4")
-                    os.system(
-                        f'ffmpeg -y -i "{output_path}" '
-                        f'-vf "scale={w_px}:{h_px},tpad=stop_mode=clone:stop_duration={hold_secs:.2f}" '
-                        f'-c:v libx264 -crf 18 -preset fast '
-                        f'"{fixed_path}" -loglevel error'
-                    )
-                    if os.path.exists(fixed_path):
-                        os.replace(fixed_path, output_path)
-
-                    # ── Audio: generate TTS synced to video duration ───────
-                    if os.path.exists(output_path):  # audio always generated with video
-                        video_dur   = self._get_duration(output_path)
-                        audio_path  = os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3")
-                        final_path  = os.path.join(output_dir, f"bar_race_{fmt}_with_audio.mp4")
-
-                        # Shorts = concise narration + audio_speed
-                        # HD/landscape = full narration with data points + audio_speed_hd
-                        _spd = audio_speed if is_portrait else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
-                        narration = self._build_narration(
-                            df_viz, topic, channel,
-                            with_points=not is_portrait   # Shorts=short, HD=full with values
-                        )
-
-                        # Save narration as cc_en.txt alongside video
-                        cc_path = os.path.join(output_dir, f"bar_race_{fmt}_cc_en.txt")
-                        with open(cc_path, 'w', encoding='utf-8') as _f:
-                            _f.write(narration)
-                        print(f"[BarRace] 📝 Narration saved: {cc_path} ({len(narration)} chars)")
-
-                        self._generate_tts(narration, audio_path, video_dur, _spd)
-                        if os.path.exists(audio_path):
-                            self._merge_audio_video(output_path, audio_path, final_path, video_dur)
-                            merged_kb = os.path.getsize(final_path) // 1024 if os.path.exists(final_path) else 0
-                            kb = os.path.getsize(output_path) // 1024
-                            results.append(
-                                f"✅ {fmt}: {output_path} ({kb} KB) "
-                                f"+ audio → bar_race_{fmt}_with_audio.mp4 ({merged_kb} KB) "
-                                f"[{len(narration.split())} words, speed={_spd}]"
+                    def _progress_bar_thread(stop_event, est_total_secs, label):
+                        """
+                        Time-based tqdm progress bar in a background thread.
+                        Advances by real elapsed time (bcr gives no frame callbacks).
+                        Falls back to plain-text ticker if tqdm not installed.
+                        """
+                        try:
+                            from tqdm import tqdm
+                            bar = tqdm(
+                                total=int(est_total_secs),
+                                desc=f"   🎬 [{label}] Rendering",
+                                unit="s",
+                                bar_format=(
+                                    "{desc}: {percentage:3.0f}%|{bar:30}|  "
+                                    "{n:.0f}/{total:.0f}s  "
+                                    "[{elapsed} <{remaining}] "
+                                ),
+                                dynamic_ncols=True,
+                                leave=True,
                             )
-                        else:
-                            kb = os.path.getsize(output_path) // 1024
-                            results.append(f"✅ {fmt}: {output_path} ({kb} KB) [audio failed]")
+                            last_n = 0
+                            while not stop_event.is_set():
+                                stop_event.wait(0.5)
+                                elapsed = _time.time() - t_start
+                                new_n = min(int(elapsed), int(est_total_secs))
+                                if new_n > last_n:
+                                    bar.update(new_n - last_n)
+                                    last_n = new_n
+                            # Fill to 100% on completion
+                            if last_n < int(est_total_secs):
+                                bar.update(int(est_total_secs) - last_n)
+                            bar.close()
+                        except ImportError:
+                            # tqdm not installed — plain-text fallback every 5s
+                            while not stop_event.is_set():
+                                stop_event.wait(5)
+                                if not stop_event.is_set():
+                                    elapsed = _time.time() - t_start
+                                    pct = min(100, int(elapsed / est_total_secs * 100)) if est_total_secs else 0
+                                    remaining = max(0, est_total_secs - elapsed)
+                                    print(
+                                        f"   ⏳ [{label}] Rendering … {elapsed:.0f}s elapsed  "
+                                        f"| ~{pct}% | ~{remaining:.0f}s remaining"
+                                    )
+
+                    ticker_thread = _threading.Thread(
+                        target=_progress_bar_thread,
+                        args=(_stop_ticker, est_secs, fmt),
+                        daemon=True,
+                    )
+                    ticker_thread.start()
+
+                    try:
+                        bcr.bar_chart_race(
+                            df=df_viz,
+                            filename=output_path,
+                            orientation="h",
+                            sort="desc",
+                            n_bars=n_bars,
+                            steps_per_period=int(fmt_spp * 15),
+                            period_length=int(fmt_spp * 1000),
+                            fig=pre_fig,
+                            title=title_text,
+                            period_label=False,
+                            period_summary_func=period_summary_func,
+                            bar_label_size=bar_label_size,
+                            tick_label_size=tick_label_size,
+                            title_size=title_size,
+                            writer='ffmpeg',
+                        )
+                    finally:
+                        _stop_ticker.set()
+                        ticker_thread.join(timeout=3)
+                    plt.close(pre_fig)
+                    elapsed = _time.time() - t_start
+                    print(f"   ✅ Render done in {elapsed:.0f}s ({elapsed/60:.1f} min)")
+
+                    if os.path.exists(output_path):
+                        w_px = int(fig_w * dpi)
+                        h_px = int(fig_h * dpi)
+                        hold_secs = fmt_spp * 2
+                        print(f"   🔧 Re-encoding {w_px}x{h_px}, holding last frame {hold_secs:.1f}s …")
+                        fixed_path = output_path.replace(".mp4", "_fixed.mp4")
+                        os.system(
+                            f'ffmpeg -y -i "{output_path}" '
+                            f'-vf "scale={w_px}:{h_px},tpad=stop_mode=clone:stop_duration={hold_secs:.2f}" '
+                            f'-c:v libx264 -crf 18 -preset fast '
+                            f'"{fixed_path}" -loglevel error'
+                        )
+                        if os.path.exists(fixed_path):
+                            os.replace(fixed_path, output_path)
+
+                # ── Audio: generate TTS synced to video duration ───────
+                if os.path.exists(output_path):  # audio always generated with video
+                    video_dur   = self._get_duration(output_path)
+                    audio_path  = os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3")
+                    final_path  = os.path.join(output_dir, f"bar_race_{fmt}_with_audio.mp4")
+
+                    # Shorts = concise narration + audio_speed
+                    # HD/landscape = full narration with data points + audio_speed_hd
+                    _spd = audio_speed if is_portrait else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
+                    narration = self._build_narration(
+                        df_viz, topic, channel,
+                        with_points=not is_portrait    # Shorts=short, HD=full with values
+                    )
+
+                    # Save narration as cc_en.txt alongside video
+                    cc_path = os.path.join(output_dir, f"bar_race_{fmt}_cc_en.txt")
+                    with open(cc_path, 'w', encoding='utf-8') as _f:
+                        _f.write(narration)
+                    print(f"[BarRace] 📝 Narration saved: {cc_path} ({len(narration)} chars)")
+
+                    self._generate_tts(narration, audio_path, video_dur, _spd)
+                    if os.path.exists(audio_path):
+                        self._merge_audio_video(output_path, audio_path, final_path, video_dur)
+                        merged_kb = os.path.getsize(final_path) // 1024 if os.path.exists(final_path) else 0
+                        kb = os.path.getsize(output_path) // 1024
+                        results.append(
+                            f"✅ {fmt}: {output_path} ({kb} KB)  "
+                            f"+ audio → bar_race_{fmt}_with_audio.mp4 ({merged_kb} KB)  "
+                            f"[{len(narration.split())} words, speed={_spd}]"
+                        )
                     else:
-                        kb = os.path.getsize(output_path) // 1024 if os.path.exists(output_path) else 0
-                        results.append(f"✅ {fmt}: {output_path} ({kb} KB)")
+                        kb = os.path.getsize(output_path) // 1024
+                        results.append(f"✅ {fmt}: {output_path} ({kb} KB) [audio failed]")
+                else:
+                    kb = os.path.getsize(output_path) // 1024 if os.path.exists(output_path) else 0
+                    results.append(f"✅ {fmt}: {output_path} ({kb} KB)")
 
             except Exception as e:
                 results.append(f"❌ {fmt}: {str(e)}")
 
         return "\n".join(results)
-
 
     # ──────────────────────────────────────────────────────────────────
     def _build_narration(self, df_viz, topic: str, channel: str,
@@ -428,14 +440,14 @@ class BarRaceVideoTool(BaseTool):
 
         if not with_points:
             parts = [
-                f"{topic_str} Race {start_year} to {end_year}.",
-                "Basic trending idea. Let's go year by year.",
+                f"{topic_str} Race {start_year} to {end_year}. ",
+                "Basic trending idea. Let's go year by year. ",
             ]
         else:
             parts = [
-                f"Today, we're exploring the {topic_str} Race from {start_year} to {end_year}.",
-                "This is for a basic idea about trending.",
-                "Let's see how the landscape evolved, year by year.",
+                f"Today, we're exploring the {topic_str} Race from {start_year} to {end_year}. ",
+                "This is for a basic idea about trending. ",
+                "Let's see how the landscape evolved, year by year. ",
             ]
 
         for period, row in df_viz.iterrows():
@@ -447,38 +459,38 @@ class BarRaceVideoTool(BaseTool):
             value      = int(sorted_row.iloc[0])
 
             if value == 0:
-                parts.append(f"{year}. Race not yet begun." if not with_points
-                             else f"{year}. The race has not yet begun.")
+                parts.append(f"{year}. Race not yet begun. " if not with_points
+                             else f"{year}. The race has not yet begun. ")
             elif value <= 20:
-                parts.append(f"{year}. {leader} leads. Market forming." if not with_points
-                             else f"{year}. {leader} leads with {value} points. The market is forming.")
+                parts.append(f"{year}. {leader} leads. Market forming. " if not with_points
+                             else f"{year}. {leader} leads with {value} points. The market is forming. ")
             elif value <= 40:
-                parts.append(f"{year}. {leader} leads. Gaining traction." if not with_points
-                             else f"{year}. {leader} leads with {value} points. Gaining traction.")
+                parts.append(f"{year}. {leader} leads. Gaining traction. " if not with_points
+                             else f"{year}. {leader} leads with {value} points. Gaining traction. ")
             elif value <= 70:
-                parts.append(f"{year}. {leader} leads. Showing strength." if not with_points
-                             else f"{year}. {leader} leads with {value} points. Showing real strength.")
+                parts.append(f"{year}. {leader} leads. Showing strength. " if not with_points
+                             else f"{year}. {leader} leads with {value} points. Showing real strength. ")
             else:
-                parts.append(f"{year}. {leader} dominates." if not with_points
-                             else f"{year}. {leader} dominates with {value} points.")
+                parts.append(f"{year}. {leader} dominates. " if not with_points
+                             else f"{year}. {leader} dominates with {value} points. ")
 
         final_row  = df_viz.iloc[-1].dropna().sort_values(ascending=False)
         final_lead = final_row.index[0] if not final_row.empty else "the leader"
 
         if with_points:
             parts.extend([
-                f"And that brings us to {end_year}, where {final_lead} continues to lead the pack.",
-                "The evolution of technology and trends never stops.",
-                f"Subscribe to {channel} for more data-driven insights.",
+                f"And that brings us to {end_year}, where {final_lead} continues to lead the pack. ",
+                "The evolution of technology and trends never stops. ",
+                f" Next Basic definition. ",
             ])
         else:
             parts.extend([
-                f"{end_year}. {final_lead} leads the pack.",
-                "Evolution continues.",
-                f"Subscribe to {channel} for more insights.",
+                f"{end_year}. {final_lead} leads the pack. ",
+                "Evolution continues. ",
+                f"Basic definition. ",
             ])
 
-        return " ".join(parts)
+        return "  ".join(parts)
 
     # ──────────────────────────────────────────────────────────────────
     def _get_duration(self, video_path: str) -> float:
@@ -544,11 +556,11 @@ class BarRaceVideoTool(BaseTool):
             if adjusted_dur > video_dur * 1.05:          # >5% overflow
                 fit_ratio = raw_dur / max(video_dur, 1)  # compress to fit
                 final_ratio = fit_ratio
-                print(f"[BarRace] ⚠️  Narration too long ({adjusted_dur:.1f}s > {video_dur:.1f}s video) "
+                print(f"[BarRace] ⚠️  Narration too long ({adjusted_dur:.1f}s > {video_dur:.1f}s video)  "
                       f"— auto-compressing to fit: atempo={fit_ratio:.3f}")
             else:
-                print(f"[BarRace] 🔊 TTS {raw_dur:.1f}s, video {video_dur:.1f}s, "
-                      f"atempo={final_ratio:.3f} → est {raw_dur/final_ratio:.1f}s "
+                print(f"[BarRace] 🔊 TTS {raw_dur:.1f}s, video {video_dur:.1f}s,  "
+                      f"atempo={final_ratio:.3f} → est {raw_dur/final_ratio:.1f}s  "
                       f"({'padded with silence' if raw_dur/final_ratio < video_dur else 'fits'})")
 
             af = atempo_chain(final_ratio)

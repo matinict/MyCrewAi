@@ -4,23 +4,19 @@ import multiprocessing
 from typing import Type, Optional
 from pydantic import BaseModel, Field
 from crewai.tools import BaseTool
-
 import matplotlib
 matplotlib.use('Agg')
 matplotlib.rcParams['figure.max_open_warning'] = 0
 
-
 # ---------------------------------------------------------------------------
 # Input Schema
 # ---------------------------------------------------------------------------
-
 class IntroClipToolInput(BaseModel):
     """Input schema for IntroClipTool."""
     topic: str = Field(..., description="Topic name (e.g. 'LLM Popularity')")
     start_year: int = Field(..., description="First year in the dataset")
     end_year: int = Field(..., description="Last year in the dataset")
     output_dir: str = Field(..., description="Directory to save the intro clip(s)")
-
     # Format control
     video_formats: list = Field(
         default=["Shorts", "HD"],
@@ -47,11 +43,9 @@ class IntroClipToolInput(BaseModel):
     # Background color
     bg_color: tuple = Field(default=(20, 20, 40), description="RGB background color")
 
-
 # ---------------------------------------------------------------------------
 # Resolution map (matches bar_race_video_tool.py conventions)
 # ---------------------------------------------------------------------------
-
 RESOLUTIONS = {
     "HD":       (1920, 1080),
     "2K":       (2560, 1440),
@@ -74,11 +68,9 @@ FONT_SCALE = {
 
 OPTIMAL_THREADS = min(multiprocessing.cpu_count(), 6)
 
-
 # ---------------------------------------------------------------------------
 # Tool
 # ---------------------------------------------------------------------------
-
 class IntroClipTool(BaseTool):
     """
     Generates intro screen video clip(s) for bar race videos.
@@ -147,30 +139,44 @@ class IntroClipTool(BaseTool):
                 continue
 
             try:
-                output_path = os.path.join(output_dir, f"intro_{fmt}.mp4")
-                print(f"[IntroClipTool] Generating {fmt} intro → {output_path}")
+                # ✅ SMART SKIP — check what already exists
+                silent_video = os.path.join(output_dir, f"intro_{fmt}.mp4")
+                audio_file = os.path.join(output_dir, f"intro_{fmt}_audio.mp3")
+                final_merged = os.path.join(output_dir, f"intro_{fmt}_with_audio.mp4")
 
-                # Per-format duration: landscape formats use intro_duration_hd,
-                # portrait formats use intro_duration
+                # Skip everything if final merged exists
+                if os.path.exists(final_merged):
+                    results.append(f"⏭️ {fmt}: Skipped (final exists: {os.path.basename(final_merged)})")
+                    continue
+
+                # Per-format duration
                 is_portrait_fmt = RESOLUTIONS[fmt][1] > RESOLUTIONS[fmt][0]
                 fmt_duration = (
                     intro_duration if is_portrait_fmt
                     else (intro_duration_hd if intro_duration_hd > 0 else intro_duration)
                 )
                 print(f"[IntroClipTool] {fmt} duration: {fmt_duration}s ({'portrait' if is_portrait_fmt else 'landscape'})")
-                self._create_intro_clip(
-                    fmt=fmt,
-                    duration=fmt_duration,
-                    output_path=output_path,
-                    topic=topic,
-                    start_year=start_year,
-                    end_year=end_year,
-                    channel=channel,
-                    bg_color=tuple(bg_color),
-                    watermark_enabled=watermark_enabled,
-                    watermark_text=watermark_text,
-                    watermark_opacity=watermark_opacity,
-                )
+
+                # If silent video exists but merged doesn't, skip rendering
+                if os.path.exists(silent_video):
+                    print(f"[IntroClipTool] ⏭️ {fmt}: Silent video exists — skipping render")
+                    output_path = silent_video
+                else:
+                    # Render silent video (missing)
+                    output_path = os.path.join(output_dir, f"intro_{fmt}.mp4")
+                    self._create_intro_clip(
+                        fmt=fmt,
+                        duration=fmt_duration,
+                        output_path=output_path,
+                        topic=topic,
+                        start_year=start_year,
+                        end_year=end_year,
+                        channel=channel,
+                        bg_color=bg_color,
+                        watermark_enabled=watermark_enabled,
+                        watermark_text=watermark_text,
+                        watermark_opacity=watermark_opacity,
+                    )
 
                 if not os.path.exists(output_path):
                     errors.append(f"❌ {fmt}: video file not created")
@@ -179,12 +185,20 @@ class IntroClipTool(BaseTool):
                 size_kb = os.path.getsize(output_path) // 1024
                 print(f"[IntroClipTool] ✅ {fmt} video created ({size_kb} KB)")
 
-                # --- AUDIO: generate intro narration MP3 ---
+                # --- AUDIO: generate intro narration MP3 with welcome message ---
                 is_portrait_fmt2 = RESOLUTIONS[fmt][1] > RESOLUTIONS[fmt][0]
                 spd = audio_speed if is_portrait_fmt2 else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
-                narration = f"{topic} from {start_year} to {end_year}."
+
+                # ✅ ADD WELCOME MESSAGE
+                narration_parts = [
+                    f"Welcome to {channel}.",
+                    f"Exploring {topic} Race from {start_year} to {end_year}.",
+                    "Let's see how landscape evolved, year by year."
+                ]
+                narration = " ".join(narration_parts)
+
                 audio_path = os.path.join(output_dir, f"intro_{fmt}_audio.mp3")
-                print(f"[IntroClipTool] 🎙  Generating {fmt} intro audio (speed={spd}) → {audio_path}")
+                print(f"[IntroClipTool] 🎙 Generating {fmt} intro audio (speed={spd}) → {audio_path}")
                 try:
                     self._generate_audio(narration, audio_path, spd)
                 except Exception as ae:
@@ -231,9 +245,9 @@ class IntroClipTool(BaseTool):
             summary += "\n\n⚠️ Some issues:\n" + "\n".join(errors)
         return summary
 
-    # -----------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
     # Core: create a single intro clip for one format
-    # -----------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 
     def _create_intro_clip(
         self,
@@ -321,9 +335,9 @@ class IntroClipTool(BaseTool):
         if os.path.exists(temp_img_path):
             os.remove(temp_img_path)
 
-    # -----------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
     # Helpers
-    # -----------------------------------------------------------------------
+    # ---------------------------------------------------------------------------
 
     def _generate_audio(self, text: str, output_path: str, speed: float):
         """Generate MP3 from text via gTTS + ffmpeg atempo speed control."""
@@ -333,7 +347,7 @@ class IntroClipTool(BaseTool):
         import time
 
         label = os.path.basename(output_path)
-        print(f"[IntroClipTool] ⏱  {label} — generating audio ({len(text)} chars)")
+        print(f"[IntroClipTool] ⏱ {label} — generating audio ({len(text)} chars)")
 
         _stop = threading.Event()
         def _ticker(lbl, start):
