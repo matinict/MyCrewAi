@@ -486,7 +486,7 @@ This visualization is based on comprehensive market data tracking {topic.lower()
         Old: YT/Metadata_{fmt}_En.json  → New: YT/{fmt}/MD/en.json
         Old: YT/Metadata_{fmt}_{lang}.txt → New: YT/{fmt}/MD/{lang}.txt
         Old: YT/cc_{fmt}_{lang}.txt     → New: YT/{fmt}/CC/{lang}.txt
-        Old: YT/cc_en_{lang}.txt        → New: YT/standard/CC/{lang}.txt
+        Old: YT/cc_en_{lang}.txt        → New: YT/{fmt}/CC/{lang}.txt
         Deletes source after successful move.
         """
         import glob as _glob, re as _re
@@ -585,8 +585,10 @@ This visualization is based on comprehensive market data tracking {topic.lower()
 
         standard_cc = os.path.join(output_dir, "cc_en.txt")
         if os.path.exists(standard_cc):
-            cc_sources.append((standard_cc, "standard"))
+            #cc_sources.append((standard_cc, "standard"))
+            cc_sources.append((standard_cc,  video_formats[0] if video_formats else  "standard "))
             print(f"[YTMetadata] 📝 Found standard CC: cc_en.txt")
+
 
         if not cc_sources:
             print(f"[YTMetadata] ⚠️  No cc_en.txt files found in {output_dir}")
