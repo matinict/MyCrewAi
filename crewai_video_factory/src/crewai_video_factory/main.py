@@ -170,11 +170,12 @@ def run():
         # crew.py task index map:
         # [0] research_data           [1] generate_csv             [2] define_topic
         # [3] create_definition_video [4] create_video             [5] create_bar_race_video
-        # [6] create_intro_clip       [7] bar_merge                [8] add_bar_race_audio
-        # [9] add_audio               [10] merge_audio_video       [11] generate_youtube_metadata
+        # [6] create_intro_clip       [7] bar_merge                [8] add_audio
+        # [9] merge_audio_video       [10] generate_youtube_metadata
 
         if inputs.get('bar_race_video_enabled', False):
             final_tasks.append(full_crew.tasks[5])  # create_bar_race_video
+
 
         if inputs.get('intro_enabled', False):
             final_tasks.append(full_crew.tasks[6])  # create_intro_clip
@@ -193,7 +194,7 @@ def run():
 
 
         if inputs.get('audio_enabled', False):
-            final_tasks.append(full_crew.tasks[9])  # add_audio
+            final_tasks.append(full_crew.tasks[8])  # add_audio
 
         if inputs.get('definition_video', False):
             final_tasks.append(full_crew.tasks[3])  # create_definition_video
@@ -204,10 +205,10 @@ def run():
 
         # merge_audio_video and generate_youtube_metadata run LAST
         if inputs.get('merge_audio_video', False):
-            final_tasks.append(full_crew.tasks[10])  # merge_audio_video
+            final_tasks.append(full_crew.tasks[9])  # merge_audio_video
 
         if inputs.get('generate_youtube_metadata', False):
-            final_tasks.append(full_crew.tasks[11])  # generate_youtube_metadata
+            final_tasks.append(full_crew.tasks[10])  # generate_youtube_metadata
 
 
 
@@ -244,15 +245,34 @@ def run():
             _crew_done.set()
             _hb.join(timeout=1)
 
-        # Definition tool saves file directly — just verify it exists
-        if inputs.get('definition_enabled', False):
-            filename_clean = inputs.get('filename', '')
-            txt_path = f"output/{filename_clean}.txt"
-            if os.path.exists(txt_path):
-                size = os.path.getsize(txt_path)
-                print(f"[Definition] ✅ Saved: {txt_path} ({size} bytes)")
-            else:
-                print(f"[Definition] ⚠️  File not found: {txt_path}")
+        # Save definition from result.raw (define_topic agent writes pure text, no tool)
+        if inputs.get('definition_enabled', False) and not inputs.get('use_existing_definition', False):
+            try:
+                filename_clean = inputs.get('filename', '')
+                # Use __file__ to anchor path — CWD unreliable in crewai
+                _main_dir     = os.path.dirname(os.path.abspath(__file__))
+                _project_root = os.path.dirname(os.path.dirname(_main_dir))
+                _output_root  = os.path.join(_project_root, 'output')
+                txt_path      = os.path.join(_output_root, f"{filename_clean}.txt")
+
+                def_text = str(result.raw if hasattr(result, 'raw') else result).strip()
+
+                if def_text and ("WHAT IS" in def_text or "WHY DOES IT MATTER" in def_text):
+                    channel = inputs.get('channel', 'PlayOwnAi')
+                    start   = inputs.get('start', 2015)
+                    end     = inputs.get('end', 2026)
+                    sep     = "━" * 52
+                    header  = f"{sep}\n📖 TOPIC: {inputs['topic']}\nChannel: @{channel}  |  Period: {start}–{end}\n{sep}\n\n"
+                    footer  = f"\n\n{sep}\nSubscribe to @{channel} for more data-driven insights.\n{sep}\n"
+                    full    = header + def_text + footer
+                    os.makedirs(_output_root, exist_ok=True)
+                    with open(txt_path, 'w', encoding='utf-8') as _df:
+                        _df.write(full)
+                    print(f"[Definition] ✅ Saved: {txt_path} ({len(full.split())} words)")
+                else:
+                    print(f"[Definition] ⚠️  result does not look like a definition — not saved")
+            except Exception as _de:
+                print(f"[Definition] ⚠️  Save error: {_de}")
 
         print("\n" + "="*60)
         print("✅ VIDEO FACTORY COMPLETED")
@@ -275,11 +295,17 @@ def run():
         if inputs.get('intro_enabled', False):
             print(f"   Intro Clips:")
             for fmt in inputs['video_formats']:
-                intro_file = f"{output_dir}/intro_{fmt}.mp4"
-                if os.path.exists(intro_file):
-                    print(f"      ✅ {intro_file}")
-                else:
-                    print(f"      ❌ Not found: {intro_file}")
+                for suffix, label in [
+                    ('', 'video'),
+                    ('_audio.mp3', 'audio'),
+                    ('_with_audio.mp4', 'merged'),
+                ]:
+                    ext = '.mp4' if suffix == '' else ''
+                    intro_file = f"{output_dir}/intro_{fmt}{suffix}{ext}" if suffix else f"{output_dir}/intro_{fmt}.mp4"
+                    intro_file = f"{output_dir}/intro_{fmt}{suffix}" if suffix else f"{output_dir}/intro_{fmt}.mp4"
+                    if os.path.exists(intro_file):
+                        kb = os.path.getsize(intro_file) // 1024
+                        print(f"      ✅ {intro_file} ({kb} KB) [{label}]")
 
         if inputs.get('bar_race_video_enabled', False):
             print(f"   Videos (Bar Race):")
@@ -346,9 +372,12 @@ def run():
 
         if inputs.get('definition_enabled', False):
             print(f"   Topic Definition:")
-            def_file = f"output/{inputs['filename']}.txt"
+            _main_dir2     = os.path.dirname(os.path.abspath(__file__))
+            _project_root2 = os.path.dirname(os.path.dirname(_main_dir2))
+            def_file = os.path.join(_project_root2, 'output', f"{inputs['filename']}.txt")
             if os.path.exists(def_file):
-                print(f"      ✅ {def_file}")
+                size_kb = os.path.getsize(def_file) // 1024
+                print(f"      ✅ {def_file} ({size_kb} KB)")
             else:
                 print(f"      ❌ Not found: {def_file}")
 

@@ -7,7 +7,6 @@ from crewai_video_factory.tools.csv_tool import CSVTool
 from crewai_video_factory.tools.smart_video_tool import SmartVideoTool
 from crewai_video_factory.tools.bar_race_video_tool import BarRaceVideoTool  # NEW - Optional bar race
 from crewai_video_factory.tools.audio_tool import AudioGenerationTool
-from crewai_video_factory.tools.bar_race_audio_tool import BarRaceAudioTool
 from crewai_video_factory.tools.intro_clip_tool import IntroClipTool
 from crewai_video_factory.tools.bar_merge_tool import BarMergeTool
 from crewai_video_factory.tools.merge_tool import MergeAudioVideoTool
@@ -77,7 +76,7 @@ class CrewaiVideoFactory:
 
     @agent
     def bar_race_audio_engineer(self) -> Agent:
-        """Bar race audio producer triggered by bar_race_audio_enabled"""
+        from crewai_video_factory.tools.bar_race_audio_tool import BarRaceAudioTool
         return Agent(
             config=self.agents_config['bar_race_audio_engineer'],
             tools=[BarRaceAudioTool()],
@@ -167,13 +166,6 @@ class CrewaiVideoFactory:
         """Bar merge task triggered by bar_merge_enabled"""
         return Task(
             config=self.tasks_config['bar_merge'],
-        )
-
-    @task
-    def add_bar_race_audio(self) -> Task:
-        """Bar race audio task triggered by bar_race_audio_enabled"""
-        return Task(
-            config=self.tasks_config['add_bar_race_audio'],
         )
 
     @task

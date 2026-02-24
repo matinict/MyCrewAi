@@ -1,69 +1,3 @@
-create_definition_video:
-  description: >
-    Generate a storytelling video from the topic definition text file.
-    This task will automatically skip if definition_video is false in inputs.
-    When enabled, reads output/{filename}.txt and creates a line-by-line
-    animated video where each line fades in as the active (bright/bold) line,
-    while previous lines remain visible but dimmed.
-
-    CRITICAL — call the Definition Video Tool with EXACTLY these values:
-      topic: "{topic}"
-      filename: "{filename}"
-      output_dir: "{output_dir}"
-      video_formats: {video_formats}
-      definition_video: {definition_video}
-      secs_per_line: 3.5
-      channel: "{channel}"
-      watermark_enabled: {watermark_enabled}
-      watermark_text: "{watermark_text}"
-
-    Output files: {output_dir}/definition_video_[format].mp4
-    Example: output/LLMTuning/definition_video_Shorts.mp4
-  expected_output: >
-    List of definition video files created, OR skip message if disabled.
-    Example: "🎬 Definition videos created:\n   • definition_video_Shorts.mp4 (2048 KB)"
-  agent: definition_video_producer
-
-define_topic:
-  description: >
-    Save a plain-English definition of {topic} by calling the Definition Tool exactly once.
-    When definition_enabled is false, output "SKIP" immediately.
-    When use_existing_definition is true, output "SKIP" immediately.
-
-    Call the Definition Tool with ALL of these fields filled in:
-      topic: "{topic}"
-      filename: "{filename}"
-      output_dir: "{output_dir}"
-      start: {start}
-      end: {end}
-      definition_enabled: {definition_enabled}
-      channel: "{channel}"
-      definition_text: |
-        WHAT IS {topic}?
-        <Write 2-3 real plain sentences: what it is, what it does, one real-world example.>
-
-        WHY DOES IT MATTER?
-        <Write 2-3 real plain sentences: what problem it solves, why people use it.>
-
-        KEY TERMS
-        1: <TermName> - <One plain sentence, no jargon.>
-        2: <TermName> - <One plain sentence, no jargon.>
-        3: <TermName> - <One plain sentence, no jargon.>
-        4: <TermName> - <One plain sentence, no jargon.>
-
-    CRITICAL RULES for definition_text you write:
-    - Replace every <...> with your own real words about {topic}. No angle brackets in output.
-    - Plain text only: no bullet points, no bold, no markdown, no brackets of any kind.
-    - 3 sections only: WHAT IS, WHY DOES IT MATTER, KEY TERMS. Nothing else.
-    - Term labels must be numbers: "1:" not "Term 1:".
-    - Total text under {definition_max_chars} characters.
-    - You MUST write the full text inside the tool call — do not call the tool with empty definition_text.
-  expected_output: >
-    Confirmation that output/{filename}.txt was saved with word and character count.
-    Example: "Topic definition saved: output/LLMAlignmentRLHF.txt  42 words | 380 chars"
-    Task is COMPLETE when tool confirms save. Do not retry.
-  agent: definition_specialist
-
 research_data:
   description: >
     Research and compile time-series data for {topic} from {start} to {end}.
@@ -125,6 +59,51 @@ generate_csv:
   context:
     - research_data
 
+define_topic:
+  description: >
+    Write a rich definition of "{topic}" for the @{channel} YouTube channel.
+    If definition_enabled is false, respond with just: SKIP
+
+    Write ONLY the definition text — no tool calls, no JSON, no code.
+    Your entire response becomes the definition file content.
+
+    Format your response exactly like this:
+
+    WHAT IS {topic}?
+    [3-4 sentences in plain English for a general YouTube audience]
+
+    WHY DOES IT MATTER?
+    [2-3 sentences on importance and who it impacts]
+
+    KEY TERMS
+    - Term 1: one-line definition
+    - Term 2: one-line definition
+    - Term 3: one-line definition
+    - Term 4: one-line definition
+
+    TIMELINE {start} TO {end}
+    [3-4 sentences on key milestones and evolution]
+
+    WHAT YOU WILL SEE IN THIS RACE
+    [2 sentences on players, trends, and what to watch for]
+
+  expected_output: >
+    The full definition text as plain prose — no tool calls, no JSON.
+    Starting with "WHAT IS {topic}?" and ending with "WHAT YOU WILL SEE IN THIS RACE".
+  agent: definition_specialist
+
+
+create_definition_video:
+  description: >
+    Create a scrolling text video clip from the topic definition text for {topic}.
+    This task will automatically skip if definition_video is false in inputs.
+    When enabled, reads output/{filename}.txt and creates a scrolling video clip.
+    Output: definition_video_[format].mp4 per format in {video_formats}, saved to {output_dir}.
+    Skip immediately if definition_video is false.
+  expected_output: >
+    List of definition video files created, OR skip message if disabled.
+  agent: definition_video_producer
+
 create_video:
   description: >
     Generate visualization videos from the CSV file for {topic}.
@@ -153,15 +132,22 @@ create_video:
 
 create_bar_race_video:
   description: >
-    Generate bar race animation videos (and optional synced audio) from the CSV for {topic}.
-    Animation: Professional bar chart race with smooth interpolation.
+    Generate AMAZING bar race animation videos from the CSV file for {topic}.
+    Animation: Professional bar chart race with smooth interpolation
     Video formats: {video_formats}
     FPS (seconds per period): {fps}
+
+    Use the Bar Race Video Generator Tool to:
+    - Read CSV from output/{filename}.csv (flat directory)
+    - Create professional bar race videos
+    - Save to output/{filename}/ subdirectory
+    - Smooth interpolation, dynamic bar reordering, professional color scheme
+    - Output files: bar_race_[format].mp4 in output/{filename}/ subdirectory
 
     CRITICAL — call the Bar Race Video Tool with EXACTLY these values:
       csv_filepath: "output/{filename}.csv"
       output_dir: "{output_dir}"
-      title: "{topic}"
+      title: "{topic} Race"
       video_formats: {video_formats}
       seconds_per_period: {fps}
       fps_hd_offset: {fps_hd_offset}
@@ -169,22 +155,68 @@ create_bar_race_video:
       watermark_enabled: {watermark_enabled}
       watermark_text: "{watermark_text}"
       watermark_opacity: {watermark_opacity}
-      topic: "{topic}"
-      channel: "{channel}"
-      audio_speed: {audio_speed}
-      audio_speed_hd: {audio_speed_hd}
 
-    Output files per format in {output_dir}/:
-    - bar_race_[format].mp4                  (video only, always created)
-    - bar_race_[format]_audio.mp3            (narration, always generated)
-    - bar_race_[format]_with_audio.mp4       (final merged video+audio, always generated)
+    DO NOT change these values. Pass them exactly as shown.
   expected_output: >
-    Confirmation of files created with sizes.
-    Example: "✅ Shorts: bar_race_Shorts.mp4 (4200 KB) + audio → bar_race_Shorts_with_audio.mp4 (5100 KB)"
+    Confirmation of successful bar race video creation with exact file paths.
+    Example: "output/LLMTuning/bar_race_Shorts.mp4, output/LLMTuning/bar_race_HD.mp4"
   agent: bar_race_video_producer
   context:
     - research_data
     - generate_csv
+
+create_intro_clip:
+  description: >
+    Generate branded intro screen video clip(s) for bar race videos.
+    This task will automatically skip if intro_enabled is false in inputs.
+    When enabled, creates intro MP4 clips for each format in {video_formats}.
+
+    CRITICAL — call the Intro Clip Tool with EXACTLY these values:
+      topic: "{topic}"
+      start_year: {start}
+      end_year: {end}
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      intro_enabled: {intro_enabled}
+      intro_duration: {intro_duration}
+      channel: "{channel}"
+      watermark_enabled: {watermark_enabled}
+      watermark_text: "{watermark_text}"
+
+    Output files: {output_dir}/intro_[format].mp4
+    Example: output/LLMPopularity/intro_Shorts.mp4, output/LLMPopularity/intro_HD.mp4
+  expected_output: >
+    List of intro clip files created, OR skip message if disabled.
+    Example: "🎬 Intro clips created:\n   • intro_Shorts.mp4 (1024 KB)\n   • intro_HD.mp4 (2048 KB)"
+  agent: intro_clip_producer
+
+add_bar_race_audio:
+  description: >
+    Generate professional audio narration files for bar race videos.
+    This task will automatically skip if bar_race_audio_enabled is false in inputs.
+    When enabled, creates audio files for all bar_race_*.mp4 videos based on {topic}.
+
+    CRITICAL — call the Bar Race Audio Tool with EXACTLY these values:
+      topic: "{topic}"
+      filename: "{filename}"
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      bar_race_audio_enabled: {bar_race_audio_enabled}
+      audio_speed: {audio_speed}
+      audio_speed_hd: {audio_speed_hd}
+      channel: "{channel}"
+
+    The tool reads the CSV from output/{filename}.csv automatically.
+    DO NOT substitute topic for filename. filename must be the slug: "{filename}" (e.g. "LLMPopularity").
+    - Audio files saved to: {output_dir}/bar_race_[format]_audio.mp3
+    - Narration text: {output_dir}/bar_race_cc_en.txt
+  expected_output: >
+    List of bar race audio files created, OR skip message if disabled.
+    Example: "🎵 Bar race audio files created:\n   • bar_race_Shorts_audio.mp3\n   • bar_race_HD_audio.mp3"
+    Narration file: "bar_race_cc_en.txt"
+  agent: bar_race_audio_engineer
+  context:
+    - create_bar_race_video
 
 add_audio:
   description: >
@@ -218,92 +250,6 @@ merge_audio_video:
   context:
     - add_audio
 
-generate_youtube_metadata:
-  description: >
-    Generate YouTube metadata and narration text file for {topic}.
-    This includes:
-    - Narration text file: output/{filename}/{filename}_cc_en.txt
-    - YouTube title (SEO optimized)
-    - YouTube description (with keywords and call-to-action)
-    - YouTube tags (25+ SEO tags)
-    - YouTube chapters/timestamps
-    - Metadata saved to output/{filename}/ subdirectory:
-      * {filename}_YouTube_Metadata.json
-      * {filename}_YouTube_Metadata.txt
-    Social Media Links:
-    - YouTube: @{channel}
-    - LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
-
-    Parameters:
-    - Topic: {topic}
-    - Year Range: {start} to {end}
-    - Video Duration: Calculate from {fps} and data points
-    - Language: English (en) - extensible to other languages
-
-    Social Media Links:
-    - YouTube: @{channel}
-    - Facebook: facebook.com/{channel}
-    - Website: {website}
-  expected_output: >
-    Confirmation of metadata files created:
-    - {filename}_cc_en.txt (Narration/Closed Captions)
-    - {filename}_YouTube_Metadata.json
-    - {filename}_YouTube_Metadata.txt
-  agent: youtube_metadata_specialist
-  context:
-    - generate_csv
-    - create_video
-
-add_bar_race_audio:
-  description: >
-    Generate professional audio narration files for bar race videos.
-    When enabled, creates audio files for all bar_race_*.mp4 videos based on {topic}.
-
-    CRITICAL — call the Bar Race Audio Tool with EXACTLY these values:
-      topic: "{topic}"
-      filename: "{filename}"
-      output_dir: "{output_dir}"
-      video_formats: {video_formats}
-      audio_speed: {audio_speed}
-      audio_speed_hd: {audio_speed_hd}
-
-    The tool reads the CSV from output/{filename}.csv automatically.
-    DO NOT substitute topic for filename. filename must be the slug: "{filename}" (e.g. "LLMPopularity").
-    - Audio files saved to: {output_dir}/bar_race_[format]_audio.mp3
-    - Narration text: {output_dir}/bar_race_cc_en.txt
-  expected_output: >
-    List of bar race audio files created, OR skip message if disabled.
-    Example: "🎵 Bar race audio files created:\n   • bar_race_Shorts_audio.mp3\n   • bar_race_HD_audio.mp3"
-    Narration file: "bar_race_cc_en.txt"
-  agent: bar_race_audio_engineer
-  context:
-    - create_bar_race_video
-
-create_intro_clip:
-  description: >
-    Generate branded intro screen video clip(s) for bar race videos.
-    This task will automatically skip if intro_enabled is false in inputs.
-    When enabled, creates intro MP4 clips for each format in {video_formats}.
-
-    CRITICAL — call the Intro Clip Tool with EXACTLY these values:
-      topic: "{topic}"
-      start_year: {start}
-      end_year: {end}
-      output_dir: "{output_dir}"
-      video_formats: {video_formats}
-      intro_enabled: {intro_enabled}
-      intro_duration: {intro_duration}
-      channel: "{channel}"
-      watermark_enabled: {watermark_enabled}
-      watermark_text: "{watermark_text}"
-
-    Output files: {output_dir}/intro_[format].mp4
-    Example: output/LLMPopularity/intro_Shorts.mp4, output/LLMPopularity/intro_HD.mp4
-  expected_output: >
-    List of intro clip files created, OR skip message if disabled.
-    Example: "🎬 Intro clips created:\n   • intro_Shorts.mp4 (1024 KB)\n   • intro_HD.mp4 (2048 KB)"
-  agent: intro_clip_producer
-
 bar_merge:
   description: >
     Concatenate intro clip + bar race video, then merge with bar race audio
@@ -323,6 +269,8 @@ bar_merge:
       output_dir: "{output_dir}"
       video_formats: {video_formats}
       bar_merge_enabled: {bar_merge_enabled}
+      channel: "{channel}"
+      topic: "{topic}"
 
     Output files go to {output_dir}/Merge_bar_race_[format].mp4
     Example: output/LLMTuningMethods/Merge_bar_race_Shorts.mp4
@@ -333,3 +281,42 @@ bar_merge:
        • Merge_bar_race_Shorts.mp4 (12.3 MB)
        • Merge_bar_race_HD.mp4 (48.7 MB)"
   agent: bar_merge_specialist
+
+generate_youtube_metadata:
+  description: >
+    Generate YouTube metadata and narration text file for {topic}.
+    This includes:
+    - Narration text file: output/{filename}/{filename}_cc_en.txt
+    - YouTube title (SEO optimized)
+    - YouTube description (with keywords and call-to-action)
+    - YouTube tags (25+ SEO tags)
+    - YouTube chapters/timestamps
+    - Metadata saved to output/{filename}/ subdirectory:
+      * {filename}_YouTube_Metadata.json
+      * {filename}_YouTube_Metadata.txt
+    Social Media Links:
+    - YouTube: @{channel}
+    - LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
+
+    CRITICAL — call the YouTube Metadata Tool with EXACTLY these values:
+      topic: "{topic}"
+      filename: "{filename}"
+      output_dir: "{output_dir}"
+      start_year: {start}
+      end_year: {end}
+      channel: "{channel}"
+      channel_lower: "{channel_lower}"
+      website: "{website}"
+      video_formats: {video_formats}
+      fps: {fps}
+      fps_hd_offset: {fps_hd_offset}
+      generate_youtube_metadata: {generate_youtube_metadata}
+  expected_output: >
+    Confirmation of metadata files created:
+    - cc_en.txt (Narration/Closed Captions)
+    - YouTube_Metadata.json
+    - YouTube_Metadata.txt
+  agent: youtube_metadata_specialist
+  context:
+    - generate_csv
+    - create_video

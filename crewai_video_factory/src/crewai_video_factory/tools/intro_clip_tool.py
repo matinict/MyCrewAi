@@ -40,6 +40,10 @@ class IntroClipToolInput(BaseModel):
     watermark_text: str = Field(default="@PlayOwnAi", description="Watermark text")
     watermark_opacity: int = Field(default=60, ge=0, le=255, description="Watermark opacity (0-255)")
 
+    # Audio
+    audio_speed: float = Field(default=1.0, ge=0.5, le=2.0, description="Speech speed for Shorts/portrait via ffmpeg atempo.")
+    audio_speed_hd: float = Field(default=0.0, ge=0.0, le=2.0, description="Speech speed for HD/landscape. 0.0 = use audio_speed.")
+
     # Background color
     bg_color: tuple = Field(default=(20, 20, 40), description="RGB background color")
 
@@ -106,6 +110,8 @@ class IntroClipTool(BaseTool):
         watermark_text: str = "@PlayOwnAi",
         watermark_opacity: int = 60,
         bg_color: tuple = (20, 20, 40),
+        audio_speed: float = 1.0,
+        audio_speed_hd: float = 0.0,
     ) -> str:
 
         # --- SKIP ---
@@ -123,6 +129,11 @@ class IntroClipTool(BaseTool):
 
         if not shutil.which('ffmpeg'):
             return "❌ FATAL: ffmpeg not found. Install: sudo apt install ffmpeg"
+
+        try:
+            from gtts import gTTS  # noqa: F401
+        except ImportError:
+            return "❌ FATAL: gTTS not installed. Run: pip install gTTS"
 
         os.makedirs(output_dir, exist_ok=True)
 
@@ -161,12 +172,48 @@ class IntroClipTool(BaseTool):
                     watermark_opacity=watermark_opacity,
                 )
 
-                if os.path.exists(output_path):
-                    size_kb = os.path.getsize(output_path) // 1024
-                    results.append(f"intro_{fmt}.mp4 ({size_kb} KB)")
-                    print(f"[IntroClipTool] ✅ {fmt} intro created ({size_kb} KB)")
+                if not os.path.exists(output_path):
+                    errors.append(f"❌ {fmt}: video file not created")
+                    continue
+
+                size_kb = os.path.getsize(output_path) // 1024
+                print(f"[IntroClipTool] ✅ {fmt} video created ({size_kb} KB)")
+
+                # --- AUDIO: generate intro narration MP3 ---
+                is_portrait_fmt2 = RESOLUTIONS[fmt][1] > RESOLUTIONS[fmt][0]
+                spd = audio_speed if is_portrait_fmt2 else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
+                narration = f"{topic} from {start_year} to {end_year}."
+                audio_path = os.path.join(output_dir, f"intro_{fmt}_audio.mp3")
+                print(f"[IntroClipTool] 🎙  Generating {fmt} intro audio (speed={spd}) → {audio_path}")
+                try:
+                    self._generate_audio(narration, audio_path, spd)
+                except Exception as ae:
+                    errors.append(f"⚠️ {fmt} audio failed: {ae}")
+                    audio_path = None
+
+                # --- MERGE: bake audio into video → intro_{fmt}_with_audio.mp4 ---
+                merged_path = os.path.join(output_dir, f"intro_{fmt}_with_audio.mp4")
+                if audio_path and os.path.exists(audio_path):
+                    import subprocess as _sp
+                    merge_cmd = [
+                        'ffmpeg', '-y',
+                        '-i', output_path,
+                        '-i', audio_path,
+                        '-c:v', 'copy',
+                        '-c:a', 'aac',
+                        '-shortest',
+                        merged_path,
+                    ]
+                    merge_result = _sp.run(merge_cmd, capture_output=True, check=False)
+                    if merge_result.returncode == 0 and os.path.exists(merged_path):
+                        merged_kb = os.path.getsize(merged_path) // 1024
+                        results.append(f"intro_{fmt}.mp4 ({size_kb} KB) + audio → intro_{fmt}_with_audio.mp4 ({merged_kb} KB)")
+                        print(f"[IntroClipTool] ✅ {fmt} merged: intro_{fmt}_with_audio.mp4 ({merged_kb} KB)")
+                    else:
+                        results.append(f"intro_{fmt}.mp4 ({size_kb} KB) [audio merge failed]")
+                        errors.append(f"⚠️ {fmt} merge failed: {merge_result.stderr.decode()[:150]}")
                 else:
-                    errors.append(f"❌ {fmt}: file not created")
+                    results.append(f"intro_{fmt}.mp4 ({size_kb} KB) [no audio]")
 
             except Exception as e:
                 errors.append(f"❌ {fmt}: {e}")
@@ -277,6 +324,51 @@ class IntroClipTool(BaseTool):
     # -----------------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------------
+
+    def _generate_audio(self, text: str, output_path: str, speed: float):
+        """Generate MP3 from text via gTTS + ffmpeg atempo speed control."""
+        from gtts import gTTS
+        import subprocess
+        import threading
+        import time
+
+        label = os.path.basename(output_path)
+        print(f"[IntroClipTool] ⏱  {label} — generating audio ({len(text)} chars)")
+
+        _stop = threading.Event()
+        def _ticker(lbl, start):
+            while not _stop.is_set():
+                time.sleep(5)
+                if not _stop.is_set():
+                    print(f"[IntroClipTool] ⏳ {lbl} ... {int(time.time()-start)}s")
+        t_start = time.time()
+        ticker = threading.Thread(target=_ticker, args=(label, t_start), daemon=True)
+        ticker.start()
+
+        result = None
+        try:
+            temp_path = output_path.replace('.mp3', '_temp.mp3')
+            tts = gTTS(text=text, lang='en', slow=False)
+            tts.save(temp_path)
+            atempo = max(0.5, min(2.0, speed))
+            result = subprocess.run([
+                'ffmpeg', '-y', '-i', temp_path,
+                '-filter:a', f'atempo={atempo}',
+                output_path
+            ], capture_output=True, check=False)
+        finally:
+            _stop.set()
+            ticker.join(timeout=1)
+
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        elapsed = time.time() - t_start
+        if result and result.returncode != 0 and not os.path.exists(output_path):
+            raise RuntimeError(f"ffmpeg atempo failed: {result.stderr.decode()[:200]}")
+
+        size_kb = os.path.getsize(output_path) // 1024 if os.path.exists(output_path) else 0
+        print(f"[IntroClipTool] ✅ {label} audio done in {elapsed:.1f}s ({size_kb}KB)")
 
     def _load_fonts(self, title_size: int, subtitle_size: int):
         from PIL import ImageFont

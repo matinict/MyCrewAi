@@ -70,17 +70,37 @@ class DefinitionVideoTool(BaseTool):
             return "❌ ffmpeg not found. Run: sudo apt install ffmpeg"
 
         # ── Locate definition .txt ──────────────────────────────────────
-        filename_clean = ''.join(re.findall(r'\w+', filename)[:3])
-        parent_dir = os.path.dirname(os.path.abspath(output_dir))
+        # output_dir is already correct (e.g. output/LLMAlignmentRLHF) — use it as-is
+        # Anchor it via __file__ in case agent passed a relative path
+        _tool_dir     = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.dirname(os.path.dirname(os.path.dirname(_tool_dir)))
+
+        # Resolve output_dir: if relative, join to project_root
+        if not os.path.isabs(output_dir):
+            output_dir = os.path.join(_project_root, output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+
+        # txt lives ONE level UP from output_dir (i.e. output/LLMAlignmentRLHF.txt)
+        parent_dir = os.path.dirname(output_dir)
+        folder_name = os.path.basename(output_dir)  # e.g. LLMAlignmentRLHF
+
         txt_candidates = [
-            os.path.join(parent_dir, f"{filename_clean}.txt"),
-            os.path.join(parent_dir, f"{filename}.txt"),
-            os.path.join(output_dir,  f"{filename_clean}.txt"),
+            os.path.join(parent_dir, f"{folder_name}.txt"),   # output/LLMAlignmentRLHF.txt ✓
+            os.path.join(parent_dir, f"{filename}.txt"),       # raw filename fallback
         ]
         txt_path = next((p for p in txt_candidates if os.path.exists(p)), None)
 
         if not txt_path:
-            return "❌ Definition .txt not found. Tried:\n" + "\n".join(txt_candidates)
+            import glob as _glob
+            found = sorted(_glob.glob(os.path.join(parent_dir, "*.txt")))
+            if found:
+                txt_path = found[0]
+                print(f"[DefVideo] ⚠️  glob fallback: {txt_path}")
+
+        if not txt_path:
+            return (f"❌ Definition .txt not found.\n"
+                    f"   output_dir: {output_dir}\n"
+                    f"   Tried: {txt_candidates}")
 
         print(f"[DefVideo] Reading: {txt_path}")
         with open(txt_path, 'r', encoding='utf-8') as f:

@@ -95,40 +95,17 @@ class DefinitionTool(BaseTool):
         # Sanitize filename slug
         filename_clean = ''.join(re.findall(r'\w+', filename)[:3])
 
-        # Save flat alongside CSV: output/{filename}.txt
-        parent_dir = os.path.dirname(os.path.abspath(output_dir))
-        txt_path = os.path.join(parent_dir, f"{filename_clean}.txt")
-
-        # No header/footer — plain text only for clean video & audio output
-        header = ""
-        footer = ""
-
-        # ── Clean & trim the agent output before saving ────────────────
-        import re as _re
-        trimmed = definition_text.strip()
-
-        # 1. Remove prompt instruction leakage like [2-3 plain sentences. ...]
-        trimmed = _re.sub(r'\[.*?\]', '', trimmed)
-
-        # 2. Remove TIMELINE / WHAT YOU WILL SEE sections entirely
-        trimmed = _re.split(r'\nTIMELINE', trimmed, flags=_re.IGNORECASE)[0]
-        trimmed = _re.split(r'\nWHAT YOU WILL SEE', trimmed, flags=_re.IGNORECASE)[0]
-
-        # 3. Fix doubled term numbers: "1: 1:" or "Term 1: 1:" → "1:"
-        trimmed = _re.sub(r'\bTerm\s*(\d+):\s*', r'\1: ', trimmed)
-        trimmed = _re.sub(r'(\d+):\s*\1:\s*', r'\1: ', trimmed)
-
-        # 4. KEY TERMS inline → split to new line
-        trimmed = _re.sub(r'KEY TERMS\s*(\d+):', r'KEY TERMS\n\1:', trimmed)
-
-        # 5. Collapse 3+ blank lines → 1 blank line
-        trimmed = _re.sub(r'\n{3,}', '\n\n', trimmed).strip()
-
-        # 6. Hard cap at definition_max_chars
-        if len(trimmed) > definition_max_chars:
-            cap = trimmed[:definition_max_chars]
-            last_break = max(cap.rfind('.'), cap.rfind('\n'))
-            trimmed = cap[:last_break + 1].strip() if last_break > int(definition_max_chars * 0.67) else cap.strip()
+        # ── Anchor save path to project root via __file__ ──────────────
+        # CWD is unreliable in crewai tools (often runs as /).
+        # os.path.abspath(output_dir) would resolve to /output/ (root fs).
+        # __file__ is always this tool's own source path — walk up to project root.
+        _tool_dir     = os.path.dirname(os.path.abspath(__file__))   # .../tools/
+        _pkg_dir      = os.path.dirname(_tool_dir)                   # .../crewai_video_factory/
+        _src_dir      = os.path.dirname(_pkg_dir)                    # .../src/
+        _project_root = os.path.dirname(_src_dir)                    # project root
+        _output_root  = os.path.join(_project_root, 'output')
+        txt_path      = os.path.join(_output_root, f"{filename_clean}.txt")
+        print(f"[Definition]   path     : {txt_path}")
 
         # ── Clean & trim the agent output before saving ────────────────
         import re as _re
@@ -175,7 +152,7 @@ class DefinitionTool(BaseTool):
         full_text = clean_definition(definition_text, definition_max_chars)
 
         try:
-            os.makedirs(parent_dir, exist_ok=True)
+            os.makedirs(_output_root, exist_ok=True)
             with open(txt_path, 'w', encoding='utf-8') as f:
                 f.write(full_text)
 
