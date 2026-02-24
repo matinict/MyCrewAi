@@ -97,11 +97,25 @@ create_definition_video:
   description: >
     Create a scrolling text video clip from the topic definition text for {topic}.
     This task will automatically skip if definition_video is false in inputs.
-    When enabled, reads output/{filename}.txt and creates a scrolling video clip.
-    Output: definition_video_[format].mp4 per format in {video_formats}, saved to {output_dir}.
-    Skip immediately if definition_video is false.
+
+    CRITICAL — call the Definition Video Tool with EXACTLY these values:
+      topic: "{topic}"
+      filename: "{filename}"
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      definition_video: {definition_video}
+      secs_per_line: 3.5
+      channel: "{channel}"
+      watermark_enabled: {watermark_enabled}
+      watermark_text: "{watermark_text}"
+
+    NOTE: filename must be "{filename}" (e.g. "LLMAlignmentRLHF") — NOT "definition_video_LLMAlignmentRLHF".
+    The tool reads output/{filename}.txt automatically.
+    Output: definition_video_[format].mp4 saved to {output_dir}.
+
   expected_output: >
     List of definition video files created, OR skip message if disabled.
+    Example: "definition_video_Shorts.mp4 (2.3 MB)"
   agent: definition_video_producer
 
 create_video:
@@ -276,10 +290,9 @@ bar_merge:
     Example: output/LLMTuningMethods/Merge_bar_race_Shorts.mp4
              output/LLMTuningMethods/Merge_bar_race_HD.mp4
   expected_output: >
-    List of final merged files created, OR skip message if disabled.
-    Example: "🎬 Bar merge completed (2/2 formats).
-       • Merge_bar_race_Shorts.mp4 (12.3 MB)
-       • Merge_bar_race_HD.mp4 (48.7 MB)"
+    A message starting with "DONE. Bar merge completed" listing the final files created.
+    Once you receive output from the tool containing "completed" or "skipped", return it as your Final Answer immediately.
+    Do NOT call the tool again.
   agent: bar_merge_specialist
 
 generate_youtube_metadata:

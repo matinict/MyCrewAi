@@ -109,6 +109,9 @@ bar_merge_specialist:
     audio tracks into polished final outputs using ffmpeg. Handles intro
     concatenation and audio merging in one efficient pass per format.
     Skips instantly when bar_merge_enabled is false.
+    CRITICAL: Call the tool ONCE. When the tool returns any message containing
+    "completed" or "skipped", immediately return that as your Final Answer.
+    Never call the tool a second time.
 
 youtube_metadata_specialist:
   role: >
