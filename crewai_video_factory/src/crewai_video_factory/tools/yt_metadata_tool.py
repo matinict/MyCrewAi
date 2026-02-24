@@ -107,6 +107,8 @@ class YouTubeMetadataTool(BaseTool):
         import re as _vre
         t0 = _time.time()
 
+        print(f"[YTMetadata] 🔖 v2.0 — structured YT/{{fmt}}/MD|CC/ output")
+
         # ── Normalize video_formats FIRST — used for both metadata and cleanup ──
         # Agent may pass: None, [], ["HD"], "['HD']", "HD", etc.
         if not video_formats:
@@ -131,6 +133,9 @@ class YouTubeMetadataTool(BaseTool):
         os.makedirs(output_dir, exist_ok=True)
         clean_filename = filename
         results = []
+
+        # ── Migrate old flat YT/ structure to new nested YT/{fmt}/MD|CC/ ──
+        self._migrate_old_yt_structure(output_dir, video_formats)
 
         if generate_narration:
             print(f"[YTMetadata] 📝 Step 1/2 — Generating narration text …")
@@ -166,9 +171,9 @@ class YouTubeMetadataTool(BaseTool):
             for fmt in fmts:
                 fmt = fmt.strip()
                 # Skip if English metadata already exists for this format
-                existing = os.path.join(output_dir, "YT", f"Metadata_{fmt}_En.json")
+                existing = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
                 if os.path.exists(existing):
-                    print(f"[YTMetadata]   • [{fmt}] ⏭️  Skipping — YT/Metadata_{fmt}_En.json already exists")
+                    print(f"[YTMetadata]   • [{fmt}] ⏭️  Skipping — YT/{fmt}/MD/en.json already exists")
                     fmt_results.append(f"⏭️  [{fmt}] Skipped (already exists)")
                     continue
                 is_portrait = fmt in ("Shorts", "ShortsHD", "Shorts4K")
@@ -192,6 +197,11 @@ class YouTubeMetadataTool(BaseTool):
             results.append(metadata_result)
 
         print(f"[YTMetadata] 🏁 Metadata done in {_time.time()-t0:.1f}s")
+
+        # --- Translate CC narration files (bar_race_*_cc_en.txt → YT/cc_*_{lang}.txt) ---
+        print(f"[YTMetadata] 📝 Step CC — Translating CC narration files …")
+        cc_result = self._translate_cc_files(output_dir, video_formats)
+        results.append(cc_result)
 
         # --- Final cleanup + rename always runs regardless of metadata flag ---
         self._cleanup_and_rename(output_dir, video_formats, channel, topic)  # already normalized
@@ -272,24 +282,18 @@ class YouTubeMetadataTool(BaseTool):
 
     def _write_metadata_files(self, topic: str, title: str, description: str, tags: list, chapters: str, output_dir: str, fmt: str = "") -> str:
         """
-        Write metadata files into YT/ subfolder.
+        Write metadata files into structured YT/{fmt}/MD/ subfolder.
         Structure:
-          output/{topic}/YT/
-            {fmt}_En.json   ← English JSON
-            {fmt}_En.txt    ← English TXT
-            {fmt}_{Lang}.txt  ← one TXT per language (31 languages)
+          output/{topic}/YT/{fmt}/MD/
+            en.json   ← English JSON
+            en.txt    ← English TXT
+            bn.txt    ← Bengali TXT
+            ar.txt    ← Arabic TXT
+            ...       ← one file per language (31 languages)
         """
-        yt_dir = os.path.join(output_dir, "YT")
-        # Auto-migrate old YT/ folder → YT/ if it exists
-        old_yt = os.path.join(output_dir, "YT")
-        if os.path.exists(old_yt) and not os.path.exists(yt_dir):
-            import shutil as _shutil
-            _shutil.move(old_yt, yt_dir)
-            print(f"[YTMetadata]   🔄 Migrated: YT/ → YT/")
-        os.makedirs(yt_dir, exist_ok=True)
-
-        prefix = fmt if fmt else "Video"
-        file_prefix = f"Metadata_{prefix}"  # e.g. Metadata_HD, Metadata_Shorts
+        fmt_label = fmt if fmt else "Video"
+        md_dir = os.path.join(output_dir, "YT", fmt_label, "MD")
+        os.makedirs(md_dir, exist_ok=True)
 
         # ── English JSON ──
         metadata = {
@@ -301,36 +305,34 @@ class YouTubeMetadataTool(BaseTool):
             "language": "en",
             "created_at": datetime.now().isoformat()
         }
-        en_json_path = os.path.join(yt_dir, f"{file_prefix}_En.json")
-        # Skip if already exists
+        en_json_path = os.path.join(md_dir, "en.json")
         if not os.path.exists(en_json_path):
             with open(en_json_path, 'w', encoding='utf-8') as f:
                 json.dump(metadata, f, indent=2, ensure_ascii=False)
-            print(f"[YTMetadata]   📄 Saved: {file_prefix}_En.json")
+            print(f"[YTMetadata]   📄 Saved: YT/{fmt_label}/MD/en.json")
         else:
-            print(f"[YTMetadata]   ⏭️  Exists: {file_prefix}_En.json")
+            print(f"[YTMetadata]   ⏭️  Exists: YT/{fmt_label}/MD/en.json")
 
         # ── English TXT ──
-        en_txt_path = os.path.join(yt_dir, f"{file_prefix}_En.txt")
+        en_txt_path = os.path.join(md_dir, "en.txt")
         if not os.path.exists(en_txt_path):
             with open(en_txt_path, 'w', encoding='utf-8') as f:
                 f.write(f"TITLE:\n{title}\n\n")
                 f.write(f"DESCRIPTION:\n{description}\n\n")
                 f.write(f"TAGS:\n{', '.join(tags)}\n\n")
                 f.write(f"CHAPTERS:\n{chapters}\n")
-            print(f"[YTMetadata]   📄 Saved: {file_prefix}_En.txt")
+            print(f"[YTMetadata]   📄 Saved: YT/{fmt_label}/MD/en.txt")
         else:
-            print(f"[YTMetadata]   ⏭️  Exists: {file_prefix}_En.txt")
+            print(f"[YTMetadata]   ⏭️  Exists: YT/{fmt_label}/MD/en.txt")
 
         # ── Translated TXT files — one per language ──
-        print(f"[YTMetadata]   🌍 Translating to {len(LANGUAGES)} languages …")
+        print(f"[YTMetadata]   🌍 Translating MD to {len(LANGUAGES)} languages …")
         ok_count = 0
         for lang_code in LANGUAGES:
-            lang_suffix = lang_code  # use code directly: bn, ar, zh-cn, fr...
-            txt_path = os.path.join(yt_dir, f"{file_prefix}_{lang_suffix}.txt")
+            txt_path = os.path.join(md_dir, f"{lang_code}.txt")
 
             if os.path.exists(txt_path):
-                print(f"[YTMetadata]     ⏭️  {file_prefix}_{lang_suffix}.txt exists")
+                print(f"[YTMetadata]     ⏭️  YT/{fmt_label}/MD/{lang_code}.txt exists")
                 ok_count += 1
                 continue
 
@@ -343,15 +345,15 @@ class YouTubeMetadataTool(BaseTool):
                     f.write(f"TITLE:\n{t_title}\n\n")
                     f.write(f"DESCRIPTION:\n{t_description}\n\n")
                     f.write(f"TAGS:\n{t_tags_str}\n\n")
-                    f.write(f"CHAPTERS:\n{chapters}\n")  # chapters keep timestamps (numbers)
-                print(f"[YTMetadata]     ✅ {file_prefix}_{lang_suffix}.txt  ({LANG_NAMES.get(lang_suffix, lang_suffix)})")
+                    f.write(f"CHAPTERS:\n{chapters}\n")
+                print(f"[YTMetadata]     ✅ YT/{fmt_label}/MD/{lang_code}.txt  ({LANG_NAMES.get(lang_code, lang_code)})")
                 ok_count += 1
-                time.sleep(0.2)  # be polite to free API
+                time.sleep(0.2)
             except Exception as e:
                 print(f"[YTMetadata]     ❌ {lang_code}: {e}")
 
-        total = len(LANGUAGES) + 2  # +2 for En.json + En.txt
-        return f"🎬 [{file_prefix}] {ok_count+2}/{total} files in YT/"
+        total = len(LANGUAGES) + 2  # +2 for en.json + en.txt
+        return f"🎬 [{fmt_label}] {ok_count+2}/{total} files in YT/{fmt_label}/MD/"
     def _generate_youtube_title(self, topic: str, start_year: int, end_year: int, channel: str = "PlayOwnAi") -> str:
         """Generate SEO-optimized YouTube title"""
 
@@ -476,6 +478,172 @@ This visualization is based on comprehensive market data tracking {topic.lower()
             f"The evolution of technology and trends continues. Subscribe to @{channel} for more insights."
         )
 
+
+
+    def _migrate_old_yt_structure(self, output_dir: str, video_formats: list):
+        """
+        One-time migration: move old flat YT/ files into new nested structure.
+        Old: YT/Metadata_{fmt}_En.json  → New: YT/{fmt}/MD/en.json
+        Old: YT/Metadata_{fmt}_{lang}.txt → New: YT/{fmt}/MD/{lang}.txt
+        Old: YT/cc_{fmt}_{lang}.txt     → New: YT/{fmt}/CC/{lang}.txt
+        Old: YT/cc_en_{lang}.txt        → New: YT/standard/CC/{lang}.txt
+        Deletes source after successful move.
+        """
+        import glob as _glob, re as _re
+        yt_dir = os.path.join(output_dir, "YT")
+        if not os.path.exists(yt_dir):
+            return
+
+        moved = 0
+
+        # ── Migrate Metadata_{fmt}_{lang}.* files ─────────────────────────
+        for old_path in _glob.glob(os.path.join(yt_dir, "Metadata_*.json")) + \
+                        _glob.glob(os.path.join(yt_dir, "Metadata_*.txt")):
+            name = os.path.basename(old_path)
+            # Metadata_HD_En.json → fmt=HD, lang=en, ext=json
+            # Metadata_Shorts_bn.txt → fmt=Shorts, lang=bn, ext=txt
+            m = _re.match(r"Metadata_([^_]+(?:HD|4K|8K|2K)?)_([A-Za-z-]+)\.(json|txt)$", name)
+            if not m:
+                m = _re.match(r"Metadata_([A-Za-z0-9]+)_([A-Za-z-]+)\.(json|txt)$", name)
+            if not m:
+                continue
+            fmt_part, lang_part, ext = m.group(1), m.group(2), m.group(3)
+            lang_norm = lang_part.lower()  # En → en, bn → bn
+            if lang_norm == "en" and ext == "json":
+                new_name = "en.json"
+            else:
+                new_name = f"{lang_norm}.txt"
+            md_dir = os.path.join(yt_dir, fmt_part, "MD")
+            os.makedirs(md_dir, exist_ok=True)
+            new_path = os.path.join(md_dir, new_name)
+            if not os.path.exists(new_path):
+                os.rename(old_path, new_path)
+                print(f"[YTMetadata] 🔄 Migrated: YT/{name} → YT/{fmt_part}/MD/{new_name}")
+                moved += 1
+            else:
+                os.remove(old_path)
+                print(f"[YTMetadata] 🗑️  Removed old (new exists): {name}")
+
+        # ── Migrate cc_{fmt}_{lang}.txt files ─────────────────────────────
+        for old_path in _glob.glob(os.path.join(yt_dir, "cc_*.txt")):
+            name = os.path.basename(old_path)
+            # cc_Shorts_bn.txt → fmt=Shorts, lang=bn
+            # cc_en_bn.txt     → fmt=standard, lang=bn (standard narration)
+            m = _re.match(r"cc_([A-Za-z0-9]+)_([A-Za-z-]+)\.txt$", name)
+            if not m:
+                continue
+            part1, lang = m.group(1), m.group(2)
+            # Distinguish: part1 is a known format → CC/{fmt}, else standard
+            known = {"HD","2K","4K","8K","Shorts","ShortsHD","Shorts4K"}
+            fmt_part = part1 if part1 in known else "standard"
+            cc_dir = os.path.join(yt_dir, fmt_part, "CC")
+            os.makedirs(cc_dir, exist_ok=True)
+            new_name = f"{lang}.txt"
+            new_path = os.path.join(cc_dir, new_name)
+            if not os.path.exists(new_path):
+                os.rename(old_path, new_path)
+                print(f"[YTMetadata] 🔄 Migrated: YT/{name} → YT/{fmt_part}/CC/{new_name}")
+                moved += 1
+            else:
+                os.remove(old_path)
+                print(f"[YTMetadata] 🗑️  Removed old (new exists): {name}")
+
+        if moved:
+            print(f"[YTMetadata] ✅ Migration complete: {moved} files moved to new structure")
+
+    def _translate_cc_files(self, output_dir: str, video_formats: list) -> str:
+        """
+        For each bar_race_{fmt}_cc_en.txt found in output_dir:
+          1. Save English copy as YT/{fmt}/CC/en.txt
+          2. Translate to all 31 languages → YT/{fmt}/CC/{lang}.txt
+
+        Also handles standard cc_en.txt → YT/standard/CC/{lang}.txt
+
+        Final structure:
+          output/{topic}/YT/
+            Shorts/CC/en.txt
+            Shorts/CC/bn.txt
+            Shorts/CC/ar.txt  ...
+            HD/CC/en.txt
+            HD/CC/bn.txt      ...
+        """
+        translated_total = 0
+        skipped_total = 0
+        report = []
+
+        # ── Collect all cc source files ─────────────────────────────────────
+        # Pattern A: bar_race_{fmt}_cc_en.txt  → YT/{fmt}/CC/{lang}.txt
+        # Pattern B: cc_en.txt (standard)      → YT/standard/CC/{lang}.txt
+        import glob as _glob
+
+        cc_sources = []
+        for fmt in video_formats:
+            candidate = os.path.join(output_dir, f"bar_race_{fmt}_cc_en.txt")
+            if os.path.exists(candidate):
+                cc_sources.append((candidate, fmt))
+                print(f"[YTMetadata] 📝 Found bar race CC: bar_race_{fmt}_cc_en.txt")
+
+        standard_cc = os.path.join(output_dir, "cc_en.txt")
+        if os.path.exists(standard_cc):
+            cc_sources.append((standard_cc, "standard"))
+            print(f"[YTMetadata] 📝 Found standard CC: cc_en.txt")
+
+        if not cc_sources:
+            print(f"[YTMetadata] ⚠️  No cc_en.txt files found in {output_dir}")
+            return "⚠️  No CC source files found to translate"
+
+        for src_path, fmt in cc_sources:
+            with open(src_path, "r", encoding="utf-8") as f:
+                en_text = f.read().strip()
+
+            if not en_text:
+                print(f"[YTMetadata]   ⚠️  {os.path.basename(src_path)} is empty — skipping")
+                continue
+
+            # ── Create YT/{fmt}/CC/ directory ─────────────────────────────
+            cc_dir = os.path.join(output_dir, "YT", fmt, "CC")
+            os.makedirs(cc_dir, exist_ok=True)
+
+            # ── Save English copy ──────────────────────────────────────────
+            en_out = os.path.join(cc_dir, "en.txt")
+            if not os.path.exists(en_out):
+                with open(en_out, "w", encoding="utf-8") as f:
+                    f.write(en_text)
+                print(f"[YTMetadata]   📄 Saved: YT/{fmt}/CC/en.txt")
+            else:
+                print(f"[YTMetadata]   ⏭️  Exists: YT/{fmt}/CC/en.txt")
+
+            # ── Translate to all languages ─────────────────────────────────
+            print(f"[YTMetadata]   🌍 Translating YT/{fmt}/CC/ to {len(LANGUAGES)} languages …")
+            ok = 1  # English already done
+            for lang_code in LANGUAGES:
+                out_path = os.path.join(cc_dir, f"{lang_code}.txt")
+                if os.path.exists(out_path):
+                    print(f"[YTMetadata]     ⏭️  YT/{fmt}/CC/{lang_code}.txt exists")
+                    skipped_total += 1
+                    ok += 1
+                    continue
+                try:
+                    translated = _google_translate(en_text, lang_code)
+                    with open(out_path, "w", encoding="utf-8") as f:
+                        f.write(translated)
+                    print(f"[YTMetadata]     ✅ YT/{fmt}/CC/{lang_code}.txt  ({LANG_NAMES.get(lang_code, lang_code)})")
+                    ok += 1
+                    translated_total += 1
+                    import time as _t; _t.sleep(0.2)
+                except Exception as e:
+                    print(f"[YTMetadata]     ❌ {fmt}/CC/{lang_code}: {e}")
+
+            total = len(LANGUAGES) + 1  # +1 for English
+            report.append(f"✅ [{fmt}] {ok}/{total} CC files in YT/{fmt}/CC/")
+
+        summary = (
+            f"📝 CC translations: {translated_total} new, {skipped_total} skipped\n"
+            + "\n".join(report)
+        )
+        print(f"[YTMetadata] {summary}")
+        return summary
+
     def _cleanup_and_rename(self, output_dir: str, video_formats: list, channel: str, topic: str):
         """
         Always runs after crew completes (regardless of generate_youtube_metadata flag).
@@ -542,13 +710,13 @@ This visualization is based on comprehensive market data tracking {topic.lower()
         # ── Step 3: Glob delete any remaining temp/norm/stage files ──
         temp_patterns = [
             "_temp_*.mp4", "_norm_*.mp4", "_stage*.mp4",
-            "_concat_*.txt", "*_cc_en.txt",
+            "_concat_*.txt",
+            # NOTE: *_cc_en.txt files are kept — they are CC source files
+            # that may be needed for re-translation or reference.
         ]
         for pat in temp_patterns:
             for path in _glob.glob(os.path.join(output_dir, pat)):
                 os.remove(path)
                 print(f"[YTMetadata] 🗑️  Glob deleted: {os.path.basename(path)}")
-
-        print(f"[YTMetadata] 🧹 Cleanup done")
 
         print(f"[YTMetadata] 🧹 Cleanup done")
