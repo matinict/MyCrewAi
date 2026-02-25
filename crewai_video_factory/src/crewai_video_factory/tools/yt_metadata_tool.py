@@ -578,20 +578,32 @@ This visualization is based on comprehensive market data tracking {topic.lower()
 
         cc_sources = []
         for fmt in video_formats:
-            candidate = os.path.join(output_dir, f"bar_race_{fmt}_cc_en.txt")
-            if os.path.exists(candidate):
-                cc_sources.append((candidate, fmt))
+            # Priority 1: merged CC from bar_merge_tool → {channel}_{slug}_{fmt}_cc_en.txt
+            merged_matches = [
+                p for p in _glob.glob(os.path.join(output_dir, f"*_{fmt}_cc_en.txt"))
+                if not os.path.basename(p).startswith("bar_race_")
+                and not os.path.basename(p).startswith("intro_")
+                and not os.path.basename(p).startswith("definition_video_")
+            ]
+            if merged_matches:
+                cc_sources.append((merged_matches[0], fmt))
+                print(f"[YTMetadata] 📝 Found merged CC: {os.path.basename(merged_matches[0])}")
+                continue
+
+            # Priority 2: bar_race segment CC (pre-merge fallback)
+            bar_race_cc = os.path.join(output_dir, f"bar_race_{fmt}_cc_en.txt")
+            if os.path.exists(bar_race_cc):
+                cc_sources.append((bar_race_cc, fmt))
                 print(f"[YTMetadata] 📝 Found bar race CC: bar_race_{fmt}_cc_en.txt")
+                continue
 
-        standard_cc = os.path.join(output_dir, "cc_en.txt")
-        if os.path.exists(standard_cc):
-            #cc_sources.append((standard_cc, "standard"))
-            cc_sources.append((standard_cc,  video_formats[0] if video_formats else  "standard "))
-            print(f"[YTMetadata] 📝 Found standard CC: cc_en.txt")
+            print(f"[YTMetadata] ⚠️  No CC file found for fmt={fmt}")
 
+        # cc_en.txt is the old narration file — intentionally ignored here.
+        # The merged CC {channel}_{slug}_{fmt}_cc_en.txt contains all content.
 
         if not cc_sources:
-            print(f"[YTMetadata] ⚠️  No cc_en.txt files found in {output_dir}")
+            print(f"[YTMetadata] ⚠️  No CC files found in {output_dir}")
             return "⚠️  No CC source files found to translate"
 
         for src_path, fmt in cc_sources:
@@ -694,7 +706,7 @@ This visualization is based on comprehensive market data tracking {topic.lower()
             else:
                 print(f"[YTMetadata]    No source found for fmt={fmt}")
 
-        # ── Step 2: Delete known temp files — scan ALL formats via glob ──
+        # ── Step 2: Delete segment mp4/mp3 temp files ────────────────────
         _temp_prefixes = [
             "intro_", "bar_race_", "definition_video_", "Merge_bar_race_", "Final_"
         ]
@@ -709,12 +721,30 @@ This visualization is based on comprehensive market data tracking {topic.lower()
                 os.remove(fpath)
                 print(f"[YTMetadata] 🗑️  Deleted: {f}")
 
-        # ── Step 3: Glob delete any remaining temp/norm/stage files ──
+        # ── Step 3: Delete segment CCs + old cc_en.txt ──────────────────
+        # Deleted:  intro_{fmt}_cc_en.txt, bar_race_{fmt}_cc_en.txt,
+        #           definition_video_{fmt}_cc_en.txt  (content merged into final CC)
+        # Deleted:  cc_en.txt  (old flat narration file, superseded by merged CC)
+        # Kept:     {channel}_{slug}_{fmt}_cc_en.txt  (final merged CC)
+        _segment_cc_prefixes = ["intro_", "bar_race_", "definition_video_"]
+        for f in os.listdir(output_dir):
+            fpath = os.path.join(output_dir, f)
+            if not os.path.isfile(fpath):
+                continue
+            # Delete old flat narration file
+            if f == "cc_en.txt":
+                os.remove(fpath)
+                print(f"[YTMetadata] 🗑️  Deleted old narration: {f}")
+                continue
+            # Delete segment CC files only (not the final merged ones)
+            if f.endswith("_cc_en.txt") and any(f.startswith(pfx) for pfx in _segment_cc_prefixes):
+                os.remove(fpath)
+                print(f"[YTMetadata] 🗑️  Deleted segment CC: {f}")
+
+        # ── Step 4: Glob delete any remaining temp/norm/stage files ──────
         temp_patterns = [
             "_temp_*.mp4", "_norm_*.mp4", "_stage*.mp4",
             "_concat_*.txt",
-            # NOTE: *_cc_en.txt files are kept — they are CC source files
-            # that may be needed for re-translation or reference.
         ]
         for pat in temp_patterns:
             for path in _glob.glob(os.path.join(output_dir, pat)):
