@@ -4,7 +4,6 @@ research_data:
     The data should be organized with {granularity} granularity.
     CRITICAL FORMAT REQUIREMENTS:
     Create data in MULTI-COLUMN format tracking multiple items/frameworks/tools over time.
-
     Example structure for "AI Agent Framework Popularity":
     Year,LangChain,CrewAI,AutoGPT,BabyAGI,SemanticKernel,n8n,Make,Zapier,Haystack,MetaGPT
     2015,0,0,0,0,0,5,8,20,0,0
@@ -33,7 +32,6 @@ generate_csv:
     - Filename must be: First 3 words of "{topic}" with no spaces
     - Example: "AI Agent Framework Popularity" → "AIAgentFramework.csv"
     - Location: output/{filename}.csv
-
     FORMAT RULES:
     - Multi-column format with time period in first column
     - 5-10 items/frameworks/tools in subsequent columns
@@ -63,7 +61,6 @@ define_topic:
   description: >
     Write a rich definition of "{topic}" for the @{channel} YouTube channel.
     If definition_enabled is false, respond with just: SKIP
-
     Write ONLY the definition text — no tool calls, no JSON, no code.
     Your entire response becomes the definition file content.
 
@@ -86,20 +83,17 @@ define_topic:
 
     WHAT YOU WILL SEE IN THIS RACE
     [2 sentences on players, trends, and what to watch for]
-
   expected_output: >
     The full definition text as plain prose — no tool calls, no JSON.
     Starting with "WHAT IS {topic}?" and ending with "WHAT YOU WILL SEE IN THIS RACE".
   agent: definition_specialist
 
-
 create_definition_video:
   description: >
     Create a scrolling text video clip from the topic definition text for {topic}.
     This task will automatically skip if definition_video is false in inputs.
-
     CRITICAL — call the Definition Video Tool with EXACTLY these values:
-      topic:  "{topic}"
+      topic: "{topic}"
       filename: "{filename}"
       output_dir: "{output_dir}"
       video_formats: {video_formats}
@@ -113,7 +107,6 @@ create_definition_video:
     NOTE: filename must be "{filename}" (e.g. "LLMAlignmentRLHF") — NOT "definition_video_LLMAlignmentRLHF".
     The tool reads output/{filename}.txt automatically.
     Output: definition_video_[format].mp4 saved to {output_dir}.
-
   expected_output: >
     List of definition video files created, OR skip message if disabled.
     Example: "definition_video_Shorts.mp4 (2.3 MB)"
@@ -128,9 +121,8 @@ create_video:
     Use the Video Generation Tool to:
     - Read CSV from output/{filename}.csv (flat directory)
     - Create videos for ALL styles in {animation_styles}
-    - Save to output/{filename}/ subdirectory with naming pattern: {filename}_[style]_[format].mp4
+    - Save to output/{filename}/ subdirectory with naming pattern: {filename}[style][format].mp4
     - All video files go to topic subdirectory, CSV stays flat
-
     Title format requirement (STRICT):
     - Line 1: Pure topic name only ("Programming Language")
     - Line 2: Visualization type + year ("Race - 2019")
@@ -151,7 +143,6 @@ create_bar_race_video:
     Animation: Professional bar chart race with smooth interpolation
     Video formats: {video_formats}
     FPS (seconds per period): {fps}
-
     Use the Bar Race Video Generator Tool to:
     - Read CSV from output/{filename}.csv (flat directory)
     - Create professional bar race videos
@@ -185,7 +176,6 @@ create_intro_clip:
     Generate branded intro screen video clip(s) for bar race videos.
     This task will automatically skip if intro_enabled is false in inputs.
     When enabled, creates intro MP4 clips for each format in {video_formats}.
-
     CRITICAL — call the Intro Clip Tool with EXACTLY these values:
       topic: "{topic}"
       start_year: {start}
@@ -210,7 +200,6 @@ add_bar_race_audio:
     Generate professional audio narration files for bar race videos.
     This task will automatically skip if bar_race_audio_enabled is false in inputs.
     When enabled, creates audio files for all bar_race_*.mp4 videos based on {topic}.
-
     CRITICAL — call the Bar Race Audio Tool with EXACTLY these values:
       topic: "{topic}"
       filename: "{filename}"
@@ -254,9 +243,9 @@ merge_audio_video:
     Merge existing MP4 video files with corresponding MP3 audio files.
     This task will automatically skip if merge_audio_video is disabled in inputs.
     When enabled, searches in output/{filename}/ subdirectory for pairs like:
-    - {filename}_[style]_[format].mp4
-    - {filename}_[style]_[format]_audio.mp3
-    And creates: {filename}_[style]_[format]_with_audio.mp4
+    - {filename}[style][format].mp4
+    - {filename}[style][format]audio.mp3
+    And creates: {filename}[style]_[format]_with_audio.mp4
     All files remain in topic subdirectory.
   expected_output: >
     Confirmation of successful merges, OR skip message if disabled.
@@ -267,18 +256,25 @@ merge_audio_video:
 
 bar_merge:
   description: >
-    Concatenate intro clip + bar race video, then merge with bar race audio
-    into a single final MP4 per format in {video_formats}.
+    Concatenate intro + bar race + definition video segments WITH AUDIO into a single final MP4 per format.
     This task will automatically skip if bar_merge_enabled is false in inputs.
-
     Pipeline per format (where [format] is each entry in {video_formats}):
-      intro_[format].mp4
+
+      intro_[format]_with_audio.mp4
         +
-      bar_race_[format].mp4
-        → ffmpeg concat → combined temp file
+      bar_race_[format]_with_audio.mp4
         +
-      bar_race_[format]_audio.mp3
-        → ffmpeg merge → Merge_bar_race_[format].mp4
+      definition_video_[format]_with_audio.mp4
+          → ffmpeg concat (with -avoid_negative_ts make_zero for perfect sync)
+          → Merged_[format].mp4
+
+    Also merges CC text files:
+      intro_[format]_cc_en.txt
+        +
+      bar_race_[format]_cc_en.txt
+        +
+      definition_video_[format]_cc_en.txt
+          → Merged_[format]_cc_en.txt
 
     CRITICAL — call the Bar Merge Tool with EXACTLY these values:
       output_dir: "{output_dir}"
@@ -287,11 +283,19 @@ bar_merge:
       channel: "{channel}"
       topic: "{topic}"
 
-    Output files go to {output_dir}/Merge_bar_race_[format].mp4
-    Example: output/LLMTuningMethods/Merge_bar_race_Shorts.mp4
-             output/LLMTuningMethods/Merge_bar_race_HD.mp4
+    Output files per format:
+      • Merged_[format].mp4          (final video with perfect audio sync)
+      • Merged_[format]_cc_en.txt    (merged closed captions text)
+
+    Example for Shorts format:
+      output/{filename}/Merged_Shorts.mp4
+      output/{filename}/Merged_Shorts_cc_en.txt
+
+    Example for HD format:
+      output/{filename}/Merged_HD.mp4
+      output/{filename}/Merged_HD_cc_en.txt
   expected_output: >
-    A message starting with "DONE. Bar merge completed" listing the final files created.
+    A message starting with "✅ SUCCESS" listing the final files created.
     Once you receive output from the tool containing "completed" or "skipped", return it as your Final Answer immediately.
     Do NOT call the tool again.
   agent: bar_merge_specialist
@@ -306,12 +310,11 @@ generate_youtube_metadata:
     - YouTube tags (25+ SEO tags)
     - YouTube chapters/timestamps
     - Metadata saved to output/{filename}/ subdirectory:
-      * {filename}_YouTube_Metadata.json
-      * {filename}_YouTube_Metadata.txt
+    * {filename}_YouTube_Metadata.json
+    * {filename}_YouTube_Metadata.txt
     Social Media Links:
     - YouTube: @{channel}
     - LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
-
     CRITICAL — call the YouTube Metadata Tool with EXACTLY these values:
       topic: "{topic}"
       filename: "{filename}"

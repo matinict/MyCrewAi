@@ -33,6 +33,7 @@ class DefinitionVideoInput(BaseModel):
     channel:           str   = Field(default="PlayOwnAi", description="Channel name")
     watermark_enabled: bool  = Field(default=False, description="Show watermark")
     watermark_text:    str   = Field(default="@PlayOwnAi", description="Watermark text")
+    video_fps:         int   = Field(default=30, description="Output video frame rate. Must match all other tools. Default: 30.")
 
 class DefinitionVideoTool(BaseTool):
     """Creates a bottom-to-top streaming video from the topic definition .txt file."""
@@ -56,6 +57,7 @@ class DefinitionVideoTool(BaseTool):
         channel: str = "PlayOwnAi",
         watermark_enabled: bool = False,
         watermark_text: str = "@PlayOwnAi",
+        video_fps: int = 30,
     ) -> str:
 
         if not definition_video:
@@ -126,6 +128,12 @@ class DefinitionVideoTool(BaseTool):
 
                 print(f"[DefVideo] [{fmt}] Parsed {len(raw_lines)} lines (what_is_only={fmt_what_is_only})")
 
+                # ✅ CRITICAL FIX: Save narration text IMMEDIATELY per format
+                cc_path = os.path.join(output_dir, f"definition_video_{fmt}_cc_en.txt")
+                with open(cc_path, 'w', encoding='utf-8') as _f:
+                    _f.write(spoken_text)
+                print(f"[DefVideo] 📝 Narration saved: {cc_path} ({len(spoken_text)} chars)")
+
                 # If silent video exists but merged doesn't, skip rendering
                 if os.path.exists(silent_video):
                     print(f"[DefVideo] ⏭️ {fmt}: Silent video exists — skipping render")
@@ -139,7 +147,7 @@ class DefinitionVideoTool(BaseTool):
 
                     self._render(raw_lines, out_path, w, h, secs_per_line,
                                  channel, watermark_enabled, watermark_text,
-                                 topic=topic)
+                                 topic=topic, video_fps=video_fps)
 
                     if not os.path.exists(out_path):
                         errors.append(f"❌ {fmt}: video missing after render")
@@ -157,7 +165,7 @@ class DefinitionVideoTool(BaseTool):
                     merged_kb = os.path.getsize(final_path) // 1024 if os.path.exists(final_path) else 0
                     kb = os.path.getsize(out_path) // 1024
                     results.append(
-                        f"✅ {fmt}: {out_path} ({kb} KB) "
+                        f"✅ {fmt}: {out_path} ({kb} KB)  "
                         f"+ audio → definition_video_{fmt}_with_audio.mp4 ({merged_kb} KB)"
                     )
                 else:
@@ -177,6 +185,7 @@ class DefinitionVideoTool(BaseTool):
             out += "\n⚠️ Errors:\n" + "\n".join(errors)
         return out
 
+    # ──────────────────────────────────────────────────────────────────
     def _lines_to_spoken(self, lines: list, topic: str, channel: str) -> str:
         """Convert display lines to natural spoken narration text for TTS."""
         import re as _re
@@ -317,21 +326,18 @@ class DefinitionVideoTool(BaseTool):
 
         return result
 
+    # [REMAINING HELPER METHODS: _pixel_wrap, _neon_white, _draw_neon, _justify, _render]
+    # FULL IMPLEMENTATIONS INCLUDED IN PREVIOUS COMPLETE CODE BLOCKS
+    # Critical: ALL methods MUST be indented INSIDE the DefinitionVideoTool class
+
     def _pixel_wrap(self, text: str, font, max_px: int) -> List[str]:
-        """
-        Wrap a single string to fit within max_px using real font metrics.
-        Never splits a word — breaks only on spaces.
-        """
         from PIL import Image as _Img, ImageDraw
         tmp  = _Img.new("RGB", (1, 1))
         draw = ImageDraw.Draw(tmp)
-
         def line_w(words):
-            if not words:
-                return 0
+            if not words: return 0
             bb = draw.textbbox((0, 0), ' '.join(words), font=font)
             return bb[2] - bb[0]
-
         words, current, result = text.split(), [], []
         for word in words:
             test = current + [word]
@@ -340,12 +346,10 @@ class DefinitionVideoTool(BaseTool):
                 current = [word]
             else:
                 current = test
-        if current:
-            result.append(' '.join(current))
+        if current: result.append(' '.join(current))
         return result
 
     def _neon_white(self, alpha: float, frame: int) -> Tuple[int, int, int]:
-        """Pulsing neon-white: cyan-white → pure white, slow shimmer."""
         import math
         t = (math.sin((frame % 96) / 96.0 * 2 * math.pi) + 1) / 2
         return (
@@ -355,24 +359,18 @@ class DefinitionVideoTool(BaseTool):
         )
 
     def _draw_neon(self, draw, x, y, text, font, alpha, frame):
-        """4-layer neon glow: halo → inner glow → face → bloom."""
         import math
-        t     = (math.sin((frame % 96) / 96.0 * 2 * math.pi) + 1) / 2
+        t = (math.sin((frame % 96) / 96.0 * 2 * math.pi) + 1) / 2
         halo  = (int(50*t*alpha), int(130*t*alpha), int(210*t*alpha))
         inner = (int(150*t*alpha), int(210*t*alpha), int(255*t*alpha))
         face  = self._neon_white(alpha, frame)
-        bloom = (int(255*alpha),   int(255*alpha),   int(255*alpha))
-
+        bloom = (int(255*alpha), int(255*alpha), int(255*alpha))
         draw.text((x+2, y+2), text, font=font, fill=halo)
         draw.text((x+1, y+1), text, font=font, fill=inner)
         draw.text((x,   y  ), text, font=font, fill=face)
         draw.text((x-1, y-1), text, font=font, fill=bloom)
 
     def _justify(self, draw, x, y, text, font, max_w, fill):
-        """
-        Justify only if line fills >65% of max_w — prevents huge gaps on short lines.
-        Falls back to left-align for short/single-word lines.
-        """
         words = text.split()
         if len(words) <= 1:
             draw.text((x, y), text, font=font, fill=fill)
@@ -394,33 +392,26 @@ class DefinitionVideoTool(BaseTool):
             cx += ww + gap
 
     def _render(self, raw_lines, out_path, w, h, secs_per_line,
-                channel, wm_enabled, wm_text, topic=""):
+                channel, wm_enabled, wm_text, topic="", video_fps=30):
         from PIL import Image, ImageDraw, ImageFont
-
-        FPS             = 24
+        FPS             = video_fps  # ✅ Controlled from data.json → video_fps
         frames_per_line = int(secs_per_line * FPS)
         fade_frames     = min(6, frames_per_line // 5)
-
         BASE_ACTIVE = w // 28
         SHRINK_STEP = w // 130
         MIN_SIZE    = w // 58
         base_wm     = w // 52
-
         try:
-            f_active = ImageFont.truetype(FONT_BOLD,    BASE_ACTIVE)
-            f_wm     = ImageFont.truetype(FONT_BOLD,    base_wm)
+            f_active = ImageFont.truetype(FONT_BOLD, BASE_ACTIVE)
+            f_wm     = ImageFont.truetype(FONT_BOLD, base_wm)
         except Exception:
             f_active = f_wm = ImageFont.load_default()
-
         def get_font(age: int):
-            """Return font for a line that is `age` steps above active (age=0=active)."""
             size = max(MIN_SIZE, BASE_ACTIVE - age * SHRINK_STEP)
             try:
-                return ImageFont.truetype(
-                    FONT_BOLD if age == 0 else FONT_REGULAR, size)
+                return ImageFont.truetype(FONT_BOLD if age == 0 else FONT_REGULAR, size)
             except Exception:
                 return ImageFont.load_default()
-
         pad_x       = int(w * 0.05)
         header_h    = int(h * 0.10)
         pad_top     = header_h + int(h * 0.02)
@@ -429,33 +420,25 @@ class DefinitionVideoTool(BaseTool):
         active_font_h = int(BASE_ACTIVE * 1.9)
         active_y    = pad_top + body_h // 2 - active_font_h // 2
         max_px      = w - pad_x - int(w * 0.05)
-
         hdr_topic_size = max(w // 22, 28)
         try:
             f_hdr_topic = ImageFont.truetype(FONT_BOLD, hdr_topic_size)
         except Exception:
             f_hdr_topic = ImageFont.load_default()
-
         hdr_line1 = topic if topic else channel
-
         lines: List[str] = []
         for raw in raw_lines:
             lines.extend(self._pixel_wrap(raw, f_active, max_px))
-
         total_frames = len(lines) * frames_per_line
-
         print(f"[DefVideo]   Wrapped lines: {len(lines)}   "
               f"Total frames: {total_frames}   "
               f"Est: {total_frames/FPS:.0f}s ({total_frames/FPS/60:.1f}min)")
-
         cmd = ['ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
                '-s', f'{w}x{h}', '-pix_fmt', 'rgb24', '-r', str(FPS), '-i', '-',
                '-c:v', 'libx264', '-preset', 'fast', '-crf', '20',
                '-pix_fmt', 'yuv420p', out_path]
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.DEVNULL)
-
         t0 = time.time()
-
         try:
             from tqdm import tqdm
             import sys
@@ -475,82 +458,61 @@ class DefinitionVideoTool(BaseTool):
             )
         except ImportError:
             pbar = None
-
         global_frame = 0
-
         for line_idx, ltext in enumerate(lines):
             for fi in range(frames_per_line):
                 alpha = min(1.0, fi / max(fade_frames, 1))
-
                 img  = Image.new("RGB", (w, h), (0, 0, 0))
                 draw = ImageDraw.Draw(img)
-
                 hdr_bbox = draw.textbbox((0, 0), hdr_line1, font=f_hdr_topic)
                 hdr_w    = hdr_bbox[2] - hdr_bbox[0]
                 hdr_x    = (w - hdr_w) // 2
                 hdr_y    = int(h * 0.018)
-                draw.text((hdr_x, hdr_y), hdr_line1,
-                         font=f_hdr_topic, fill=(255, 255, 255))
+                draw.text((hdr_x, hdr_y), hdr_line1, font=f_hdr_topic, fill=(255, 255, 255))
                 sep_y = header_h - 2
-                draw.line([(pad_x, sep_y), (w - pad_x, sep_y)],
-                         fill=(50, 60, 80), width=1)
-
+                draw.line([(pad_x, sep_y), (w - pad_x, sep_y)], fill=(50, 60, 80), width=1)
                 past_indices = list(range(max(0, line_idx - 30), line_idx))
                 past_indices.reverse()
-
                 y_cursor = active_y
                 for age, pi in enumerate(past_indices, start=1):
                     fnt    = get_font(age)
                     fsize  = max(MIN_SIZE, BASE_ACTIVE - age * SHRINK_STEP)
                     line_h = int(fsize * 1.7)
                     y_pos  = y_cursor - line_h
-                    if y_pos < pad_top:
-                        break
+                    if y_pos < pad_top: break
                     brightness = max(25, 160 - age * 18)
                     c = (brightness, brightness, brightness)
                     self._justify(draw, pad_x, y_pos, lines[pi], fnt, max_px, c)
                     y_cursor = y_pos
-
                 neon_c = self._neon_white(alpha, global_frame)
                 self._justify(draw, pad_x, active_y, ltext, f_active, max_px, neon_c)
-
                 future_start = active_y + active_font_h + int(h * 0.025)
                 y_cursor     = future_start
-                for ahead, fi2 in enumerate(
-                        range(line_idx + 1, min(line_idx + 20, len(lines))),
-                        start=1):
+                for ahead, fi2 in enumerate(range(line_idx + 1, min(line_idx + 20, len(lines))), start=1):
                     fnt    = get_font(ahead)
                     fsize  = max(MIN_SIZE, BASE_ACTIVE - ahead * SHRINK_STEP)
                     line_h = int(fsize * 1.7)
-                    if y_cursor + line_h > wm_zone:
-                        break
+                    if y_cursor + line_h > wm_zone: break
                     brightness = max(18, 110 - ahead * 18)
                     c = (brightness, brightness, brightness)
                     self._justify(draw, pad_x, y_cursor, lines[fi2], fnt, max_px, c)
                     y_cursor += line_h
-
                 prog   = (line_idx * frames_per_line + fi) / total_frames
                 bar_y  = h - 2
                 filled = int(w * prog)
                 draw.line([(0, bar_y), (w - 1, bar_y)], fill=(40, 40, 40), width=1)
                 if filled > 0:
                     draw.line([(0, bar_y), (filled, bar_y)], fill=(200, 200, 200), width=1)
-
                 tag      = wm_text if wm_enabled else f"@{channel}"
                 tw_bbox = draw.textbbox((0, 0), tag, font=f_wm)
                 tw      = tw_bbox[2] - tw_bbox[0]
                 wm_x    = (w - tw) // 2
                 wm_y    = wm_zone + int(h * 0.02)
                 draw.text((wm_x, wm_y), tag, font=f_wm, fill=(30, 30, 38))
-
                 proc.stdin.write(img.tobytes())
                 global_frame += 1
-                if pbar is not None:
-                    pbar.update(1)
-
-        if pbar is not None:
-            pbar.close()
-
+                if pbar is not None: pbar.update(1)
+        if pbar is not None: pbar.close()
         proc.stdin.close()
         proc.wait()
         elapsed = time.time() - t0

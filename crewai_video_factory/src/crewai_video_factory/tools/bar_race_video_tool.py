@@ -33,6 +33,7 @@ class BarRaceInput(BaseModel):
     channel: str = Field(default="PlayOwnAi", description="Channel name for subscribe CTA in narration.")
     audio_speed: float = Field(default=1.0, description="TTS playback speed for Shorts via atempo (0.5-2.0). 1.0=normal.")
     audio_speed_hd: float = Field(default=0.0, description="TTS playback speed for HD/landscape formats. 0.0 = fall back to audio_speed.")
+    video_fps: int = Field(default=30, description="Output video frame rate. Must match intro and definition tools. Default: 30.")
 
 class BarRaceVideoTool(BaseTool):
     name: str = "Bar Race Video Tool"
@@ -41,7 +42,6 @@ class BarRaceVideoTool(BaseTool):
 
     def _get_video_dimensions(self, video_format: str):
         fmt = video_format.strip()
-
         resolutions_px = {
             "HD": (1920, 1080),
             "2K": (2560, 1440),
@@ -51,22 +51,15 @@ class BarRaceVideoTool(BaseTool):
             "ShortsHD": (1080, 1920),
             "Shorts4K": (2160, 3840),
         }
-
         dpi = 100
-
         if fmt not in resolutions_px:
             fmt = "HD"
-
         w_px, h_px = resolutions_px[fmt]
-
-        # Ensure pixel dimensions are divisible by 2 (required by ffmpeg h264 codec).
         w_px = w_px if w_px % 2 == 0 else w_px - 1
         h_px = h_px if h_px % 2 == 0 else h_px - 1
-
         return (w_px / dpi, h_px / dpi)
 
     def _load_label_mappings(self, use_label_mappings: bool = True) -> dict:
-        """Load label mappings from label_mappings.json (cached after first load)."""
         import json
         if not use_label_mappings:
             if not getattr(self, '_label_disabled_logged', False):
@@ -75,15 +68,12 @@ class BarRaceVideoTool(BaseTool):
             return {}
         if hasattr(self, '_label_mapping_cache'):
             return self._label_mapping_cache
-        # Search for label_mappings.json in multiple locations:
-        # 1. Same dir as this tool file
-        # 2. Project data/ folder (walk up from tool to find project root)
         tool_dir = os.path.dirname(os.path.abspath(__file__))
         candidates = [
-            os.path.join(tool_dir, "label_mappings.json"),                          # next to tool
-            os.path.join(tool_dir, "..", "data", "label_mappings.json"),            # ../data/
-            os.path.join(tool_dir, "..", "..", "data", "label_mappings.json"),      # ../../data/
-            os.path.join(tool_dir, "..", "..", "..", "data", "label_mappings.json"),# ../../../data/
+            os.path.join(tool_dir, "label_mappings.json"),
+            os.path.join(tool_dir, "..", "data", "label_mappings.json"),
+            os.path.join(tool_dir, "..", "..", "data", "label_mappings.json"),
+            os.path.join(tool_dir, "..", "..", "..", "data", "label_mappings.json"),
         ]
         json_path = next((p for p in candidates if os.path.exists(os.path.normpath(p))), None)
         if json_path:
@@ -92,7 +82,6 @@ class BarRaceVideoTool(BaseTool):
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     raw = json.load(f)
-                # Support nested { "bar_race_labels": {...}} or flat { "Label": "Short" } format
                 self._label_mapping_cache = raw.get("bar_race_labels", raw)
                 print(f"✅ Loaded {len(self._label_mapping_cache)} label mappings from label_mappings.json")
                 return self._label_mapping_cache
@@ -104,7 +93,6 @@ class BarRaceVideoTool(BaseTool):
         return self._label_mapping_cache
 
     def _trim_label(self, label: str, use_label_mappings: bool = True) -> str:
-        """Trim labels using mappings loaded from label_mappings.json."""
         return self._load_label_mappings(use_label_mappings).get(label, label)
 
     def _run(self, **kwargs) -> str:
@@ -123,15 +111,16 @@ class BarRaceVideoTool(BaseTool):
         video_formats = kwargs.get("video_formats", ["Shorts"])
         seconds_per_period = kwargs.get("seconds_per_period", 4.0)
         fps_hd_offset = float(kwargs.get("fps_hd_offset", 1.0))
-        n_bars_input = kwargs.get("n_bars") or None  # None = use format-based default
+        n_bars_input = kwargs.get("n_bars") or None
         use_label_mappings = kwargs.get("use_label_mappings", True)
         watermark_enabled = kwargs.get("watermark_enabled", False)
-        watermark_text    = kwargs.get("watermark_text", "@PlayOwnAi")
+        watermark_text = kwargs.get("watermark_text", "@PlayOwnAi")
         watermark_opacity = int(kwargs.get("watermark_opacity", 60))
-        topic             = kwargs.get("topic", " ")
-        channel           = kwargs.get("channel", "PlayOwnAi")
-        audio_speed       = float(kwargs.get("audio_speed", 1.0))
-        audio_speed_hd    = float(kwargs.get("audio_speed_hd", 0.0))
+        topic = kwargs.get("topic", " ")
+        channel = kwargs.get("channel", "PlayOwnAi")
+        audio_speed = float(kwargs.get("audio_speed", 1.0))
+        audio_speed_hd = float(kwargs.get("audio_speed_hd", 0.0))
+        video_fps = int(kwargs.get("video_fps", 30))
 
         if isinstance(video_formats, str):
             video_formats = [video_formats.strip()]
@@ -154,7 +143,7 @@ class BarRaceVideoTool(BaseTool):
             try:
                 # ✅ SMART SKIP — check what already exists
                 silent_video = os.path.join(output_dir, f"bar_race_{fmt}.mp4")
-                audio_file   = os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3")
+                audio_file = os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3")
                 final_merged = os.path.join(output_dir, f"bar_race_{fmt}_with_audio.mp4")
 
                 # Skip everything if final merged exists
@@ -164,27 +153,33 @@ class BarRaceVideoTool(BaseTool):
 
                 # Get figure size (in inches)
                 figsize = self._get_video_dimensions(fmt)
-
                 dpi = 100
                 fig_w, fig_h = figsize
                 width_px = fig_w * dpi
-
-                # Scale relative to 1920 width
                 scale_factor = width_px / 1920
-
-                # Dynamic font scaling
-                # Per-format font multiplier: HD -10%, Shorts/portrait +10%, others neutral
                 is_portrait = fig_h > fig_w
                 font_mult = 1.10 if is_portrait else 0.90
-                # Format-aware n_bars: Shorts=9, HD/landscape=7 (user override takes priority)
                 n_bars = n_bars_input if n_bars_input else (9 if is_portrait else 7)
 
-                title_size       = int(54  * scale_factor * font_mult)
-                bar_label_size   = int(43  * scale_factor * font_mult)  # value numbers at bar end
-                tick_label_size  = int(22  * scale_factor * font_mult)  # passed to bcr (will be overridden below)
-                x_tick_label_size= int(43  * scale_factor * font_mult)  # x-axis scale numbers (0, 25, 50...)
-                bar_name_size    = int(27  * scale_factor * font_mult)  # y-axis bar names — applied via draw_event
-                period_label_size= int(65  * scale_factor * font_mult)
+                # ✅ CRITICAL FIX: Build & save narration text IMMEDIATELY per format
+                # This ensures bar_race_{fmt}_cc_en.txt is created for EVERY format BEFORE video rendering
+                _spd = audio_speed if is_portrait else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
+                narration = self._build_narration(
+                    df_viz, topic, channel,
+                    with_points=not is_portrait  # Shorts=short, HD=full with values
+                )
+                cc_path = os.path.join(output_dir, f"bar_race_{fmt}_cc_en.txt")
+                with open(cc_path, 'w', encoding='utf-8') as _f:
+                    _f.write(narration)
+                print(f"[BarRace] 📝 Narration saved: {cc_path} ({len(narration)} chars)")
+
+                # Continue with video rendering setup
+                title_size = int(54 * scale_factor * font_mult)
+                bar_label_size = int(43 * scale_factor * font_mult)
+                tick_label_size = int(22 * scale_factor * font_mult)
+                x_tick_label_size = int(43 * scale_factor * font_mult)
+                bar_name_size = int(27 * scale_factor * font_mult)
+                period_label_size = int(65 * scale_factor * font_mult)
 
                 plt.rcParams.update({
                     "axes.titlesize": title_size,
@@ -205,10 +200,7 @@ class BarRaceVideoTool(BaseTool):
                         'weight': 'bold'
                     }
 
-                # Pre-configure figure: x-axis ticks on TOP, y-axis labels large + 45°
                 pre_fig, pre_ax = plt.subplots(figsize=figsize, dpi=dpi)
-
-                # X-axis: move to top with correct size
                 pre_ax.xaxis.set_ticks_position('top')
                 pre_ax.xaxis.set_label_position('top')
                 pre_ax.tick_params(
@@ -222,41 +214,32 @@ class BarRaceVideoTool(BaseTool):
                     pad=-x_tick_label_size * 0.4,
                 )
 
-                # Hook into matplotlib's draw cycle to enforce y-axis label size + rotation
-                # on every frame (bcr resets these each update).
                 def on_draw(event):
                     ax = pre_fig.axes[0] if pre_fig.axes else None
                     if ax is None:
                         return
                     for lbl in ax.get_yticklabels():
                         lbl.set_fontsize(bar_name_size)
-                        lbl.set_rotation(77)
+                        lbl.set_rotation(70)
                         lbl.set_ha('right')
                         lbl.set_va('center')
-                    # Also re-enforce x-axis size in case bcr reset it
                     for lbl in ax.get_xticklabels():
                         lbl.set_fontsize(x_tick_label_size)
-
                 pre_fig.canvas.mpl_connect('draw_event', on_draw)
 
-                # --- WATERMARK ---
                 if watermark_enabled:
                     self._add_watermark(pre_fig, watermark_text, watermark_opacity,
                                         int(fig_w * dpi), int(fig_h * dpi))
 
-                # Reserve space at top for suptitle
-                # Landscape (HD/2K/4K/8K): tight margins so bars use full width.
-                # Portrait (Shorts): more left room for rotated bar names.
                 if is_portrait:
-                    top_margin   = 0.93
-                    left_margin  = 0.12
+                    top_margin = 0.93
+                    left_margin = 0.12
                     right_margin = 0.95
                 else:
-                    top_margin   = 0.85
-                    left_margin  = 0.08
+                    top_margin = 0.85
+                    left_margin = 0.08
                     right_margin = 0.97
                 pre_fig.subplots_adjust(top=top_margin, bottom=0.02, left=left_margin, right=right_margin)
-                # y set to just above top_margin so title sits ~1px above axes
                 title_y = top_margin + (1.0 - top_margin) * 0.5
                 pre_fig.suptitle(
                     title_text,
@@ -268,13 +251,13 @@ class BarRaceVideoTool(BaseTool):
 
                 output_path = os.path.join(output_dir, f"bar_race_{fmt}.mp4")
                 n_periods = len(df_viz)
+                TARGET_FPS = video_fps  # ✅ Controlled from data.json → video_fps
                 fmt_spp = seconds_per_period if is_portrait else seconds_per_period * fps_hd_offset
                 if not is_portrait and fps_hd_offset != 1.0:
                     print(f"   ⚙️  [{fmt}] spp {seconds_per_period:.2f}s × fps_hd_offset {fps_hd_offset} = {fmt_spp:.2f}s/period")
-                total_frames = n_periods * int(fmt_spp * 15)
-                est_secs = total_frames / 15
-                print(f"")
-                print(f"🎬 [{fmt}] Starting render")
+                total_frames = n_periods * int(fmt_spp * TARGET_FPS)
+                est_secs = total_frames / TARGET_FPS
+                print(f"\n🎬 [{fmt}] Starting render")
                 print(f"   Resolution : {int(fig_w*dpi)} x {int(fig_h*dpi)}")
                 print(f"   Periods    : {n_periods}  |  spp: {fmt_spp:.2f}s  |  Frames: {total_frames}")
                 print(f"   ⏱️  Estimated: ~{est_secs/60:.1f} min ({est_secs:.0f}s) — please wait …")
@@ -290,11 +273,6 @@ class BarRaceVideoTool(BaseTool):
                     _stop_ticker = _threading.Event()
 
                     def _progress_bar_thread(stop_event, est_total_secs, label):
-                        """
-                        Time-based tqdm progress bar in a background thread.
-                        Advances by real elapsed time (bcr gives no frame callbacks).
-                        Falls back to plain-text ticker if tqdm not installed.
-                        """
                         try:
                             from tqdm import tqdm
                             bar = tqdm(
@@ -317,12 +295,10 @@ class BarRaceVideoTool(BaseTool):
                                 if new_n > last_n:
                                     bar.update(new_n - last_n)
                                     last_n = new_n
-                            # Fill to 100% on completion
                             if last_n < int(est_total_secs):
                                 bar.update(int(est_total_secs) - last_n)
                             bar.close()
                         except ImportError:
-                            # tqdm not installed — plain-text fallback every 5s
                             while not stop_event.is_set():
                                 stop_event.wait(5)
                                 if not stop_event.is_set():
@@ -348,7 +324,7 @@ class BarRaceVideoTool(BaseTool):
                             orientation="h",
                             sort="desc",
                             n_bars=n_bars,
-                            steps_per_period=int(fmt_spp * 15),
+                            steps_per_period=int(fmt_spp * TARGET_FPS),
                             period_length=int(fmt_spp * 1000),
                             fig=pre_fig,
                             title=title_text,
@@ -375,32 +351,19 @@ class BarRaceVideoTool(BaseTool):
                         os.system(
                             f'ffmpeg -y -i "{output_path}" '
                             f'-vf "scale={w_px}:{h_px},tpad=stop_mode=clone:stop_duration={hold_secs:.2f}" '
-                            f'-c:v libx264 -crf 18 -preset fast '
+                            f'-c:v libx264 -crf 18 -preset fast -r {video_fps} '
                             f'"{fixed_path}" -loglevel error'
                         )
                         if os.path.exists(fixed_path):
                             os.replace(fixed_path, output_path)
 
-                # ── Audio: generate TTS synced to video duration ───────
-                if os.path.exists(output_path):  # audio always generated with video
-                    video_dur   = self._get_duration(output_path)
-                    audio_path  = os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3")
-                    final_path  = os.path.join(output_dir, f"bar_race_{fmt}_with_audio.mp4")
+                # ── Audio: generate TTS using PRE-SAVED narration ───────
+                if os.path.exists(output_path):
+                    video_dur = self._get_duration(output_path)
+                    audio_path = os.path.join(output_dir, f"bar_race_{fmt}_audio.mp3")
+                    final_path = os.path.join(output_dir, f"bar_race_{fmt}_with_audio.mp4")
 
-                    # Shorts = concise narration + audio_speed
-                    # HD/landscape = full narration with data points + audio_speed_hd
-                    _spd = audio_speed if is_portrait else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
-                    narration = self._build_narration(
-                        df_viz, topic, channel,
-                        with_points=not is_portrait    # Shorts=short, HD=full with values
-                    )
-
-                    # Save narration as cc_en.txt alongside video
-                    cc_path = os.path.join(output_dir, f"bar_race_{fmt}_cc_en.txt")
-                    with open(cc_path, 'w', encoding='utf-8') as _f:
-                        _f.write(narration)
-                    print(f"[BarRace] 📝 Narration saved: {cc_path} ({len(narration)} chars)")
-
+                    # Use narration variable already built above (no rebuild needed)
                     self._generate_tts(narration, audio_path, video_dur, _spd)
                     if os.path.exists(audio_path):
                         self._merge_audio_video(output_path, audio_path, final_path, video_dur)
@@ -419,24 +382,18 @@ class BarRaceVideoTool(BaseTool):
                     results.append(f"✅ {fmt}: {output_path} ({kb} KB)")
 
             except Exception as e:
+                import traceback
+                print(f"[BarRace] ERROR for {fmt}: {traceback.format_exc()}")
                 results.append(f"❌ {fmt}: {str(e)}")
 
         return "\n".join(results)
 
     # ──────────────────────────────────────────────────────────────────
-    def _build_narration(self, df_viz, topic: str, channel: str,
-                         with_points: bool = False) -> str:
-        """
-        Build year-by-year narration matched to audio_tool.py logic.
-        with_points=False → concise Shorts version (fewer words, faster pace)
-        with_points=True  → full HD version (leader + value + context sentence)
-        """
+    def _build_narration(self, df_viz, topic: str, channel: str, with_points: bool = False) -> str:
         topic_str = topic if topic else "this topic"
-
-        # Derive start/end years from index
         years = [p.year if hasattr(p, 'year') else int(str(p)) for p in df_viz.index]
         start_year = years[0]
-        end_year   = years[-1]
+        end_year = years[-1]
 
         if not with_points:
             parts = [
@@ -451,12 +408,12 @@ class BarRaceVideoTool(BaseTool):
             ]
 
         for period, row in df_viz.iterrows():
-            year       = period.year if hasattr(period, 'year') else int(str(period))
+            year = period.year if hasattr(period, 'year') else int(str(period))
             sorted_row = row.dropna().sort_values(ascending=False)
             if sorted_row.empty:
                 continue
-            leader     = sorted_row.index[0]
-            value      = int(sorted_row.iloc[0])
+            leader = sorted_row.index[0]
+            value = int(sorted_row.iloc[0])
 
             if value == 0:
                 parts.append(f"{year}. Race not yet begun. " if not with_points
@@ -474,27 +431,23 @@ class BarRaceVideoTool(BaseTool):
                 parts.append(f"{year}. {leader} dominates. " if not with_points
                              else f"{year}. {leader} dominates with {value} points. ")
 
-        final_row  = df_viz.iloc[-1].dropna().sort_values(ascending=False)
+        final_row = df_viz.iloc[-1].dropna().sort_values(ascending=False)
         final_lead = final_row.index[0] if not final_row.empty else "the leader"
 
         if with_points:
             parts.extend([
-                f"And that brings us to {end_year}, where {final_lead} continues to lead the pack. ",
-                "The evolution of technology and trends never stops. ",
-                f" Next Basic definition. ",
+                f"And that brings us to {end_year}, where {final_lead} continues to Defination. ",
             ])
         else:
             parts.extend([
-                f"{end_year}. {final_lead} leads the pack. ",
-                "Evolution continues. ",
-                f"Basic definition. ",
+                f"{end_year}. {final_lead} leads the Defination. ",
+
             ])
 
         return "  ".join(parts)
 
     # ──────────────────────────────────────────────────────────────────
     def _get_duration(self, video_path: str) -> float:
-        """Get video duration in seconds via ffprobe."""
         import subprocess
         r = subprocess.run(
             ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
@@ -507,19 +460,7 @@ class BarRaceVideoTool(BaseTool):
             return 0.0
 
     # ──────────────────────────────────────────────────────────────────
-    def _generate_tts(self, text: str, audio_path: str, video_dur: float,
-                      audio_speed: float = 1.0):
-        """
-        Generate TTS MP3 and apply audio_speed preference (same as audio_tool.py).
-
-        Strategy:
-        - Apply audio_speed directly as atempo (user clarity preference).
-        - If the resulting audio is longer than video_dur → slow it down
-          a bit more so it fits (avoids cut-off speech).
-        - If shorter → leave it; _merge_audio_video pads with silence.
-        - This avoids the "compounding sync×speed" bug that made Shorts
-          audio impossibly fast.
-        """
+    def _generate_tts(self, text: str, audio_path: str, video_dur: float, audio_speed: float = 1.0):
         import subprocess, os
         try:
             from gtts import gTTS
@@ -528,7 +469,6 @@ class BarRaceVideoTool(BaseTool):
             return
 
         def atempo_chain(ratio: float) -> str:
-            """Build atempo filter string, chaining if outside 0.5–2.0."""
             ratio = max(0.25, min(4.0, ratio))
             if ratio < 0.5:
                 return f"atempo=0.5000,atempo={ratio/0.5:.4f}"
@@ -548,13 +488,10 @@ class BarRaceVideoTool(BaseTool):
                 os.rename(tmp, audio_path)
                 return
 
-            # Step 1: apply user speed preference
             final_ratio = audio_speed
-
-            # Step 2: if speech still won't fit in video, slow it down just enough
             adjusted_dur = raw_dur / max(audio_speed, 0.01)
-            if adjusted_dur > video_dur * 1.05:          # >5% overflow
-                fit_ratio = raw_dur / max(video_dur, 1)  # compress to fit
+            if adjusted_dur > video_dur * 1.05:
+                fit_ratio = raw_dur / max(video_dur, 1)
                 final_ratio = fit_ratio
                 print(f"[BarRace] ⚠️  Narration too long ({adjusted_dur:.1f}s > {video_dur:.1f}s video)  "
                       f"— auto-compressing to fit: atempo={fit_ratio:.3f}")
@@ -578,9 +515,7 @@ class BarRaceVideoTool(BaseTool):
                 os.rename(tmp, audio_path)
 
     # ──────────────────────────────────────────────────────────────────
-    def _merge_audio_video(self, video_path: str, audio_path: str,
-                           output_path: str, video_dur: float):
-        """Merge TTS audio into bar race video; pad audio with silence if shorter."""
+    def _merge_audio_video(self, video_path: str, audio_path: str, output_path: str, video_dur: float):
         import subprocess
         print(f"[BarRace] 🎬 Merging audio+video → {os.path.basename(output_path)}")
         result = subprocess.run([
@@ -596,19 +531,12 @@ class BarRaceVideoTool(BaseTool):
             print(f"[BarRace] ⚠️  merge failed: {result.stderr.decode()[:150]}")
 
     def _add_watermark(self, fig, text: str, opacity: int, width_px: int, height_px: int):
-        """
-        Add a semi-transparent centered watermark text to a matplotlib figure
-        using a PIL RGBA image composited as a figimage.
-        """
         try:
             from PIL import Image, ImageDraw, ImageFont
             import numpy as np
 
-            # Create transparent RGBA canvas same size as figure
             wm_img = Image.new('RGBA', (width_px, height_px), (0, 0, 0, 0))
             draw = ImageDraw.Draw(wm_img)
-
-            # Font size: ~6% of width
             font_size = max(24, int(width_px * 0.06))
             font_paths = [
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
@@ -628,22 +556,15 @@ class BarRaceVideoTool(BaseTool):
             if font is None:
                 font = ImageFont.load_default()
 
-            # Measure text and center it
             bbox = draw.textbbox((0, 0), text, font=font)
             tw = bbox[2] - bbox[0]
             th = bbox[3] - bbox[1]
             tx = (width_px - tw) // 2
             ty = (height_px - th) // 2
-
-            # Draw watermark with configured opacity
             draw.text((tx, ty), text, fill=(255, 255, 255, opacity), font=font)
 
-            # Convert to numpy RGBA array and overlay on figure
-            wm_array = np.array(wm_img).astype(float) / 255.0  # shape: (H, W, 4)
-
-            # figimage: bottom-left origin, so flip vertically
+            wm_array = np.array(wm_img).astype(float) / 255.0
             wm_array = wm_array[::-1]
-
             fig.figimage(wm_array, xo=0, yo=0, alpha=1.0, zorder=10, origin='lower')
 
         except ImportError:

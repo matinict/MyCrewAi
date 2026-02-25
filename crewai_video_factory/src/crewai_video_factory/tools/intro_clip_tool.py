@@ -40,6 +40,9 @@ class IntroClipToolInput(BaseModel):
     audio_speed: float = Field(default=1.0, ge=0.5, le=2.0, description="Speech speed for Shorts/portrait via ffmpeg atempo.")
     audio_speed_hd: float = Field(default=0.0, ge=0.0, le=2.0, description="Speech speed for HD/landscape. 0.0 = use audio_speed.")
 
+    # FPS
+    video_fps: int = Field(default=30, description="Output video frame rate. Must match all other tools. Default: 30.")
+
     # Background color
     bg_color: tuple = Field(default=(20, 20, 40), description="RGB background color")
 
@@ -104,6 +107,7 @@ class IntroClipTool(BaseTool):
         bg_color: tuple = (20, 20, 40),
         audio_speed: float = 1.0,
         audio_speed_hd: float = 0.0,
+        video_fps: int = 30,
     ) -> str:
 
         # --- SKIP ---
@@ -157,6 +161,25 @@ class IntroClipTool(BaseTool):
                 )
                 print(f"[IntroClipTool] {fmt} duration: {fmt_duration}s ({'portrait' if is_portrait_fmt else 'landscape'})")
 
+                # ✅ CRITICAL FIX: Build & save narration text IMMEDIATELY per format
+                # This ensures intro_{fmt}_cc_en.txt is created for EVERY format BEFORE video rendering
+                is_portrait_fmt2 = RESOLUTIONS[fmt][1] > RESOLUTIONS[fmt][0]
+                spd = audio_speed if is_portrait_fmt2 else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
+
+                # ✅ ADD WELCOME MESSAGE
+                narration_parts = [
+                    f"Welcome to {channel}.",
+                    f"Exploring {topic} Race from {start_year} to {end_year}.",
+                    "Let's see how landscape evolved, year by year."
+                ]
+                narration = "  ".join(narration_parts)
+
+                # Save narration as cc_en.txt alongside video
+                cc_path = os.path.join(output_dir, f"intro_{fmt}_cc_en.txt")
+                with open(cc_path, 'w', encoding='utf-8') as _f:
+                    _f.write(narration)
+                print(f"[IntroClipTool] 📝 Narration saved: {cc_path} ({len(narration)} chars)")
+
                 # If silent video exists but merged doesn't, skip rendering
                 if os.path.exists(silent_video):
                     print(f"[IntroClipTool] ⏭️ {fmt}: Silent video exists — skipping render")
@@ -176,6 +199,7 @@ class IntroClipTool(BaseTool):
                         watermark_enabled=watermark_enabled,
                         watermark_text=watermark_text,
                         watermark_opacity=watermark_opacity,
+                        video_fps=video_fps,
                     )
 
                 if not os.path.exists(output_path):
@@ -185,18 +209,7 @@ class IntroClipTool(BaseTool):
                 size_kb = os.path.getsize(output_path) // 1024
                 print(f"[IntroClipTool] ✅ {fmt} video created ({size_kb} KB)")
 
-                # --- AUDIO: generate intro narration MP3 with welcome message ---
-                is_portrait_fmt2 = RESOLUTIONS[fmt][1] > RESOLUTIONS[fmt][0]
-                spd = audio_speed if is_portrait_fmt2 else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
-
-                # ✅ ADD WELCOME MESSAGE
-                narration_parts = [
-                    f"Welcome to {channel}.",
-                    f"Exploring {topic} Race from {start_year} to {end_year}.",
-                    "Let's see how landscape evolved, year by year."
-                ]
-                narration = " ".join(narration_parts)
-
+                # --- AUDIO: generate intro narration MP3 using PRE-SAVED narration ---
                 audio_path = os.path.join(output_dir, f"intro_{fmt}_audio.mp3")
                 print(f"[IntroClipTool] 🎙 Generating {fmt} intro audio (speed={spd}) → {audio_path}")
                 try:
@@ -262,6 +275,7 @@ class IntroClipTool(BaseTool):
         watermark_enabled: bool,
         watermark_text: str,
         watermark_opacity: int,
+        video_fps: int = 30,
     ):
         import subprocess
         from PIL import Image, ImageDraw, ImageFont
@@ -269,7 +283,7 @@ class IntroClipTool(BaseTool):
         width, height = RESOLUTIONS[fmt]
         title_size, subtitle_size = FONT_SCALE[fmt]
         is_portrait = height > width
-        fps = 30
+        fps = video_fps  # ✅ Controlled from data.json → video_fps
 
         # --- BACKGROUND ---
         img = Image.new('RGB', (width, height), color=tuple(bg_color))
