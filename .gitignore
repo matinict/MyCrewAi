@@ -109,3 +109,9 @@ Thumbs.db
 *~
 *.swp
 *.swo
+
+ 
+**/client_secret.json
+**/input/client_secret_839331006393-5leiaeau4655bknuge32686ph7476c7a.apps.googleusercontent.com.json
+**/input/client_secrets.json
+**/input/token.json

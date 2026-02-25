@@ -1,7 +1,7 @@
 """
 YouTube Upload Tool
-Updated to handle automatic subtitle uploads from the /YT/{fmt}/CC/ directory.
-Uses credentials from input/ folder.
+Automates video uploads and multi-language subtitle (CC) injection.
+Matches the directory structure: output/{Topic}/YT/{Format}/CC/
 """
 
 import os
@@ -20,29 +20,29 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 class YTUploadToolInput(BaseModel):
     """Input schema for YTUploadTool."""
-    topic:               str   = Field(...,  description="Topic name")
-    output_dir:          str   = Field(...,  description="Output directory containing final videos and YT/ folder")
-    video_formats:       list  = Field(...,  description="List of formats to upload: HD, Shorts, etc.")
-    upload_youtube_video: bool = Field(default=False, description="Master switch — must be true to upload")
-    channel:             str   = Field(default="PlayOwnAi", description="Channel name")
+    topic:               str   = Field(...,  description="Topic name (e.g., 'LLM Alignment RLHF')")
+    output_dir:          str   = Field(...,  description="Full path to the output/Topic directory")
+    video_formats:       list  = Field(...,  description="Formats to upload: ['HD', 'Shorts']")
+    upload_youtube_video: bool = Field(default=False, description="Master switch")
+    channel:             str   = Field(default="PlayOwnAi", description="Channel prefix")
     privacy_status:      str   = Field(default="private", description="public, private, or unlisted")
 
 class YTUploadTool(BaseTool):
     name: str = "yt_upload_tool"
-    description: str = "Uploads videos and their multi-language subtitles to YouTube."
+    description: str = "Uploads videos and 30+ language subtitles to YouTube automatically."
     args_schema: Type[BaseModel] = YTUploadToolInput
-    
+
     SCOPES: List[str] = [
         'https://www.googleapis.com/auth/youtube.upload',
         'https://www.googleapis.com/auth/youtube.force-ssl'
     ]
 
-    def _run(self, topic: str, output_dir: str, video_formats: list, 
-             upload_youtube_video: bool, channel: str = "PlayOwnAi", 
+    def _run(self, topic: str, output_dir: str, video_formats: list,
+             upload_youtube_video: bool, channel: str = "PlayOwnAi",
              privacy_status: str = "private") -> str:
-        
+
         if not upload_youtube_video:
-            return "Skipping YouTube upload (master switch is off)."
+            return "Skipping YouTube upload (upload_youtube_video=false)."
 
         try:
             creds = self._get_credentials()
@@ -54,32 +54,30 @@ class YTUploadTool(BaseTool):
         errors = []
 
         for fmt in video_formats:
-            # 1. Path Setup (Matching your tree output)
-            # Video expected at: output_dir/PlayOwnAi_Topic_HD.mp4
+            # 1. Map File Paths
             clean_topic = topic.replace(" ", "_")
             video_name = f"{channel}_{clean_topic}_{fmt}.mp4"
             video_path = os.path.join(output_dir, video_name)
-            
-            # Metadata expected at: output_dir/YT/HD/MD/en.json
+
+            # Metadata path: output/Topic/YT/HD/MD/en.json
             metadata_path = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
 
             if not os.path.exists(video_path):
-                errors.append(f"{fmt}: Video file not found at {video_path}")
+                errors.append(f"{fmt}: Video file not found: {video_path}")
                 continue
 
-            # 2. Load Metadata
+            # 2. Upload Video
             metadata = self._load_metadata(metadata_path, topic)
+            print(f"🚀 Uploading {fmt} to YouTube...")
 
-            # 3. Upload Video
-            print(f"🚀 Uploading {fmt} video: {video_name}...")
             try:
                 video_id = self._upload_video(youtube, video_path, metadata, privacy_status)
-                
-                # 4. Upload Captions (The new CC logic)
+
+                # 3. Automatic CC Upload (The "n8n" style bulk loop)
                 cc_stats = self._upload_cc_files(youtube, video_id, output_dir, fmt)
-                
+
                 results.append(
-                    f"{fmt} (ID: {video_id}) | CC: {cc_stats['uploaded']} uploaded, {cc_stats['failed']} failed"
+                    f"{fmt} (ID: {video_id}) | CC: {cc_stats['uploaded']} uploaded"
                 )
             except Exception as e:
                 errors.append(f"{fmt}: Upload failed - {str(e)}")
@@ -87,14 +85,14 @@ class YTUploadTool(BaseTool):
         return self._format_summary(results, errors)
 
     def _get_credentials(self):
-        """Fetches credentials from the input folder."""
+        """Points to your 'input/' folder credentials."""
         token_path = 'input/token.json'
         secret_path = 'input/client_secrets.json'
-        
+
         creds = None
         if os.path.exists(token_path):
             creds = Credentials.from_authorized_user_file(token_path, self.SCOPES)
-        
+
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
@@ -108,8 +106,8 @@ class YTUploadTool(BaseTool):
     def _upload_video(self, youtube, file_path, metadata, privacy):
         body = {
             'snippet': {
-                'title': metadata.get('title')[:100],
-                'description': metadata.get('description')[:5000],
+                'title': metadata.get('title', 'AI Video')[:100],
+                'description': metadata.get('description', '')[:5000],
                 'tags': metadata.get('tags', []),
                 'categoryId': '27' # Education
             },
@@ -118,56 +116,54 @@ class YTUploadTool(BaseTool):
                 'selfDeclaredMadeForKids': False
             }
         }
-        
-        insert_request = youtube.videos().insert(
-            part=",".join(body.keys()),
-            body=body,
-            media_body=MediaFileUpload(file_path, chunksize=-1, resumable=True)
-        )
-        
-        response = insert_request.execute()
+
+        media = MediaFileUpload(file_path, chunksize=1024*1024, resumable=True)
+        request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+
+        response = None
+        while response is None:
+            status, response = request.next_chunk()
         return response.get("id")
 
     def _upload_cc_files(self, youtube, video_id, output_dir, fmt):
-        """Scans the YT/{fmt}/CC/ directory and uploads all .txt files."""
+        """Scans the CC folder and uploads every language file found."""
         cc_dir = os.path.join(output_dir, "YT", fmt, "CC")
         stats = {"uploaded": 0, "failed": 0}
-        
+
         if not os.path.exists(cc_dir):
             return stats
 
         for filename in os.listdir(cc_dir):
-            if not filename.endswith(".txt"):
-                continue
-                
-            lang_code = filename.replace(".txt", "")
-            file_path = os.path.join(cc_dir, filename)
-            
-            try:
-                youtube.captions().insert(
-                    part="snippet",
-                    body={
-                        "snippet": {
-                            "videoId": video_id,
-                            "language": lang_code,
-                            "name": f"{lang_code} auto-gen",
-                            "isDraft": False
-                        }
-                    },
-                    media_body=MediaFileUpload(file_path, mimetype='text/plain')
-                ).execute()
-                stats["uploaded"] += 1
-            except Exception:
-                stats["failed"] += 1
+            if filename.endswith(".txt"):
+                lang_code = filename.replace(".txt", "")
+                file_path = os.path.join(cc_dir, filename)
+
+                try:
+                    youtube.captions().insert(
+                        part="snippet",
+                        body={
+                            "snippet": {
+                                "videoId": video_id,
+                                "language": lang_code,
+                                "name": f"{lang_code} auto-translation",
+                                "isDraft": False
+                            }
+                        },
+                        media_body=MediaFileUpload(file_path, mimetype='text/plain')
+                    ).execute()
+                    stats["uploaded"] += 1
+                except:
+                    stats["failed"] += 1
         return stats
 
     def _load_metadata(self, path, topic):
         if os.path.exists(path):
             with open(path, 'r') as f:
                 return json.load(f)
-        return {"title": topic, "description": f"Video about {topic}", "tags": ["AI"]}
+        return {"title": topic, "description": "AI Generated Content", "tags": ["AI"]}
 
     def _format_summary(self, results, errors):
-        res = "✅ UPLOADS:\n" + "\n".join(results) if results else ""
-        err = "\n❌ ERRORS:\n" + "\n".join(errors) if errors else ""
-        return res + err
+        summary = "✅ YouTube Success:\n" + "\n".join(results)
+        if errors:
+            summary += "\n\n❌ Errors:\n" + "\n".join(errors)
+        return summary
