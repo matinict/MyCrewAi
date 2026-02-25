@@ -6,8 +6,7 @@
   "animation_styles": [
     "bar_race"
   ],
-  "video_formats": [
-    "Shorts",
+  "video_formats": [ 
     "HD"
   ],
   "use_label_mappings": false,
@@ -48,5 +47,6 @@
   "llm_csv": "deepseek/deepseek-chat",
   "llm_video": null,
   "llm_audio": null,
-  "llm_youtube": null
+  "llm_youtube": null,
+  "llm_upload": null
 }

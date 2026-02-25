@@ -2,6 +2,13 @@
 YouTube Upload Tool
 Automates video uploads and multi-language subtitle (CC) injection.
 Matches the directory structure: output/{Topic}/YT/{Format}/CC/
+
+Improvements:
+- Upload timeout (120s per chunk) with automatic retry (3 attempts)
+- quotaExceeded on video upload → fails fast immediately (no pointless retries)
+- Log saved IMMEDIATELY after video upload (before CC) — timeout won't lose video_id
+- CC quota-exceeded → stops immediately, logs failed langs for retry
+- Smart skip: already-uploaded formats skipped via upload_log.json
 """
 
 import os
@@ -11,21 +18,29 @@ from typing import Type, List
 from pydantic import BaseModel, Field
 from crewai.tools import BaseTool
 
-# Google API Imports
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+# Google API libraries are lazy-imported inside methods.
+# Install with: pip install google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client
+
+CHUNK_SIZE      = 5 * 1024 * 1024   # 5 MB chunks (smaller = less data lost on timeout)
+CHUNK_TIMEOUT   = 120                # seconds per chunk before raising timeout
+MAX_RETRIES     = 3                  # chunk-level retries on timeout/transient error
+RETRY_BACKOFF   = [5, 15, 30]        # seconds between retries
+
 
 class YTUploadToolInput(BaseModel):
     """Input schema for YTUploadTool."""
-    topic:               str   = Field(...,  description="Topic name (e.g., 'LLM Alignment RLHF')")
-    output_dir:          str   = Field(...,  description="Full path to the output/Topic directory")
-    video_formats:       list  = Field(...,  description="Formats to upload: ['HD', 'Shorts']")
-    upload_youtube_video: bool = Field(default=False, description="Master switch")
-    channel:             str   = Field(default="PlayOwnAi", description="Channel prefix")
-    privacy_status:      str   = Field(default="private", description="public, private, or unlisted")
+    topic:                str   = Field(...,  description="Topic name (e.g., 'LLM Alignment RLHF')")
+    output_dir:           str   = Field(...,  description="Full path to the output/Topic directory")
+    video_formats:        list  = Field(...,  description="Formats to upload: ['HD', 'Shorts']")
+    upload_youtube_video: bool  = Field(default=False,               description="Master switch — must be true to upload")
+    channel:              str   = Field(default="PlayOwnAi",         description="Channel prefix for video filename lookup")
+    privacy_status:       str   = Field(default="private",           description="private | unlisted | public")
+    category_id:          str   = Field(default="28",                description="YouTube category ID. 28=Science & Tech, 27=Education")
+    upload_cc:            bool  = Field(default=True,                description="Upload CC subtitle files after video upload")
+    notify_subscribers:   bool  = Field(default=False,               description="Notify subscribers on upload")
+    client_secrets_file:  str   = Field(default="client_secrets.json", description="Path to OAuth2 client secrets JSON")
+    token_file:           str   = Field(default="token.json",        description="Path to saved OAuth2 token (auto-created on first run)")
+
 
 class YTUploadTool(BaseTool):
     name: str = "yt_upload_tool"
@@ -38,123 +53,337 @@ class YTUploadTool(BaseTool):
     ]
 
     def _run(self, topic: str, output_dir: str, video_formats: list,
-             upload_youtube_video: bool, channel: str = "PlayOwnAi",
-             privacy_status: str = "private") -> str:
+             upload_youtube_video: bool = False, channel: str = "PlayOwnAi",
+             privacy_status: str = "private", category_id: str = "28",
+             upload_cc: bool = True, notify_subscribers: bool = False,
+             client_secrets_file: str = "client_secrets.json",
+             token_file: str = "token.json") -> str:
+
+        import re as _re
 
         if not upload_youtube_video:
-            return "Skipping YouTube upload (upload_youtube_video=false)."
+            return "🔇 YouTube upload skipped (upload_youtube_video=false)."
 
         try:
-            creds = self._get_credentials()
+            from googleapiclient.discovery import build
+        except ImportError:
+            return ("❌ Missing Google API libraries.\n"
+                    "Run: pip install google-auth google-auth-oauthlib "
+                    "google-auth-httplib2 google-api-python-client")
+
+        if not os.path.exists(output_dir):
+            return f"❌ Output directory not found: {output_dir}"
+
+        # Normalize video_formats
+        if isinstance(video_formats, str):
+            video_formats = [v.strip() for v in _re.findall(r"[A-Za-z0-9]+", video_formats)]
+        _valid = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
+        video_formats = [f for f in video_formats if f in _valid] or ["HD"]
+
+        print(f"[YTUpload] 🚀 Starting — formats: {video_formats} | privacy: {privacy_status}")
+
+        try:
+            creds = self._get_credentials(client_secrets_file, token_file)
             youtube = build("youtube", "v3", credentials=creds)
+            print(f"[YTUpload] ✅ Authenticated")
         except Exception as e:
             return f"❌ Auth Error: {str(e)}"
 
         results = []
-        errors = []
+        errors  = []
 
         for fmt in video_formats:
-            # 1. Map File Paths
-            clean_topic = topic.replace(" ", "_")
-            video_name = f"{channel}_{clean_topic}_{fmt}.mp4"
+            fmt = fmt.strip()
+            print(f"\n[YTUpload] ── Format: {fmt} ──────────────────")
+
+            # ── Smart skip: check upload log ──────────────────────────────
+            log_path = os.path.join(output_dir, "YT", fmt, "upload_log.json")
+            if os.path.exists(log_path):
+                try:
+                    with open(log_path) as _lf:
+                        _log = json.load(_lf)
+                    vid_id = _log.get("video_id", "")
+                    if vid_id:
+                        url = f"https://youtu.be/{vid_id}"
+                        # Check if CC still needs finishing
+                        cc_failed = _log.get("cc_failed", 0)
+                        if upload_cc and cc_failed > 0:
+                            print(f"[YTUpload] ♻️  {fmt}: Video already uploaded ({vid_id}), retrying {cc_failed} failed CC(s)")
+                            cc_stats = self._upload_cc_files(youtube, vid_id, output_dir, fmt)
+                            # Update log with new CC stats
+                            _log["cc_uploaded"] = _log.get("cc_uploaded", 0) + cc_stats["uploaded"]
+                            _log["cc_failed"]   = cc_stats["failed"]
+                            _log["cc_skipped"]  = _log.get("cc_skipped", 0) + cc_stats["skipped"]
+                            with open(log_path, "w") as _lf:
+                                json.dump(_log, _lf, indent=2)
+                            results.append(
+                                f"⏭️ {fmt}: Already uploaded → {url} "
+                                f"(CC retry: +{cc_stats['uploaded']} uploaded, {cc_stats['failed']} failed)"
+                            )
+                        else:
+                            results.append(f"⏭️ {fmt}: Already uploaded → {url}")
+                            print(f"[YTUpload] ⏭️ {fmt}: upload_log exists (id={vid_id}) — skipping")
+                        continue
+                except Exception:
+                    pass  # Corrupt log — proceed with upload
+
+            # ── Find video file ────────────────────────────────────────────
+            topic_slug = "_".join(_re.findall(r"\w+", topic)[:4]) if topic else "Video"
+            video_name = f"{channel}_{topic_slug}_{fmt}.mp4"
             video_path = os.path.join(output_dir, video_name)
 
-            # Metadata path: output/Topic/YT/HD/MD/en.json
-            metadata_path = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
-
             if not os.path.exists(video_path):
-                errors.append(f"{fmt}: Video file not found: {video_path}")
-                continue
+                import glob as _glob
+                seg_pfx = ("intro_", "bar_race_", "definition_video_", "_norm_")
+                matches = [p for p in _glob.glob(os.path.join(output_dir, f"*_{fmt}.mp4"))
+                           if not any(os.path.basename(p).startswith(px) for px in seg_pfx)]
+                if matches:
+                    video_path = matches[0]
+                    print(f"[YTUpload] ⚠️  Fallback: {os.path.basename(video_path)}")
+                else:
+                    errors.append(f"❌ {fmt}: Video not found (expected: {video_name})")
+                    print(f"[YTUpload] ❌ {fmt}: No video file — skipping")
+                    continue
 
-            # 2. Upload Video
+            # ── Load metadata ──────────────────────────────────────────────
+            metadata_path = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
             metadata = self._load_metadata(metadata_path, topic)
-            print(f"🚀 Uploading {fmt} to YouTube...")
+            size_mb = os.path.getsize(video_path) / (1024 * 1024)
+            print(f"[YTUpload]   📤 {os.path.basename(video_path)} ({size_mb:.1f} MB) → {privacy_status}")
 
             try:
-                video_id = self._upload_video(youtube, video_path, metadata, privacy_status)
-
-                # 3. Automatic CC Upload (The "n8n" style bulk loop)
-                cc_stats = self._upload_cc_files(youtube, video_id, output_dir, fmt)
-
-                results.append(
-                    f"{fmt} (ID: {video_id}) | CC: {cc_stats['uploaded']} uploaded"
+                video_id = self._upload_video(
+                    youtube, video_path, metadata, privacy_status, category_id, fmt
                 )
+
+                # ── Save log IMMEDIATELY after video upload ────────────────
+                # This ensures the video_id is never lost, even if CC upload
+                # times out or hits quota on a subsequent run.
+                log_entry = {
+                    "video_id":    video_id,
+                    "video_url":   f"https://youtu.be/{video_id}",
+                    "video_file":  os.path.basename(video_path),
+                    "format":      fmt,
+                    "privacy":     privacy_status,
+                    "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "cc_uploaded": 0,
+                    "cc_skipped":  0,
+                    "cc_failed":   0,
+                }
+                os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                with open(log_path, "w") as _lf:
+                    json.dump(log_entry, _lf, indent=2)
+                print(f"[YTUpload]   💾 Log saved → YT/{fmt}/upload_log.json (video secured)")
+
+                # ── Upload CC files ────────────────────────────────────────
+                cc_stats = {"uploaded": 0, "skipped": 0, "failed": 0}
+                if upload_cc:
+                    cc_stats = self._upload_cc_files(youtube, video_id, output_dir, fmt)
+                    # Update log with CC results
+                    log_entry.update({
+                        "cc_uploaded": cc_stats["uploaded"],
+                        "cc_skipped":  cc_stats["skipped"],
+                        "cc_failed":   cc_stats["failed"],
+                    })
+                    with open(log_path, "w") as _lf:
+                        json.dump(log_entry, _lf, indent=2)
+
+                url = f"https://youtu.be/{video_id}"
+                cc_note = f"CC: {cc_stats['uploaded']} uploaded, {cc_stats['skipped']} skipped"
+                if cc_stats["failed"] > 0:
+                    cc_note += f", {cc_stats['failed']} failed (run again to retry)"
+                results.append(f"✅ {fmt}: {url} ({cc_note})")
+
             except Exception as e:
-                errors.append(f"{fmt}: Upload failed - {str(e)}")
+                errors.append(f"❌ {fmt}: Upload failed — {str(e)}")
+                print(f"[YTUpload] ❌ {fmt}: {e}")
 
         return self._format_summary(results, errors)
 
-    def _get_credentials(self):
-        """Points to your 'input/' folder credentials."""
-        token_path = 'input/token.json'
-        secret_path = 'input/client_secrets.json'
+    # ── OAuth2 ────────────────────────────────────────────────────────────────
+
+    def _get_credentials(self, client_secrets_file="client_secrets.json", token_file="token.json"):
+        """OAuth2 auth. Opens browser on first run, saves token.json for reuse."""
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        from google.auth.transport.requests import Request
 
         creds = None
-        if os.path.exists(token_path):
-            creds = Credentials.from_authorized_user_file(token_path, self.SCOPES)
+        if os.path.exists(token_file):
+            creds = Credentials.from_authorized_user_file(token_file, self.SCOPES)
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
+                print(f"[YTUpload] 🔑 Token refreshed")
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(secret_path, self.SCOPES)
+                if not os.path.exists(client_secrets_file):
+                    raise RuntimeError(
+                        f"client_secrets.json not found at: {client_secrets_file}\n"
+                        "Download from: console.cloud.google.com → APIs & Services → Credentials"
+                    )
+                flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, self.SCOPES)
                 creds = flow.run_local_server(port=0)
-            with open(token_path, 'w') as token:
-                token.write(creds.to_json())
+                print(f"[YTUpload] 🔑 New token obtained")
+            with open(token_file, "w") as _tf:
+                _tf.write(creds.to_json())
+            print(f"[YTUpload] 💾 Token saved → {token_file}")
         return creds
 
-    def _upload_video(self, youtube, file_path, metadata, privacy):
+    # ── Video upload with timeout + retry ─────────────────────────────────────
+
+    def _upload_video(self, youtube, file_path, metadata, privacy,
+                      category_id="28", fmt=""):
+        from googleapiclient.http import MediaFileUpload
+        import socket
+
+        title = metadata.get("title", "AI Video")[:100]
+        tags  = list(metadata.get("tags", []))
+
+        is_shorts = fmt in ("Shorts", "ShortsHD", "Shorts4K")
+        if is_shorts:
+            if "#Shorts" not in title:
+                title = f"{title} #Shorts"
+            if "Shorts" not in tags:
+                tags = ["Shorts", "#Shorts"] + tags
+
         body = {
-            'snippet': {
-                'title': metadata.get('title', 'AI Video')[:100],
-                'description': metadata.get('description', '')[:5000],
-                'tags': metadata.get('tags', []),
-                'categoryId': '27' # Education
+            "snippet": {
+                "title":           title,
+                "description":     metadata.get("description", "")[:5000],
+                "tags":            tags,
+                "categoryId":      category_id,
+                "defaultLanguage": "en",
             },
-            'status': {
-                'privacyStatus': privacy,
-                'selfDeclaredMadeForKids': False
-            }
+            "status": {
+                "privacyStatus":           privacy,
+                "selfDeclaredMadeForKids": False,
+            },
         }
 
-        media = MediaFileUpload(file_path, chunksize=1024*1024, resumable=True)
+        media   = MediaFileUpload(file_path, chunksize=CHUNK_SIZE, resumable=True)
         request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
 
-        response = None
-        while response is None:
-            status, response = request.next_chunk()
-        return response.get("id")
+        response  = None
+        last_pct  = -1
+        t0        = time.time()
+        attempt   = 0
+
+        # Set socket timeout so hung connections don't block forever
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(CHUNK_TIMEOUT)
+
+        try:
+            while response is None:
+                try:
+                    status, response = request.next_chunk()
+                    attempt = 0  # reset on success
+                    if status:
+                        pct = int(status.progress() * 100)
+                        if pct != last_pct:
+                            print(f"[YTUpload]   ⬆️  {pct}% ({int(time.time()-t0)}s elapsed)")
+                            last_pct = pct
+                except Exception as chunk_err:
+                    err_str = str(chunk_err)
+                    # Quota errors will NOT resolve with retries — fail fast immediately
+                    if "quotaExceeded" in err_str:
+                        raise RuntimeError(
+                            "YouTube API quota exceeded. "
+                            "Resets at midnight Pacific Time (PT). "
+                            "Request increase: console.cloud.google.com → "
+                            "APIs & Services → YouTube Data API v3 → Quotas"
+                        )
+                    attempt += 1
+                    if attempt > MAX_RETRIES:
+                        raise RuntimeError(f"Upload failed after {MAX_RETRIES} retries: {err_str}")
+                    wait = RETRY_BACKOFF[min(attempt - 1, len(RETRY_BACKOFF) - 1)]
+                    print(f"[YTUpload]   ⚠️  Chunk error (attempt {attempt}/{MAX_RETRIES}): {err_str}")
+                    print(f"[YTUpload]   ⏳ Retrying in {wait}s …")
+                    time.sleep(wait)
+                    # next_chunk() on a resumable upload will resume from last committed byte
+        finally:
+            socket.setdefaulttimeout(old_timeout)
+
+        video_id = response.get("id", "")
+        print(f"[YTUpload] ✅ Upload complete → https://youtu.be/{video_id} ({int(time.time()-t0)}s)")
+        return video_id
+
+    # ── CC upload with quota early-exit ───────────────────────────────────────
 
     def _upload_cc_files(self, youtube, video_id, output_dir, fmt):
-        """Scans the CC folder and uploads every language file found."""
+        """Upload CC files from YT/{fmt}/CC/. Stops immediately on quota exceeded."""
+        from googleapiclient.http import MediaInMemoryUpload
+        from googleapiclient.errors import HttpError
+
         cc_dir = os.path.join(output_dir, "YT", fmt, "CC")
-        stats = {"uploaded": 0, "failed": 0}
+        stats  = {"uploaded": 0, "skipped": 0, "failed": 0, "quota_hit": False}
 
         if not os.path.exists(cc_dir):
+            print(f"[YTUpload]   ⚠️  No CC dir: {cc_dir}")
             return stats
 
-        for filename in os.listdir(cc_dir):
-            if filename.endswith(".txt"):
-                lang_code = filename.replace(".txt", "")
-                file_path = os.path.join(cc_dir, filename)
+        # Check what's already on the video
+        try:
+            existing      = youtube.captions().list(part="snippet", videoId=video_id).execute()
+            existing_langs = {c["snippet"]["language"] for c in existing.get("items", [])}
+        except Exception:
+            existing_langs = set()
 
-                try:
-                    youtube.captions().insert(
-                        part="snippet",
-                        body={
-                            "snippet": {
-                                "videoId": video_id,
-                                "language": lang_code,
-                                "name": f"{lang_code} auto-translation",
-                                "isDraft": False
-                            }
-                        },
-                        media_body=MediaFileUpload(file_path, mimetype='text/plain')
-                    ).execute()
-                    stats["uploaded"] += 1
-                except:
+        cc_files = sorted(f for f in os.listdir(cc_dir) if f.endswith(".txt"))
+        pending  = [f for f in cc_files
+                    if f.replace(".txt", "") not in existing_langs]
+        already  = len(cc_files) - len(pending)
+
+        print(f"[YTUpload]   📝 CC: {len(cc_files)} total | {already} already uploaded | {len(pending)} to upload")
+        if already:
+            stats["skipped"] += already
+
+        for filename in pending:
+            lang_code = filename.replace(".txt", "")
+            file_path = os.path.join(cc_dir, filename)
+
+            try:
+                cc_text = open(file_path, encoding="utf-8").read().strip()
+                if not cc_text:
+                    stats["skipped"] += 1
+                    continue
+
+                media = MediaInMemoryUpload(cc_text.encode("utf-8"), mimetype="text/plain")
+                youtube.captions().insert(
+                    part="snippet",
+                    body={"snippet": {
+                        "videoId":  video_id,
+                        "language": lang_code,
+                        "name":     lang_code,
+                        "isDraft":  False,
+                    }},
+                    media_body=media
+                ).execute()
+                print(f"[YTUpload]     ✅ CC {lang_code}")
+                stats["uploaded"] += 1
+                time.sleep(0.3)
+
+            except HttpError as e:
+                if "quotaExceeded" in str(e):
+                    # Count all remaining files as failed and stop immediately
+                    remaining = len(pending) - stats["uploaded"] - stats["skipped"] - 1
+                    stats["failed"] += 1 + remaining
+                    stats["quota_hit"] = True
+                    print(f"[YTUpload]     ❌ CC {lang_code}: quota exceeded")
+                    print(f"[YTUpload]   🛑 Quota hit — stopping CC upload. "
+                          f"{stats['failed']} lang(s) skipped. Run again tomorrow to retry.")
+                    break
+                else:
+                    print(f"[YTUpload]     ❌ CC {lang_code}: {e}")
                     stats["failed"] += 1
+
+            except Exception as e:
+                print(f"[YTUpload]     ❌ CC {lang_code}: {e}")
+                stats["failed"] += 1
+
         return stats
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _load_metadata(self, path, topic):
         if os.path.exists(path):
@@ -163,7 +392,13 @@ class YTUploadTool(BaseTool):
         return {"title": topic, "description": "AI Generated Content", "tags": ["AI"]}
 
     def _format_summary(self, results, errors):
-        summary = "✅ YouTube Success:\n" + "\n".join(results)
+        if not results and not errors:
+            return "ℹ️ No formats processed"
+        lines = []
+        if results:
+            lines.append(f"✅ YouTube Upload ({len(results)} format(s)):")
+            lines.extend(f"   • {r}" for r in results)
         if errors:
-            summary += "\n\n❌ Errors:\n" + "\n".join(errors)
-        return summary
+            lines.append(f"\n⚠️ Errors ({len(errors)}):")
+            lines.extend(f"   • {e}" for e in errors)
+        return "\n".join(lines)

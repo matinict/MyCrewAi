@@ -96,6 +96,8 @@ def run():
     output_dir = f"output/{inputs['filename']}"
     os.makedirs(output_dir, exist_ok=True)
     inputs['output_dir'] = output_dir
+    # topic_slug used by tasks.yaml templates (e.g. upload_to_youtube)
+    inputs['topic_slug'] = '_'.join(re.findall(r'\w+', inputs['topic'])[:4])
 
     # FPS validation
     fps = float(inputs.get('fps', 0.5))
@@ -139,10 +141,12 @@ def run():
     print(f"🔊 Audio Enabled: {inputs.get('audio_enabled', False)}")
     print(f"📹 Merge Audio-Video: {inputs.get('merge_audio_video', False)}")
     print(f"📺 YouTube Metadata: {inputs.get('generate_youtube_metadata', False)}")
+    upload_on = inputs.get('upload_youtube_video', False)
+    print(f"📤 YouTube Upload:   {upload_on}" + (f" [{inputs.get('upload_privacy','private')}]" if upload_on else ""))
     print(f"🎬 Definition Video: {inputs.get('definition_video', False)}")
 
     # LLM overrides banner
-    llm_keys = ['llm_researcher', 'llm_definition', 'llm_csv', 'llm_video', 'llm_audio', 'llm_youtube']
+    llm_keys = ['llm_researcher', 'llm_definition', 'llm_csv', 'llm_video', 'llm_audio', 'llm_youtube', 'llm_upload']
     llm_overrides = {k: inputs[k] for k in llm_keys if inputs.get(k) and str(inputs[k]).strip().lower() not in ('null','none','')}
     if llm_overrides:
         print("🤖 LLM Overrides:")
@@ -171,7 +175,7 @@ def run():
         # [0] research_data           [1] generate_csv             [2] define_topic
         # [3] create_definition_video [4] create_video             [5] create_bar_race_video
         # [6] create_intro_clip       [7] bar_merge                [8] add_audio
-        # [9] merge_audio_video       [10] generate_youtube_metadata
+        # [9] merge_audio_video       [10] generate_youtube_metadata  [11] upload_to_youtube
 
         if inputs.get('bar_race_video_enabled', False):
             final_tasks.append(full_crew.tasks[5])  # create_bar_race_video
@@ -210,7 +214,8 @@ def run():
         if inputs.get('generate_youtube_metadata', False):
             final_tasks.append(full_crew.tasks[10])  # generate_youtube_metadata
 
-
+        if inputs.get('upload_youtube_video', False):
+            final_tasks.append(full_crew.tasks[11])  # upload_to_youtube
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
@@ -369,6 +374,19 @@ def run():
             for mf in metadata_files:
                 if os.path.exists(mf):
                     print(f"      ✅ {mf}")
+
+        if inputs.get('upload_youtube_video', False):
+            print(f"   YouTube Uploads:")
+            for fmt in inputs['video_formats']:
+                _log_p = f"{output_dir}/YT/{fmt}/upload_log.json"
+                if os.path.exists(_log_p):
+                    try:
+                        with open(_log_p) as _lf: _ul = json.load(_lf)
+                        print(f"      ✅ {fmt}: {_ul.get('video_url','?')} (CC: {_ul.get('cc_uploaded',0)} langs)")
+                    except Exception:
+                        print(f"      ✅ {fmt}: upload_log.json found")
+                else:
+                    print(f"      ❌ {fmt}: upload_log.json not found")
 
         if inputs.get('definition_enabled', False):
             print(f"   Topic Definition:")

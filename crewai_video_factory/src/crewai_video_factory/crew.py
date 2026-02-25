@@ -13,6 +13,7 @@ from crewai_video_factory.tools.merge_tool import MergeAudioVideoTool
 from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool
 from crewai_video_factory.tools.definition_tool import DefinitionTool
 from crewai_video_factory.tools.definition_video_tool import DefinitionVideoTool
+from crewai_video_factory.tools.yt_upload_tool import YTUploadTool
 
 @CrewBase
 class CrewaiVideoFactory:
@@ -117,6 +118,12 @@ class CrewaiVideoFactory:
             verbose=True
         )
 
+    @agent
+    def youtube_upload_specialist(self) -> Agent:
+        kwargs = dict(config=self.agents_config['youtube_upload_specialist'], tools=[YTUploadTool()], verbose=True)
+        if self._llm('llm_upload'): kwargs['llm'] = self._llm('llm_upload')
+        return Agent(**kwargs)
+
     @task
     def research_data(self) -> Task:
         return Task(
@@ -185,6 +192,10 @@ class CrewaiVideoFactory:
         return Task(
             config=self.tasks_config['generate_youtube_metadata'],
         )
+
+    @task
+    def upload_to_youtube(self) -> Task:
+        return Task(config=self.tasks_config['upload_to_youtube'])
 
     @crew
     def crew(self, inputs: dict = None) -> Crew:
