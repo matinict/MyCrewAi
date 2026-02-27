@@ -198,7 +198,9 @@ class YTUploadTool(BaseTool):
                 errors.append(f"❌ {fmt}: Upload failed — {str(e)}")
                 print(f"[YTUpload] ❌ {fmt}: {e}")
 
-        return self._format_summary(results, errors)
+        summary = self._format_summary(results, errors)
+        self._save_upload_summary(results, errors, output_dir, topic)
+        return summary
 
     # ── OAuth2 ────────────────────────────────────────────────────────────────
 
@@ -253,7 +255,8 @@ class YTUploadTool(BaseTool):
                 "description":     metadata.get("description", "")[:5000],
                 "tags":            tags,
                 "categoryId":      category_id,
-                "defaultLanguage": "en",
+                "defaultLanguage":      "en",
+                "defaultAudioLanguage": "en",
             },
             "status": {
                 "privacyStatus":           privacy,
@@ -390,6 +393,75 @@ class YTUploadTool(BaseTool):
             with open(path, 'r') as f:
                 return json.load(f)
         return {"title": topic, "description": "AI Generated Content", "tags": ["AI"]}
+
+    def _save_upload_summary(self, results, errors, output_dir, topic):
+        """Save final upload summary JSON + TXT after all formats complete."""
+        import datetime
+        summary_dir = os.path.join(output_dir, "YT")
+        os.makedirs(summary_dir, exist_ok=True)
+
+        parsed = []
+        for r in results:
+            fmt_match = r.replace("✅ ", "").split(": ", 1)
+            fmt  = fmt_match[0].strip() if len(fmt_match) > 1 else "unknown"
+            rest = fmt_match[1] if len(fmt_match) > 1 else r
+            url_match = [w for w in rest.split() if w.startswith("https://")]
+            url = url_match[0] if url_match else ""
+            video_id = url.replace("https://youtu.be/", "") if url else ""
+            parsed.append({
+                "format":         fmt,
+                "video_id":       video_id,
+                "video_url":      url,
+                "youtube_studio": f"https://studio.youtube.com/video/{video_id}/edit" if video_id else "",
+                "cc_note":        rest.split("(")[-1].rstrip(")") if "(" in rest else "",
+                "status":         "success",
+            })
+
+        for e in errors:
+            fmt = e.replace("❌ ", "").split(":")[0].strip()
+            parsed.append({"format": fmt, "status": "failed", "error": e})
+
+        data = {
+            "topic":       topic,
+            "uploaded_at": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "total":       len(results) + len(errors),
+            "success":     len(results),
+            "failed":      len(errors),
+            "uploads":     parsed,
+        }
+
+        json_path = os.path.join(summary_dir, "upload_summary.json")
+        with open(json_path, "w") as f:
+            json.dump(data, f, indent=2)
+
+        txt_path = os.path.join(summary_dir, "upload_summary.txt")
+        sep = "━" * 52
+        lines = [
+            sep,
+            "📺 YOUTUBE UPLOAD SUMMARY",
+            f"Topic     : {topic}",
+            f"Uploaded  : {data['uploaded_at']}",
+            f"Success   : {data['success']} / {data['total']}",
+            sep, "",
+        ]
+        for u in parsed:
+            if u["status"] == "success":
+                lines += [
+                    f"✅ {u['format']}",
+                    f"   URL     : {u['video_url']}",
+                    f"   Studio  : {u['youtube_studio']}",
+                    f"   CC      : {u['cc_note']}",
+                    "",
+                ]
+            else:
+                lines += [f"❌ {u['format']} — {u.get('error', '')}", ""]
+        lines.append(sep)
+
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write("".join(lines))
+
+        print(f"[YTUpload] 💾 Summary → {json_path}")
+        print(f"[YTUpload] 💾 Summary → {txt_path}")
 
     def _format_summary(self, results, errors):
         if not results and not errors:

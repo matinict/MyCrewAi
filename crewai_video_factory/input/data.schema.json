@@ -17,25 +17,49 @@
   "granularity": {
     "type": "string",
     "description": "Data granularity",
-    "enum": ["yearly", "monthly", "daily"],
+    "enum": [
+      "yearly",
+      "monthly",
+      "daily"
+    ],
     "example": "yearly"
   },
   "animation_styles": {
     "type": "array",
     "description": "Animation styles to generate (for standard video_producer)",
-    "enum": ["bar", "line", "bubble", "pie", "stream", "map"],
-    "example": ["bar", "line"]
+    "enum": [
+      "bar",
+      "line",
+      "bubble",
+      "pie",
+      "stream",
+      "map"
+    ],
+    "example": [
+      "bar",
+      "line"
+    ]
   },
   "video_formats": {
     "type": "array",
     "description": "Video formats to generate. Applies to bar race, intro, audio and merge tasks.",
-    "enum": ["HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"],
-    "example": ["Shorts", "HD"]
+    "enum": [
+      "HD",
+      "2K",
+      "4K",
+      "8K",
+      "Shorts",
+      "ShortsHD",
+      "Shorts4K"
+    ],
+    "example": [
+      "Shorts",
+      "HD"
+    ]
   },
-
   "fps": {
     "type": "number",
-    "description": "Seconds per period for bar_race videos. Controls animation pace — higher = slower/longer video.",
+    "description": "Seconds per period for bar_race videos. Controls animation pace \u2014 higher = slower/longer video.",
     "minimum": 0.1,
     "maximum": 30.0,
     "examples": {
@@ -45,25 +69,28 @@
       "5.0": "~60s total",
       "10.0": "~120s total"
     },
-    "tip": "fps_hd_offset multiplies the per-period duration for HD. HD duration = fps × fps_hd_offset per period."
+    "tip": "fps_hd_offset multiplies the per-period duration for HD. HD duration = fps \u00d7 fps_hd_offset per period."
   },
   "fps_hd_offset": {
     "type": "number",
-    "description": "Multiplier applied to fps for HD format only. Shorts uses fps directly; HD uses fps × fps_hd_offset.",
+    "description": "Extra seconds per period added to HD only. Shorts uses fps; HD uses fps + fps_hd_offset.",
     "minimum": 0.0,
     "maximum": 10.0,
     "example": 1.37,
-    "tip": "fps=4.9 + fps_hd_offset=1.37 => Shorts=4.9s/period, HD=6.71s/period"
+    "tip": "fps=4.9 + fps_hd_offset=1.37 => Shorts=4.9s/period, HD=6.27s/period"
   },
   "video_fps": {
     "type": "integer",
-    "description": "Output video frame rate for ALL tools (intro, bar_race, definition_video). Must be identical across all 3 tools — mismatched fps causes A/V sync failure on merge. Change here to update everywhere.",
-    "enum": [24, 30, 60],
+    "description": "Output video frame rate for ALL tools (intro, bar_race, definition_video). Must be identical across all 3 tools \u2014 mismatched fps causes A/V sync failure on merge. Change here to update everywhere.",
+    "enum": [
+      24,
+      30,
+      60
+    ],
     "default": 30,
     "example": 30,
-    "tip": "30fps is recommended. Never mix fps values — all 3 segment tools read this single field."
+    "tip": "30fps is recommended. Never mix fps values \u2014 all 3 segment tools read this single field."
   },
-
   "use_existing_csv": {
     "type": "boolean",
     "description": "Use existing CSV instead of generating new one. Skips research_data and generate_csv tasks. If CSV is missing, auto-generates it instead of erroring.",
@@ -91,10 +118,10 @@
     "maximum": 3000,
     "default": 1200,
     "examples": {
-      "600": "Very short — one paragraph per section",
-      "1200": "Default — balanced length for video display",
-      "2000": "Long — detailed definition with more key terms",
-      "3000": "Maximum — full article-style definition"
+      "600": "Very short \u2014 one paragraph per section",
+      "1200": "Default \u2014 balanced length for video display",
+      "2000": "Long \u2014 detailed definition with more key terms",
+      "3000": "Maximum \u2014 full article-style definition"
     }
   },
   "definition_video": {
@@ -102,7 +129,18 @@
     "description": "Create a bottom-to-top scrolling text video from the definition .txt file. Active line is large neon white at bottom; older lines scroll up and shrink. Output: definition_video_{fmt}_with_audio.mp4.",
     "example": false
   },
-
+  "secs_per_line": {
+    "type": "number",
+    "description": "Seconds each line is shown as active in the definition video. Higher = slower/longer video.",
+    "minimum": 0.5,
+    "maximum": 10.0,
+    "default": 3.5,
+    "examples": {
+      "2.0": "Fast pace \u2014 good for short definitions",
+      "3.5": "Default \u2014 comfortable reading speed",
+      "5.0": "Slow \u2014 good for detailed definitions"
+    }
+  },
   "video_enabled": {
     "type": "boolean",
     "description": "Enable standard video generation (uses smart_video_tool with multiple animation styles).",
@@ -110,9 +148,8 @@
   },
   "bar_race_video_enabled": {
     "type": "boolean",
-    "description": "Enable bar race video generation using bar_race_video_tool with professional interpolation.",
-    "example": false,
-    "note": "Can be used WITH or WITHOUT video_enabled."
+    "description": "Enable bar race video generation. Output: bar_race_{fmt}_with_audio.mp4 per format.",
+    "example": false
   },
   "watermark_enabled": {
     "type": "boolean",
@@ -131,7 +168,6 @@
     "maximum": 255,
     "example": 60
   },
-
   "audio_speed": {
     "type": "number",
     "description": "Speech speed for Shorts audio via ffmpeg atempo filter. 1.0=normal, <1.0=slower, >1.0=faster.",
@@ -146,13 +182,22 @@
     "minimum": 0.0,
     "maximum": 2.0,
     "examples": {
-      "0.0": "No override — HD uses same speed as audio_speed",
-      "0.9": "Slightly faster than Shorts — good for longer HD narration",
+      "0.0": "No override \u2014 HD uses same speed as audio_speed",
+      "0.9": "Slightly faster than Shorts \u2014 good for longer HD narration",
       "1.0": "Normal speed for HD"
     },
-    "tip": "HD narration is longer (includes data points). 0.9–1.0 prevents it feeling too slow."
+    "tip": "HD narration is longer (includes data points). 0.9\u20131.0 prevents it feeling too slow."
   },
-
+  "audio_enabled": {
+    "type": "boolean",
+    "description": "Enable audio narration for standard (non-bar-race) videos.",
+    "example": true
+  },
+  "bar_race_audio_enabled": {
+    "type": "boolean",
+    "description": "Generate audio narration MP3 for bar race videos (bar_race_{fmt}_audio.mp3). Uses audio_speed for Shorts and audio_speed_hd for HD. Independent of audio_enabled.",
+    "example": true
+  },
   "intro_enabled": {
     "type": "boolean",
     "description": "Generate branded intro clip per format. Shows channel name, topic and year range on dark background. Output: intro_{fmt}_with_audio.mp4.",
@@ -172,36 +217,22 @@
     "maximum": 60,
     "example": 15
   },
-
-  "bar_race_video_enabled": {
-    "type": "boolean",
-    "description": "Enable bar race video generation. Output: bar_race_{fmt}_with_audio.mp4 per format.",
-    "example": false
-  },
   "bar_merge_enabled": {
     "type": "boolean",
     "description": "Concatenate intro + bar_race + definition_video segments into one final video per format. Output: {channel}_{topic_slug}_{fmt}.mp4. Also merges CC text files. Requires all 3 segment _with_audio.mp4 files to exist.",
     "example": true,
     "note": "Segments must have identical fps (controlled by video_fps). Mismatched fps will cause A/V sync issues."
   },
-
-  "audio_enabled": {
-    "type": "boolean",
-    "description": "Enable audio narration for standard (non-bar-race) videos.",
-    "example": true
-  },
   "merge_audio_video": {
     "type": "boolean",
     "description": "Merge standard audio with standard video files.",
     "example": true
   },
-
   "generate_youtube_metadata": {
     "type": "boolean",
     "description": "Generate YouTube metadata files (title, description, tags, chapters) and translate to 31 languages. Output saved to YT/{fmt}/MD/ and YT/{fmt}/CC/.",
     "example": true
   },
-
   "upload_youtube_video": {
     "type": "boolean",
     "description": "Upload final merged videos to YouTube using YouTube Data API v3. Reads metadata from YT/{fmt}/MD/en.json. Smart skip: if YT/{fmt}/upload_log.json exists with a video_id, re-upload is skipped.",
@@ -211,7 +242,11 @@
   "upload_privacy": {
     "type": "string",
     "description": "YouTube video privacy setting on upload.",
-    "enum": ["private", "unlisted", "public"],
+    "enum": [
+      "private",
+      "unlisted",
+      "public"
+    ],
     "default": "private",
     "example": "private",
     "tip": "Use 'private' to review before publishing. Change to 'public' when ready."
@@ -246,7 +281,7 @@
     "description": "Path to OAuth2 client_secrets.json downloaded from Google Cloud Console. Required for first-time authentication.",
     "default": "client_secrets.json",
     "example": "client_secrets.json",
-    "setup": "https://console.cloud.google.com → APIs & Services → Credentials → Create OAuth 2.0 Client ID → Desktop App → Download JSON"
+    "setup": "https://console.cloud.google.com \u2192 APIs & Services \u2192 Credentials \u2192 Create OAuth 2.0 Client ID \u2192 Desktop App \u2192 Download JSON"
   },
   "upload_token_file": {
     "type": "string",
@@ -254,7 +289,29 @@
     "default": "token.json",
     "example": "token.json"
   },
-
+  "social_share_enabled": {
+    "type": "boolean",
+    "description": "Post the uploaded YouTube video URL to configured social platforms after upload. Reads video URL from YT/upload_summary.json. Requires input/social_credentials.json.",
+    "example": false
+  },
+  "social_platforms": {
+    "type": "array",
+    "description": "List of social platforms to post to. Tool auto-picks the URL from video_formats[0].",
+    "enum": [
+      "Facebook",
+      "LinkedIn",
+      "X",
+      "YouTube",
+      "Instagram"
+    ],
+    "example": [
+      "Facebook",
+      "LinkedIn",
+      "X",
+      "YouTube"
+    ],
+    "tip": "YouTube posts a Community post. Instagram requires a publicly accessible video URL for Reels."
+  },
   "channel": {
     "type": "string",
     "description": "Channel name used in audio narration ('Welcome to X'), intro clip title, agent backstory, and YouTube metadata. No @ prefix. Change once to update everywhere.",
@@ -270,9 +327,11 @@
     "description": "Channel website or primary URL shown in YouTube metadata.",
     "example": "youtube.com/@PlayOwnAi"
   },
-
   "llm_researcher": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the data_researcher agent (research_data task). null = use project default.",
     "examples": {
       "null": "Use project default model",
@@ -283,19 +342,37 @@
     "example": null
   },
   "llm_definition": {
-    "type": ["string", "null"],
-    "description": "LLM override for the definition_specialist agent (define_topic task). null = use project default. Tip: use a strong model here — this agent must compose text AND call a tool correctly in one shot.",
+    "type": [
+      "string",
+      "null"
+    ],
+    "description": "LLM override for the definition_specialist agent (define_topic task). null = use project default. Tip: use a strong model here \u2014 this agent must compose text AND call a tool correctly in one shot.",
     "examples": {
       "null": "Use project default model",
-      "openai/gpt-4o": "Recommended — reliable tool calling",
+      "openai/gpt-4o": "Recommended \u2014 reliable tool calling",
       "openai/gpt-4o-mini": "Good balance of quality and cost",
       "deepseek/deepseek-chat": "Cost-effective, good instruction following",
       "anthropic/claude-3-haiku": "Fast and reliable for structured output"
     },
     "example": null
   },
+  "llm_definition_video": {
+    "type": [
+      "string",
+      "null"
+    ],
+    "description": "LLM override for the definition_video_producer agent. null = use project default.",
+    "examples": {
+      "null": "Use project default model",
+      "openai/gpt-4o-mini": "Fast for tool-calling video tasks"
+    },
+    "example": null
+  },
   "llm_csv": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the csv_generator agent (generate_csv task). null = use project default.",
     "examples": {
       "null": "Use project default model",
@@ -305,7 +382,10 @@
     "example": null
   },
   "llm_video": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the video_producer and bar_race_video_producer agents. null = use project default.",
     "examples": {
       "null": "Use project default model",
@@ -314,7 +394,10 @@
     "example": null
   },
   "llm_audio": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the audio_engineer and bar_race_audio_engineer agents. null = use project default.",
     "examples": {
       "null": "Use project default model",
@@ -323,7 +406,10 @@
     "example": null
   },
   "llm_youtube": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the youtube_metadata_specialist agent. null = use project default.",
     "examples": {
       "null": "Use project default model",
@@ -333,11 +419,26 @@
     "example": null
   },
   "llm_upload": {
-    "type": ["string", "null"],
+    "type": [
+      "string",
+      "null"
+    ],
     "description": "LLM override for the youtube_upload_specialist agent (upload_youtube_video task). null = use project default.",
     "examples": {
       "null": "Use project default model",
       "openai/gpt-4o-mini": "Reliable for tool-calling upload tasks"
+    },
+    "example": null
+  },
+  "llm_social": {
+    "type": [
+      "string",
+      "null"
+    ],
+    "description": "LLM override for the social_share_specialist agent. null = use project default.",
+    "examples": {
+      "null": "Use project default model",
+      "openai/gpt-4o-mini": "Fast and reliable for tool-calling tasks"
     },
     "example": null
   }

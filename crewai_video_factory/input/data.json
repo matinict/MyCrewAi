@@ -1,12 +1,12 @@
 {
-  "topic": "LLM Evaluation",
-  "start": 2015,
+  "topic": "LLM Alignment (RLHF)",
+  "start": 2020,
   "end": 2026,
   "granularity": "yearly",
   "animation_styles": [
     "bar_race"
   ],
-  "video_formats": [ 
+  "video_formats": [
     "HD"
   ],
   "use_label_mappings": false,
@@ -36,6 +36,8 @@
   "upload_notify_subscribers": false,
   "upload_client_secrets_file": "client_secrets.json",
   "upload_token_file": "token.json",
+  "social_share_enabled": true,
+  "social_platforms": ["Facebook", "LinkedIn", "X", "YouTube"],
   "channel": "PlayOwnAi",
   "channel_lower": "playownai",
   "website": "youtube.com/@PlayOwnAi",
