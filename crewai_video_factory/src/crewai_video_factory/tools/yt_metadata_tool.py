@@ -1,4 +1,5 @@
 import os
+import csv
 import json
 import re
 import time
@@ -317,6 +318,17 @@ class YouTubeMetadataTool(BaseTool):
         width, height = 1920, 1080
         png_path = os.path.join(output_dir, f"{filename}.png")
         jpg_path = os.path.join(output_dir, f"{filename}.jpg")
+
+        # Smart skip: both files already exist
+        if os.path.exists(png_path) and os.path.exists(jpg_path):
+            png_kb = os.path.getsize(png_path) // 1024
+            jpg_kb = os.path.getsize(jpg_path) // 1024
+            print(f"[YTMetadata] ⏭️  Thumbnail smart skip — both files already exist")
+            return (
+                f"⏭️  Thumbnails already exist (skipped):\n"
+                f"   PNG: {png_path} ({png_kb} KB)\n"
+                f"   JPG: {jpg_path} ({jpg_kb} KB)"
+            )
 
         try:
             # Read CSV data

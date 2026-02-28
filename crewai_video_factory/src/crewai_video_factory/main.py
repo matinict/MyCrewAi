@@ -281,6 +281,29 @@ def run():
                 print(f"[Definition] ⚠️  Save error: {_de}")
 
         print("\n" + "="*60)
+
+        # -- Generate thumbnails directly (bypasses LLM, always runs) ------
+        try:
+            from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool
+            _csv_path = f"output/{inputs['filename']}.csv"
+            if os.path.exists(_csv_path):
+                print("\n Generating thumbnails...")
+                _meta_tool = YouTubeMetadataTool()
+                _thumb_result = _meta_tool._generate_thumbnail(
+                    topic=inputs['topic'],
+                    filename=inputs['filename'],
+                    output_dir=inputs['output_dir'],
+                    channel=inputs.get('channel', 'PlayOwnAi'),
+                    csv_path=_csv_path,
+                    start_year=inputs.get('start', 2015),
+                    end_year=inputs.get('end', 2026),
+                )
+                print(f"   {_thumb_result}")
+            else:
+                print(f"\n Thumbnail skipped - CSV not found: {_csv_path}")
+        except Exception as _te:
+            print(f"\n Thumbnail generation error: {_te}")
+
         print("✅ VIDEO FACTORY COMPLETED")
         print("="*60)
         print("\nResult:")
