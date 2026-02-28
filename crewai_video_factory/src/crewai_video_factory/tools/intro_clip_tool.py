@@ -169,7 +169,8 @@ class IntroClipTool(BaseTool):
                 # ✅ ADD WELCOME MESSAGE
                 narration_parts = [
                     f"Welcome to {channel}.",
-                    f"Exploring {topic} Race from {start_year} to {end_year}.",
+                    f"Exploring {topic} Race ",
+                    #from {start_year} to {end_year}.",
                     "Let's see how landscape evolved, year by year."
                 ]
                 narration = "  ".join(narration_parts)
