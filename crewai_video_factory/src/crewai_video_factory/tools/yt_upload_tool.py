@@ -40,6 +40,7 @@ class YTUploadToolInput(BaseModel):
     notify_subscribers:   bool  = Field(default=False,               description="Notify subscribers on upload")
     client_secrets_file:  str   = Field(default="client_secrets.json", description="Path to OAuth2 client secrets JSON")
     token_file:           str   = Field(default="token.json",        description="Path to saved OAuth2 token (auto-created on first run)")
+    thumbnail_path:       str   = Field(default="",                  description="Path to thumbnail image (JPG/PNG). Auto-detected if empty.")
 
 
 class YTUploadTool(BaseTool):
@@ -57,7 +58,8 @@ class YTUploadTool(BaseTool):
              privacy_status: str = "private", category_id: str = "28",
              upload_cc: bool = True, notify_subscribers: bool = False,
              client_secrets_file: str = "client_secrets.json",
-             token_file: str = "token.json") -> str:
+             token_file: str = "token.json",
+             thumbnail_path: str = "") -> str:
 
         import re as _re
 
@@ -188,11 +190,41 @@ class YTUploadTool(BaseTool):
                     with open(log_path, "w") as _lf:
                         json.dump(log_entry, _lf, indent=2)
 
+                # ── Upload thumbnail ──────────────────────────────────
+                thumb_note = ""
+                _thumb_path = thumbnail_path
+                if not _thumb_path:
+                    # Auto-detect: look for filename.jpg or filename.png in output_dir
+                    import glob as _tglob
+                    _candidates = (
+                        [p for p in _tglob.glob(os.path.join(output_dir, "*.jpg"))
+                         if not os.path.basename(p).startswith("PlayOwnAi")] +
+                        [p for p in _tglob.glob(os.path.join(output_dir, "*.png"))
+                         if not os.path.basename(p).startswith("PlayOwnAi")]
+                    )
+                    _thumb_path = _candidates[0] if _candidates else ""
+                if _thumb_path and os.path.exists(_thumb_path):
+                    try:
+                        _ext = os.path.splitext(_thumb_path)[1].lower()
+                        _mime = "image/jpeg" if _ext in (".jpg", ".jpeg") else "image/png"
+                        from googleapiclient.http import MediaFileUpload as _MFU
+                        youtube.thumbnails().set(
+                            videoId=video_id,
+                            media_body=_MFU(_thumb_path, mimetype=_mime)
+                        ).execute()
+                        thumb_note = f" | Thumbnail: ✅ {os.path.basename(_thumb_path)}"
+                        print(f"[YTUpload]   🖼️  Thumbnail uploaded: {os.path.basename(_thumb_path)}")
+                    except Exception as _te:
+                        thumb_note = f" | Thumbnail: ❌ {_te}"
+                        print(f"[YTUpload]   ⚠️  Thumbnail upload failed: {_te}")
+                else:
+                    print(f"[YTUpload]   ⚠️  No thumbnail found — skipping")
+
                 url = f"https://youtu.be/{video_id}"
                 cc_note = f"CC: {cc_stats['uploaded']} uploaded, {cc_stats['skipped']} skipped"
                 if cc_stats["failed"] > 0:
                     cc_note += f", {cc_stats['failed']} failed (run again to retry)"
-                results.append(f"✅ {fmt}: {url} ({cc_note})")
+                results.append(f"✅ {fmt}: {url} ({cc_note}{thumb_note})")
 
             except Exception as e:
                 errors.append(f"❌ {fmt}: Upload failed — {str(e)}")
@@ -240,14 +272,44 @@ class YTUploadTool(BaseTool):
         import socket
 
         title = metadata.get("title", "AI Video")[:100]
-        tags  = list(metadata.get("tags", []))
+        raw_tags = list(metadata.get("tags", []))
+
+        # Sanitize tags: strip leading #, emoji, special chars, max 30 chars each
+        def _clean_tag(t):
+            import re as _re
+            t = str(t).strip().lstrip('#')
+            # Remove emoji and symbols (U+2000 and above covers all emoji)
+            t = _re.sub(u'[\U00002000-\U0010FFFF]', '', t)
+            # Remove YouTube-rejected chars
+            t = _re.sub(r'[<>&]', '', t)
+            t = t.replace('"', '').replace("'", '')
+            # Keep only safe printable chars
+            t = _re.sub(r'[^\x20-\x7E\u00C0-\u024F]', '', t)
+            return t[:30].strip()
+
+
+        tags = []
+        seen = set()
+        total_len = 0
+        for t in raw_tags:
+            ct = _clean_tag(t)
+            if not ct or ct.lower() in seen:
+                continue
+            if total_len + len(ct) > 500:
+                break
+            tags.append(ct)
+            seen.add(ct.lower())
+            total_len += len(ct)
 
         is_shorts = fmt in ("Shorts", "ShortsHD", "Shorts4K")
         if is_shorts:
             if "#Shorts" not in title:
                 title = f"{title} #Shorts"
-            if "Shorts" not in tags:
-                tags = ["Shorts", "#Shorts"] + tags
+            for st in ["Shorts", "Short"]:
+                if st.lower() not in seen and total_len + len(st) <= 500:
+                    tags.insert(0, st)
+                    seen.add(st.lower())
+                    total_len += len(st)
 
         body = {
             "snippet": {
@@ -288,7 +350,7 @@ class YTUploadTool(BaseTool):
                             last_pct = pct
                 except Exception as chunk_err:
                     err_str = str(chunk_err)
-                    # Quota errors will NOT resolve with retries — fail fast immediately
+                    # Fail fast on non-retryable errors
                     if "quotaExceeded" in err_str:
                         raise RuntimeError(
                             "YouTube API quota exceeded. "
@@ -296,6 +358,12 @@ class YTUploadTool(BaseTool):
                             "Request increase: console.cloud.google.com → "
                             "APIs & Services → YouTube Data API v3 → Quotas"
                         )
+                    if "400" in err_str and "invalidTags" in err_str:
+                        raise RuntimeError(
+                            f"Invalid tags in metadata — check en.json tags field: {err_str}"
+                        )
+                    if "400" in err_str:
+                        raise RuntimeError(f"Bad request (non-retryable): {err_str}")
                     attempt += 1
                     if attempt > MAX_RETRIES:
                         raise RuntimeError(f"Upload failed after {MAX_RETRIES} retries: {err_str}")
