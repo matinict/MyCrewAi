@@ -7,7 +7,7 @@
     "bar_race"
   ],
   "video_formats": [
-    "HD" 
+    "HD"
   ],
   "use_label_mappings": false,
   "fps": 4.9,
@@ -32,7 +32,7 @@
   "upload_youtube_video": true,
   "upload_privacy": "private",
   "upload_category_id": "28",
-  "upload_cc": false,
+  "upload_cc": true,
   "upload_notify_subscribers": false,
   "upload_client_secrets_file": "client_secrets.json",
   "upload_token_file": "token.json",

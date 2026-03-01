@@ -107,12 +107,23 @@ class YTUploadTool(BaseTool):
                     vid_id = _log.get("video_id", "")
                     if vid_id:
                         url = f"https://youtu.be/{vid_id}"
-                        # Check if CC still needs uploading (never uploaded, or had failures)
-                        cc_failed   = _log.get("cc_failed", 0)
-                        cc_uploaded = _log.get("cc_uploaded", 0)
-                        cc_needs_upload = upload_cc and (cc_failed > 0 or cc_uploaded == 0)
+                        notes = []
+
+                        # ── Check CC: compare disk files vs what's on YouTube ──
+                        import os as _os2
+                        cc_dir_check = _os2.path.join(output_dir, "YT", fmt, "CC")
+                        cc_total_on_disk = len([f for f in _os2.listdir(cc_dir_check) if f.endswith(".txt")]) if _os2.path.exists(cc_dir_check) else 0
+                        # Ask YouTube how many captions the video actually has
+                        try:
+                            from googleapiclient.errors import HttpError as _HE
+                            _cap_resp = youtube.captions().list(part="snippet", videoId=vid_id).execute()
+                            cc_on_yt  = len(_cap_resp.get("items", []))
+                        except Exception:
+                            cc_on_yt  = _log.get("cc_uploaded", 0)
+                        cc_failed = _log.get("cc_failed", 0)
+                        cc_needs_upload = upload_cc and (cc_on_yt < cc_total_on_disk)
                         if cc_needs_upload:
-                            reason = "never uploaded" if cc_uploaded == 0 else f"{cc_failed} failed"
+                            reason = f"{cc_on_yt}/{cc_total_on_disk} on YouTube"
                             print(f"[YTUpload] ♻️  {fmt}: Video already uploaded ({vid_id}), uploading CC ({reason})")
                             cc_stats = self._upload_cc_files(youtube, vid_id, output_dir, fmt)
                             _log["cc_uploaded"] = _log.get("cc_uploaded", 0) + cc_stats["uploaded"]
@@ -120,13 +131,19 @@ class YTUploadTool(BaseTool):
                             _log["cc_skipped"]  = _log.get("cc_skipped", 0) + cc_stats["skipped"]
                             with open(log_path, "w") as _lf:
                                 json.dump(_log, _lf, indent=2)
-                            results.append(
-                                f"⏭️ {fmt}: Already uploaded → {url} "
-                                f"(CC: +{cc_stats['uploaded']} uploaded, {cc_stats['failed']} failed)"
-                            )
+                            notes.append(f"CC: +{cc_stats['uploaded']} uploaded, {cc_stats['failed']} failed")
                         else:
-                            results.append(f"⏭️ {fmt}: Already uploaded → {url}")
-                            print(f"[YTUpload] ⏭️ {fmt}: upload_log exists (id={vid_id}) — skipping")
+                            print(f"[YTUpload] ⏭️  {fmt}: CC complete ({cc_uploaded}/{cc_total_on_disk})")
+
+                        # ── Localizations: always re-upload to keep in sync ────
+                        _loc = self._upload_localizations(youtube, vid_id, output_dir, fmt)
+                        _log["loc_uploaded"] = _loc["uploaded"]
+                        with open(log_path, "w") as _lf:
+                            json.dump(_log, _lf, indent=2)
+                        notes.append(f"Loc: {_loc['uploaded']} languages")
+
+                        note_str = " | ".join(notes) if notes else "all done"
+                        results.append(f"⏭️ {fmt}: Already uploaded → {url} ({note_str})")
                         continue
                 except Exception:
                     pass  # Corrupt log — proceed with upload
@@ -191,6 +208,12 @@ class YTUploadTool(BaseTool):
                     })
                     with open(log_path, "w") as _lf:
                         json.dump(log_entry, _lf, indent=2)
+
+                # ── Upload localizations (title & description per language) ──
+                loc_stats = self._upload_localizations(youtube, video_id, output_dir, fmt)
+                log_entry["loc_uploaded"] = loc_stats["uploaded"]
+                with open(log_path, "w") as _lf:
+                    json.dump(log_entry, _lf, indent=2)
 
                 # ── Upload thumbnail ──────────────────────────────────
                 thumb_note = ""
@@ -425,6 +448,78 @@ class YTUploadTool(BaseTool):
 
         return "\n".join(lines)
 
+    # Map our ISO codes → YouTube BCP-47 localization codes
+    _LANG_MAP = {
+        "zh-cn": "zh-Hans",  # Simplified Chinese
+        "zh-tw": "zh-Hant",  # Traditional Chinese
+        "sr":    "sr-Latn",  # Serbian Latin
+    }
+
+    def _upload_localizations(self, youtube, video_id, output_dir, fmt):
+        """Upload translated title & description for all languages via YouTube localizations API."""
+        import re as _re2
+
+        def _clean(t, limit):
+            t = _re2.sub(u"[ -􏿿]", "", str(t))
+            t = _re2.sub(r"[<>&]", "", t)
+            return t.strip()[:limit]
+
+        def _parse_md_txt(path):
+            try:
+                text = open(path, encoding="utf-8").read()
+                title_m = _re2.search("TITLE:\n(.+?)(?:\n\n|\nDESCRIPTION:)", text, _re2.DOTALL)
+                desc_m  = _re2.search("DESCRIPTION:\n(.+?)(?:\n\n|\nTAGS:|$)",  text, _re2.DOTALL)
+                return (
+                    title_m.group(1).strip() if title_m else "",
+                    desc_m.group(1).strip()  if desc_m  else "",
+                )
+            except Exception:
+                return "", ""
+
+        md_dir = os.path.join(output_dir, "YT", fmt, "MD")
+        if not os.path.exists(md_dir):
+            print(f"[YTUpload]   ⚠️  No MD dir: {md_dir}")
+            return {"uploaded": 0, "failed": 0}
+
+        # Fetch existing localizations so we can merge (not overwrite)
+        try:
+            existing_resp = youtube.videos().list(
+                part="localizations", id=video_id).execute()
+            existing_locs = existing_resp["items"][0].get("localizations", {}) if existing_resp.get("items") else {}
+        except Exception:
+            existing_locs = {}
+
+        # Build localizations dict — merge with existing
+        localizations = dict(existing_locs)  # start from what's already there
+        lang_files = [f for f in os.listdir(md_dir) if f.endswith(".txt") and f != "en.txt"]
+        added = 0
+        for fname in lang_files:
+            raw_code = fname.replace(".txt", "")
+            yt_code  = self._LANG_MAP.get(raw_code, raw_code)  # map to YT BCP-47
+            title, desc = _parse_md_txt(os.path.join(md_dir, fname))
+            if title:
+                localizations[yt_code] = {
+                    "title":       _clean(title, 100),
+                    "description": _clean(desc,  5000),
+                }
+                added += 1
+
+        if not added:
+            print(f"[YTUpload]   ⚠️  No translated MD files found in {md_dir}")
+            return {"uploaded": 0, "failed": 0}
+
+        print(f"[YTUpload]   🌍 Uploading localizations for {added} languages …")
+        try:
+            youtube.videos().update(
+                part="localizations",
+                body={"id": video_id, "localizations": localizations},
+            ).execute()
+            print(f"[YTUpload]   ✅ Localizations uploaded: {added} languages")
+            return {"uploaded": added, "failed": 0}
+        except Exception as e:
+            print(f"[YTUpload]   ❌ Localizations upload failed: {e}")
+            return {"uploaded": 0, "failed": added}
+
     def _upload_cc_files(self, youtube, video_id, output_dir, fmt):
         """Upload CC files from YT/{fmt}/CC/. Stops immediately on quota exceeded."""
         from googleapiclient.http import MediaInMemoryUpload
@@ -439,8 +534,14 @@ class YTUploadTool(BaseTool):
 
         # Check what's already on the video
         try:
-            existing      = youtube.captions().list(part="snippet", videoId=video_id).execute()
+            existing       = youtube.captions().list(part="snippet", videoId=video_id).execute()
             existing_langs = {c["snippet"]["language"] for c in existing.get("items", [])}
+        except HttpError as e:
+            if "quotaExceeded" in str(e):
+                print(f"[YTUpload]   🛑 CC quota exceeded on list() — skipping CC entirely. Try tomorrow.")
+                stats["failed"] = len([f for f in os.listdir(cc_dir) if f.endswith(".txt")])
+                return stats
+            existing_langs = set()
         except Exception:
             existing_langs = set()
 
@@ -482,13 +583,14 @@ class YTUploadTool(BaseTool):
 
             except HttpError as e:
                 if "quotaExceeded" in str(e):
-                    # Count all remaining files as failed and stop immediately
-                    remaining = len(pending) - stats["uploaded"] - stats["skipped"] - 1
+                    # Count remaining pending files (exclude already-processed ones)
+                    pending_done = stats["uploaded"] + stats["failed"]
+                    remaining = max(0, len(pending) - pending_done - 1)
                     stats["failed"] += 1 + remaining
                     stats["quota_hit"] = True
                     print(f"[YTUpload]     ❌ CC {lang_code}: quota exceeded")
                     print(f"[YTUpload]   🛑 Quota hit — stopping CC upload. "
-                          f"{stats['failed']} lang(s) skipped. Run again tomorrow to retry.")
+                          f"{stats['failed']} lang(s) failed. Run again tomorrow to retry.")
                     break
                 else:
                     print(f"[YTUpload]     ❌ CC {lang_code}: {e}")

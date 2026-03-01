@@ -11,19 +11,34 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 # All target languages for metadata translation
+# Kept top 20 by actual viewer data (YouTube 20-language limit)
+# Disabled (low views): 'cs','et','gu','mr','sr','te','ur','zh-cn'→replaced by 'zh-Hans'
 LANGUAGES = [
-    'ar', 'bn', 'bg', 'bs', 'my', 'zh-cn', 'cs', 'et', 'fr', 'de', 'el',
-    'gu', 'hi', 'id', 'it', 'ja', 'ko', 'mr', 'fa', 'pl', 'pt',
-    'ru', 'sr', 'es', 'ta', 'te', 'th', 'tr', 'uk', 'ur', 'vi'
+    'ar', 'es', 'pt', 'id', 'tr', 'vi', 'fr', 'ru',
+    'ko', 'hi', 'bn', 'it', 'fa', 'th', 'ja', 'pl',
+    'uk', 'de', 'ta', 'zh-cn'
 ]
-
 LANG_NAMES = {
-    'ar':'Arabic','bn':'Bengali','bg':'Bulgarian','bs':'Bosnian','my':'Burmese',
-    'zh-cn':'Chinese','cs':'Czech','et':'Estonian','fr':'French','de':'German',
-    'el':'Greek','gu':'Gujarati','hi':'Hindi','id':'Indonesian','it':'Italian',
-    'ja':'Japanese','ko':'Korean','mr':'Marathi','fa':'Persian','pl':'Polish',
-    'pt':'Portuguese','ru':'Russian','sr':'Serbian','es':'Spanish','ta':'Tamil',
-    'te':'Telugu','th':'Thai','tr':'Turkish','uk':'Ukrainian','ur':'Urdu','vi':'Vietnamese'
+    'ar':'Arabic',
+    'es':'Spanish',
+    'pt':'Portuguese',
+    'id':'Indonesian',
+    'tr':'Turkish',
+    'vi':'Vietnamese',
+    'fr':'French',
+    'ru':'Russian',
+    'ko':'Korean',
+    'hi':'Hindi',
+    'bn':'Bengali',
+    'it':'Italian',
+    'fa':'Persian',
+    'th':'Thai',
+    'ja':'Japanese',
+    'pl':'Polish',
+    'uk':'Ukrainian',
+    'de':'German',
+    'ta':'Tamil',
+    'zh-cn':'Chinese',
 }
 
 
