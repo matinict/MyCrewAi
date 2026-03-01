@@ -107,12 +107,14 @@ class YTUploadTool(BaseTool):
                     vid_id = _log.get("video_id", "")
                     if vid_id:
                         url = f"https://youtu.be/{vid_id}"
-                        # Check if CC still needs finishing
-                        cc_failed = _log.get("cc_failed", 0)
-                        if upload_cc and cc_failed > 0:
-                            print(f"[YTUpload] ♻️  {fmt}: Video already uploaded ({vid_id}), retrying {cc_failed} failed CC(s)")
+                        # Check if CC still needs uploading (never uploaded, or had failures)
+                        cc_failed   = _log.get("cc_failed", 0)
+                        cc_uploaded = _log.get("cc_uploaded", 0)
+                        cc_needs_upload = upload_cc and (cc_failed > 0 or cc_uploaded == 0)
+                        if cc_needs_upload:
+                            reason = "never uploaded" if cc_uploaded == 0 else f"{cc_failed} failed"
+                            print(f"[YTUpload] ♻️  {fmt}: Video already uploaded ({vid_id}), uploading CC ({reason})")
                             cc_stats = self._upload_cc_files(youtube, vid_id, output_dir, fmt)
-                            # Update log with new CC stats
                             _log["cc_uploaded"] = _log.get("cc_uploaded", 0) + cc_stats["uploaded"]
                             _log["cc_failed"]   = cc_stats["failed"]
                             _log["cc_skipped"]  = _log.get("cc_skipped", 0) + cc_stats["skipped"]
@@ -120,7 +122,7 @@ class YTUploadTool(BaseTool):
                                 json.dump(_log, _lf, indent=2)
                             results.append(
                                 f"⏭️ {fmt}: Already uploaded → {url} "
-                                f"(CC retry: +{cc_stats['uploaded']} uploaded, {cc_stats['failed']} failed)"
+                                f"(CC: +{cc_stats['uploaded']} uploaded, {cc_stats['failed']} failed)"
                             )
                         else:
                             results.append(f"⏭️ {fmt}: Already uploaded → {url}")
@@ -271,7 +273,7 @@ class YTUploadTool(BaseTool):
         from googleapiclient.http import MediaFileUpload
         import socket
 
-        title = metadata.get("title", "AI Video")[:100]
+        title = _clean_text(metadata.get("title", "AI Video"))[:100]
         raw_tags = list(metadata.get("tags", []))
 
         # Sanitize tags: strip leading #, emoji, special chars, max 30 chars each
@@ -287,6 +289,14 @@ class YTUploadTool(BaseTool):
             t = _re.sub(r'[^\x20-\x7E\u00C0-\u024F]', '', t)
             return t[:30].strip()
 
+
+        # Strip emoji from free-text fields (title, description)
+        def _clean_text(t):
+            import re as _re
+            t = str(t)
+            t = _re.sub(u'[\U00002000-\U0010FFFF]', '', t)
+            t = _re.sub(r'[^\x09\x0A\x0D\x20-\x7E\u00C0-\u024F\u0400-\u04FF]', '', t)
+            return t.strip()
 
         tags = []
         seen = set()
@@ -314,7 +324,10 @@ class YTUploadTool(BaseTool):
         body = {
             "snippet": {
                 "title":           title,
-                "description":     metadata.get("description", "")[:5000],
+                "description":     _clean_text(
+                    metadata.get("description", "") +
+                    (("\n\n" + metadata["chapters"]) if metadata.get("chapters") else "")
+                )[:5000],
                 "tags":            tags,
                 "categoryId":      category_id,
                 "defaultLanguage":      "en",
@@ -381,6 +394,37 @@ class YTUploadTool(BaseTool):
 
     # ── CC upload with quota early-exit ───────────────────────────────────────
 
+    @staticmethod
+    def _text_to_srt(text: str) -> str:
+        """Convert plain narration text to SRT subtitle format.
+        Splits text into ~10-word chunks with auto-generated timestamps."""
+        import math
+        words = text.split()
+        if not words:
+            return "1\n00:00:00,000 --> 00:00:05,000\n \n"
+
+        chunk_size = 10  # words per subtitle line
+        chunks = [words[i:i+chunk_size] for i in range(0, len(words), chunk_size)]
+        secs_per_chunk = 4.0  # approximate display time per chunk
+
+        lines = []
+        for i, chunk in enumerate(chunks):
+            start_s = i * secs_per_chunk
+            end_s   = start_s + secs_per_chunk
+
+            def _fmt(s):
+                h = int(s // 3600)
+                m = int((s % 3600) // 60)
+                sec = s % 60
+                return f"{h:02d}:{m:02d}:{int(sec):02d},{int((sec % 1)*1000):03d}"
+
+            lines.append(str(i + 1))
+            lines.append(f"{_fmt(start_s)} --> {_fmt(end_s)}")
+            lines.append(" ".join(chunk))
+            lines.append("")
+
+        return "\n".join(lines)
+
     def _upload_cc_files(self, youtube, video_id, output_dir, fmt):
         """Upload CC files from YT/{fmt}/CC/. Stops immediately on quota exceeded."""
         from googleapiclient.http import MediaInMemoryUpload
@@ -419,7 +463,9 @@ class YTUploadTool(BaseTool):
                     stats["skipped"] += 1
                     continue
 
-                media = MediaInMemoryUpload(cc_text.encode("utf-8"), mimetype="text/plain")
+                # Convert plain text to SRT format for proper YouTube CC
+                srt_content = self._text_to_srt(cc_text)
+                media = MediaInMemoryUpload(srt_content.encode("utf-8"), mimetype="application/x-subrip")
                 youtube.captions().insert(
                     part="snippet",
                     body={"snippet": {
