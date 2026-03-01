@@ -97,6 +97,8 @@ def run():
 
     # topic_slug used by tasks.yaml templates (e.g. upload_to_youtube)
     inputs['topic_slug'] = '_'.join(re.findall(r'\w+', inputs['topic'])[:4])
+    # fmt placeholder — prevents CrewAI interpolation errors in tasks not being run
+    inputs.setdefault('fmt', 'HD')
 
     # FPS validation
     fps = float(inputs.get('fps', 0.5))
