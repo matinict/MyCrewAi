@@ -425,5 +425,6 @@ share_to_social:
       ✅ X: Tweeted — tweet_id: 1234567890
     OR skip message if social_share_enabled=false.
   agent: social_share_specialist
+  dry_run: {social_share_dry_run}
   context:
     - upload_to_youtube

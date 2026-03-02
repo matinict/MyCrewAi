@@ -63,6 +63,19 @@ class SocialShareInput(BaseModel):
     start_year: int = Field(default=2015, description="Start year for bar race")
     end_year: int = Field(default=2026, description="End year for bar race")
     video_url: str = Field(default="", description="Manual video URL override")
+    dry_run: bool = Field(default=False, description="If true: generate & log post texts without posting live. Use for testing.")
+
+
+# Platform character limits for definition section
+# (total post budget minus ~400 chars for header/footer boilerplate)
+PLATFORM_DEF_LIMITS = {
+    "Facebook":  5000,   # ~63k total limit — effectively unlimited, use full text
+    "LinkedIn":  2500,   # 3k total; ~2500 left after boilerplate
+    "Instagram": 1600,   # 2200 total; ~1600 left after boilerplate
+    "X":            0,   # no room — definition omitted entirely
+    "Twitter":      0,
+    "YouTube":   2500,   # community post, generous limit
+}
 
 
 class SocialShareTool(BaseTool):
@@ -90,6 +103,7 @@ class SocialShareTool(BaseTool):
         start_year: int = 2015,
         end_year: int = 2026,
         video_url: str = "",
+        dry_run: bool = False,
     ) -> str:
         # Strip trailing/leading spaces from all string inputs
         topic = topic.strip()
@@ -103,18 +117,21 @@ class SocialShareTool(BaseTool):
         if not social_share_enabled:
             return "⏭️  Social share skipped (social_share_enabled=false)"
 
+        if dry_run:
+            print(f"[SocialShare] 🧪 DRY RUN MODE — posts will be generated and logged but NOT sent live")
+
         if social_platforms is None:
             social_platforms = ["Facebook", "LinkedIn", "X", "YouTube"]
 
         if video_formats is None:
             video_formats = ["HD"]
 
-        # ── SMART SKIP — per-platform, per-format ────────────────────────────────
+        # ── SMART SKIP — per-platform, per-format (skipped in dry_run) ───────────
         _smart_fmt = (video_formats[0] if video_formats else "HD")
         share_log_path = os.path.join(output_dir, "YT", _smart_fmt, "share_log.json")
         already_shared = set()
 
-        if os.path.exists(share_log_path):
+        if not dry_run and os.path.exists(share_log_path):
             try:
                 with open(share_log_path) as _f:
                     _log = json.load(_f)
@@ -174,7 +191,27 @@ class SocialShareTool(BaseTool):
                 print(f"[SocialShare] ℹ️  No upload log found — using manual video_url: {video_url}")
                 found_url = video_url
             else:
-                return "❌ No video URL found. Run upload_youtube_video=true first."
+                # ── Fallback: recover URL from any existing share_log.json ─────
+                for fmt_check in video_formats:
+                    for log_name in ("share_log.json", "share_log_dryrun.json"):
+                        slog_path = os.path.join(output_dir, "YT", fmt_check, log_name)
+                        if os.path.exists(slog_path):
+                            try:
+                                with open(slog_path) as _sf:
+                                    _slog = json.load(_sf)
+                                _url = _slog.get("video_url", "")
+                                if _url:
+                                    found_url = _url
+                                    fmt = fmt_check
+                                    print(f"[SocialShare] ℹ️  Recovered video URL from {log_name}: {found_url}")
+                                    break
+                            except Exception as _e:
+                                print(f"[SocialShare] ⚠️  Could not read {slog_path}: {_e}")
+                    if found_url:
+                        break
+
+        if not found_url:
+            return "❌ No video URL found. Run upload_youtube_video=true first, or set video_url manually in data.json."
 
         video_url = found_url
         topic_text = topic
@@ -189,24 +226,46 @@ class SocialShareTool(BaseTool):
         creds = self._load_credentials()
 
         # ── Build post text WITH DYNAMIC VALUES ─────────────────────────────
-        post_text = self._build_post_text(topic_text, video_url, channel, website,
-                                          short=False, start_year=start_year, end_year=end_year)
-        short_text = self._build_post_text(topic_text, video_url, channel, website,
-                                           short=True, start_year=start_year, end_year=end_year)
+        is_shorts_fmt = fmt in ("Shorts", "ShortsHD", "Shorts4K")
 
-        results = []
-        errors = []
+        # Load output/{filename}.txt — the topic definition file (HD: full, Shorts: What is section)
+        definition_txt = self._load_definition_txt(output_dir, filename)
+
+        short_text = self._build_post_text(topic_text, video_url, channel, website,
+                                           short=True, start_year=start_year, end_year=end_year,
+                                           fmt=fmt, definition=definition_txt, platform="X")
+
+        results      = []
+        errors       = []
+        post_texts   = {}   # platform -> actual post text used (for logging)
 
         for platform in social_platforms:
             p = platform.strip()
             print(f"\n[SocialShare] ── {p} ──────────────────────────")
+            # Build platform-specific post text — cc_en.txt content, smart-trimmed per platform
+            _is_x = p in ("X", "Twitter")
+            post_text = short_text if _is_x else self._build_post_text(
+                topic_text, video_url, channel, website,
+                short=False, start_year=start_year, end_year=end_year,
+                fmt=fmt, definition=definition_txt, platform=p
+            )
+            post_texts[p] = post_text   # save for log
+            print(f"[SocialShare] 📝 Post text ({len(post_text)} chars):\n{post_text[:200]}{'...' if len(post_text)>200 else ''}")
+
+            if dry_run:
+                # ── DRY RUN: skip API call, record as dry_run result ──────────
+                r = f"[DRY RUN] Post ready ({len(post_text)} chars) — not sent"
+                results.append(f"✅ {p}: {r}")
+                print(f"[SocialShare] 🧪 {p}: {r}")
+                continue
+
             try:
                 if p == "Facebook":
                     r = self._post_facebook(creds.get("Facebook", {}), post_text, video_url, image_file)
                 elif p == "LinkedIn":
                     r = self._post_linkedin(creds.get("LinkedIn", {}), post_text, video_url, image_file)
-                elif p in ("X", "Twitter"):
-                    r = self._post_x(creds.get("X", {}), short_text, image_file)
+                elif _is_x:
+                    r = self._post_x(creds.get("X", {}), post_text, image_file)
                 elif p == "YouTube":
                     r = self._post_youtube_community(creds.get("YouTube", {}), post_text, video_url)
                 elif p == "Instagram":
@@ -220,9 +279,11 @@ class SocialShareTool(BaseTool):
                 print(f"[SocialShare] ❌ {p}: {str(e)}")
 
         self._save_share_log(output_dir, topic_text, video_url, fmt, social_platforms,
-                            results, errors, channel, start_year, end_year)
+                            results, errors, channel, start_year, end_year, post_texts,
+                            dry_run=dry_run)
 
-        out = f"📢 Social Share — {len(results)} posted, {len(errors)} failed\n"
+        mode = "🧪 DRY RUN" if dry_run else "📢 Social Share"
+        out = f"{mode} — {len(results)} {'previewed' if dry_run else 'posted'}, {len(errors)} failed\n"
         out += f"   Video URL: {video_url}\n"
         out += f"   Channel: @{channel}\n"
         out += f"   Year Range: {start_year}–{end_year}\n"
@@ -237,29 +298,189 @@ class SocialShareTool(BaseTool):
             out += "\n\n⚠️ Errors:\n" + "\n".join(f"   {e}" for e in errors)
         return out
 
-    def _build_post_text(self, topic, url, channel, website, short=False,
-                         start_year=2015, end_year=2026):
-        """Build social post text with DYNAMIC channel, year range, and website."""
-        hashtags = "#AI #DataVisualization #BarRace #MachineLearning #TechTrends"
-        year_range = f"{start_year}–{end_year}"
+    def _load_definition_txt(self, output_dir: str, filename: str) -> str:
+        """
+        Load output/{filename}.txt — the topic definition file.
+        Searches both absolute (anchored to project root) and relative paths.
+        Returns full text stripped, or empty string if not found.
+        """
+        import glob as _glob
 
+        _tool_dir     = os.path.dirname(os.path.abspath(__file__))
+        _pkg_dir      = os.path.dirname(_tool_dir)
+        _src_dir      = os.path.dirname(_pkg_dir)
+        _project_root = os.path.dirname(_src_dir)
+        _output_root  = os.path.join(_project_root, "output")
+
+        candidates = [
+            os.path.join(_output_root, f"{filename}.txt"),
+            os.path.join("output", f"{filename}.txt"),
+            os.path.join(output_dir, f"{filename}.txt"),
+            f"output/{filename}.txt",
+        ]
+
+        print(f"[SocialShare] 📖 Looking for definition txt: {filename}.txt")
+        for path in candidates:
+            exists = os.path.exists(path)
+            print(f"[SocialShare]   {'✅' if exists else '❌'} {path}")
+            if exists:
+                try:
+                    text = open(path, encoding="utf-8").read().strip()
+                    print(f"[SocialShare] ✅ Definition txt loaded: {len(text)} chars")
+                    return text
+                except Exception as e:
+                    print(f"[SocialShare] Warning: could not read {path}: {e}")
+
+        # Glob fallback
+        for pat in [
+            os.path.join(_output_root, f"{filename[:6]}*.txt"),
+            os.path.join("output", f"{filename[:6]}*.txt"),
+        ]:
+            matches = sorted(_glob.glob(pat))
+            if matches:
+                path = matches[0]
+                print(f"[SocialShare] ⚠️  Glob fallback: {path}")
+                try:
+                    text = open(path, encoding="utf-8").read().strip()
+                    print(f"[SocialShare] ✅ Definition txt loaded via glob: {len(text)} chars")
+                    return text
+                except Exception as e:
+                    print(f"[SocialShare] Warning: glob read failed: {e}")
+
+        print(f"[SocialShare] ⚠️  No definition txt found for: {filename}.txt")
+        return ""
+
+    def _narration_to_viral(self, raw, topic, fmt, platform):
+        """Shorts: WHAT IS section only. HD: full txt trimmed to platform limit."""
+        import re as _re
+        if not raw: return ""
+        is_shorts = fmt in ("Shorts", "ShortsHD", "Shorts4K")
+        limit = PLATFORM_DEF_LIMITS.get(platform, 1000)
+        if limit == 0: return ""
+
+        if is_shorts:
+            # Extract WHAT IS section — handles both formats:
+            #   A) Same line:  "WHAT IS X? Content here..."
+            #   B) Next lines: "WHAT IS X?" + newline + "Content here..."
+            section = ""
+            all_lines = raw.splitlines()
+            for i, line in enumerate(all_lines):
+                stripped = line.strip()
+                if not _re.match(r"WHAT IS", stripped, _re.IGNORECASE):
+                    continue
+                # Grab inline content after the "?"
+                q_pos = stripped.find("?")
+                inline = stripped[q_pos + 1:].strip() if q_pos != -1 else stripped
+                # Collect continuation lines until next section header or separator
+                extra = []
+                for next_line in all_lines[i + 1:]:
+                    ns = next_line.strip()
+                    # Stop at next ALLCAPS header like "WHY DOES IT MATTER?"
+                    if ns and _re.match(r"[A-Z][A-Z ]{3,}", ns):
+                        break
+                    # Stop at separator lines
+                    if ns and len(ns) > 4 and len(set(ns)) <= 3:
+                        break
+                    if ns:
+                        extra.append(ns)
+                parts = ([inline] if inline else []) + extra
+                section = " ".join(parts).strip()
+                break
+            if len(section) > 400:
+                cut = section.rfind(". ", 0, 400)
+                section = section[:cut + 1] if cut > 0 else section[:400]
+            return section
+
+        # HD: full txt trimmed to platform limit at paragraph/sentence boundary
+        text = raw
+        if len(text) <= limit: return text
+        cut = text.rfind("\n\n", 0, limit)
+        if cut > limit * 0.5: return text[:cut].strip()
+        cut = text.rfind(". ", 0, limit)
+        if cut > limit * 0.5: return text[:cut + 1].strip()
+        return text[:limit].strip()
+
+    def _smart_trim_definition(self, full_text: str, platform: str, fmt: str, topic: str) -> str:
+        """Wrapper — converts raw cc_en.txt narration to viral post copy via _narration_to_viral."""
+        return self._narration_to_viral(full_text, topic, fmt, platform)
+
+    def _build_post_text(self, topic, url, channel, website, short=False,
+                         start_year=2015, end_year=2026, fmt="HD", definition="",
+                         platform="LinkedIn"):
+        """
+        Build clean social post. No emojis.
+
+        Shorts:
+            [Short] {topic} -- Bar Race {year_range}
+            Watch now: {url}
+
+            What is {topic}?
+            {WHAT IS section from txt}
+
+            #{hashtags}
+
+        HD:
+            {topic} -- Bar Race {year_range}
+            Watch now: {url}
+
+            {full txt content, platform-trimmed}
+
+            Subscribe to @{channel}
+            #{hashtags}
+        """
+        year_range = f"{start_year}-{end_year}"
+        is_shorts  = fmt in ("Shorts", "ShortsHD", "Shorts4K")
+        txt_body   = self._smart_trim_definition(definition, platform, fmt, topic)
+
+        # X / Twitter — compact only
         if short:
-            text = f"📊 {topic} — Bar Race {year_range}\n{url}\n\n#AI #DataViz #BarRace"
+            if is_shorts:
+                text = (
+                    f"[Short] {topic} {year_range} in 60 seconds. "
+                    f"Who dominated? Find out: {url} "
+                    f"#Shorts #AI #BarRace #DataViz"
+                )
+            else:
+                text = (
+                    f"{topic} {year_range} -- "
+                    f"Who led the race? Full breakdown: {url} "
+                    f"#AI #DataVisualization #BarRace #MachineLearning"
+                )
             return text[:280]
 
-        lines = [
-            f"📊 {topic} — Bar Race {year_range}",
-            " ",
-            f"Which approach dominated? Watch the data race unfold year by year! 🚀",
-            " ",
-            f"🎬 Watch now: {url}",
-            " ",
-            f"📺 Subscribe to @{channel} for more data-driven insights.",
-        ]
-        if website:
-            lines.append(f"🌐 {website}")
-        lines += [" ", hashtags]
-        return "\n".join(lines)
+        if is_shorts:
+            lines = [
+                f"[Short] {topic} -- Bar Race {year_range}",
+                "",
+                f"Watch now: {url}",
+            ]
+            if txt_body:
+                lines += [
+                    "",
+                    f"What is {topic}?",
+                    txt_body,
+                ]
+            if website:
+                lines.append(f"More: {website}")
+            lines += ["", "#Shorts #AI #DataVisualization #BarRace #MachineLearning #TechTrends"]
+
+        else:
+            lines = [
+                f"{topic} -- Bar Race {year_range}",
+                "",
+                f"Watch now: {url}",
+            ]
+            if txt_body:
+                lines += ["", txt_body]
+            lines += [
+                "",
+                f"Subscribe to @{channel} for more data-driven tech animations.",
+            ]
+            if website:
+                lines.append(f"More: {website}")
+            lines += ["", "#AI #MachineLearning #LLM #DataVisualization #BarRace #TechTrends"]
+
+        return chr(10).join(lines)
 
     def _post_facebook(self, creds: dict, text: str, url: str, image_path: Optional[str] = None) -> str:
         """Post to Facebook Page via Graph API with optional image attachment."""
@@ -563,58 +784,102 @@ class SocialShareTool(BaseTool):
         return {}
 
     def _save_share_log(self, output_dir, topic, video_url, fmt, platforms,
-                       results, errors, channel, start_year, end_year):
-        """Save share results to output/{filename}/YT/{fmt}/share_log.json + share_log.txt"""
+                       results, errors, channel, start_year, end_year, post_texts=None,
+                       dry_run=False):
+        """
+        Save share results to:
+          YT/{fmt}/share_log.json        — live run  (machine-readable)
+          YT/{fmt}/share_log_dryrun.json — dry run   (machine-readable)
+          YT/{fmt}/share_log.txt         — live run  (human-readable with full post bodies)
+          YT/{fmt}/share_log_dryrun.txt  — dry run   (human-readable with full post bodies)
+        """
         import datetime
+        post_texts = post_texts or {}
         log_dir = os.path.join(output_dir, "YT", fmt)
         os.makedirs(log_dir, exist_ok=True)
+        suffix = "_dryrun" if dry_run else ""
 
         parsed_results = []
         for r in results:
             platform = r.replace("✅ ", "").split(": ")[0].strip()
             detail = ": ".join(r.split(": ")[1:]).strip()
-            parsed_results.append({"platform": platform, "status": "success", "detail": detail})
+            parsed_results.append({
+                "platform":  platform,
+                "status":    "success",
+                "detail":    detail,
+                "post_text": post_texts.get(platform, ""),
+            })
         for e in errors:
             platform = e.replace("❌ ", "").split(": ")[0].strip()
             detail = ": ".join(e.split(": ")[1:]).strip()
-            parsed_results.append({"platform": platform, "status": "failed", "error": detail})
+            parsed_results.append({
+                "platform":  platform,
+                "status":    "failed",
+                "error":     detail,
+                "post_text": post_texts.get(platform, ""),
+            })
 
         data = {
-            "topic": topic,
-            "channel": channel,
+            "topic":      topic,
+            "channel":    channel,
             "year_range": f"{start_year}–{end_year}",
-            "shared_at": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            "video_url": video_url,
-            "format": fmt,
-            "platforms": platforms,
-            "success": len(results),
-            "failed": len(errors),
-            "shares": parsed_results,
+            "shared_at":  datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            "video_url":  video_url,
+            "format":     fmt,
+            "dry_run":    dry_run,
+            "platforms":  platforms,
+            "success":    len(results),
+            "failed":     len(errors),
+            "shares":     parsed_results,
         }
 
-        json_path = os.path.join(log_dir, "share_log.json")
-        with open(json_path, "w") as f:
-            json.dump(data, f, indent=2)
+        json_path = os.path.join(log_dir, f"share_log{suffix}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
 
-        sep = "━" * 52
+        # Dry run ALSO writes share_log.json so smart-skip blocks a real accidental run
+        if dry_run:
+            real_log_path = os.path.join(log_dir, "share_log.json")
+            with open(real_log_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            print(f"[SocialShare] 🧪 Dry run guard written → {real_log_path}")
+
+        # ── Human-readable .txt log with full post bodies ─────────────────────
+        sep     = "━" * 60
+        sep_mid = "─" * 60
+        now_str = data["shared_at"]
+        mode_label = "🧪  DRY RUN — POST PREVIEW" if dry_run else "📢  SOCIAL SHARE LOG"
         txt_lines = [
             sep,
-            "📢 SOCIAL SHARE LOG",
-            f"Topic     : {topic}",
-            f"Channel   : @{channel}",
-            f"Year Range: {start_year}–{end_year}",
-            f"Shared at : {data['shared_at']}",
-            f"Video URL : {video_url}",
-            f"Success   : {len(results)} / {len(platforms)}",
-            sep, " ",
+            mode_label,
+            sep,
+            f"Topic      : {topic}",
+            f"Channel    : @{channel}",
+            f"Format     : {fmt}",
+            f"Year Range : {start_year}–{end_year}",
+            f"Shared at  : {now_str}",
+            f"Video URL  : {video_url}",
+            f"Result     : {len(results)} posted  |  {len(errors)} failed",
+            sep,
+            "",
         ]
-        for s in parsed_results:
-            icon = "✅" if s["status"] == "success" else "❌"
-            key = "detail" if s["status"] == "success" else "error"
-            txt_lines.append(f"{icon} {s['platform']}: {s.get(key,'')}")
-        txt_lines += [" ", sep]
 
-        txt_path = os.path.join(log_dir, "share_log.txt")
+        for s in parsed_results:
+            icon   = "✅" if s["status"] == "success" else "❌"
+            detail = s.get("detail") or s.get("error", "")
+            p_text = s.get("post_text", "").strip()
+
+            txt_lines += [
+                f"{icon}  {s['platform']}  —  {detail}",
+                sep_mid,
+                "POST CONTENT:",
+                p_text if p_text else "(no post text recorded)",
+                "",
+            ]
+
+        txt_lines += [sep, ""]
+
+        txt_path = os.path.join(log_dir, f"share_log{suffix}.txt")
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write("\n".join(txt_lines))
 
