@@ -133,7 +133,7 @@ class YTUploadTool(BaseTool):
                                 json.dump(_log, _lf, indent=2)
                             notes.append(f"CC: +{cc_stats['uploaded']} uploaded, {cc_stats['failed']} failed")
                         else:
-                            print(f"[YTUpload] ⏭️  {fmt}: CC complete ({cc_uploaded}/{cc_total_on_disk})")
+                            print(f"[YTUpload] ⏭️  {fmt}: CC complete ({cc_on_yt}/{cc_total_on_disk})")
 
                         # ── Localizations: always re-upload to keep in sync ────
                         _loc = self._upload_localizations(youtube, vid_id, output_dir, fmt)
@@ -296,24 +296,7 @@ class YTUploadTool(BaseTool):
         from googleapiclient.http import MediaFileUpload
         import socket
 
-        title = _clean_text(metadata.get("title", "AI Video"))[:100]
-        raw_tags = list(metadata.get("tags", []))
-
-        # Sanitize tags: strip leading #, emoji, special chars, max 30 chars each
-        def _clean_tag(t):
-            import re as _re
-            t = str(t).strip().lstrip('#')
-            # Remove emoji and symbols (U+2000 and above covers all emoji)
-            t = _re.sub(u'[\U00002000-\U0010FFFF]', '', t)
-            # Remove YouTube-rejected chars
-            t = _re.sub(r'[<>&]', '', t)
-            t = t.replace('"', '').replace("'", '')
-            # Keep only safe printable chars
-            t = _re.sub(r'[^\x20-\x7E\u00C0-\u024F]', '', t)
-            return t[:30].strip()
-
-
-        # Strip emoji from free-text fields (title, description)
+        # Strip emoji / non-printable chars from free-text fields (title, description)
         def _clean_text(t):
             import re as _re
             t = str(t)
@@ -415,6 +398,25 @@ class YTUploadTool(BaseTool):
         print(f"[YTUpload] ✅ Upload complete → https://youtu.be/{video_id} ({int(time.time()-t0)}s)")
         return video_id
 
+
+        title = _clean_text(metadata.get("title", "AI Video"))[:100]
+        raw_tags = list(metadata.get("tags", []))
+
+        # Sanitize tags: strip leading #, emoji, special chars, max 30 chars each
+        def _clean_tag(t):
+            import re as _re
+            t = str(t).strip().lstrip('#')
+            # Remove emoji and symbols (U+2000 and above covers all emoji)
+            t = _re.sub(u'[\U00002000-\U0010FFFF]', '', t)
+            # Remove YouTube-rejected chars
+            t = _re.sub(r'[<>&]', '', t)
+            t = t.replace('"', '').replace("'", '')
+            # Keep only safe printable chars
+            t = _re.sub(r'[^\x20-\x7E\u00C0-\u024F]', '', t)
+            return t[:30].strip()
+
+
+        # Strip emoji from free-text fields (title, description)
     # ── CC upload with quota early-exit ───────────────────────────────────────
 
     @staticmethod
@@ -448,11 +450,16 @@ class YTUploadTool(BaseTool):
 
         return "\n".join(lines)
 
-    # Map our ISO codes → YouTube BCP-47 localization codes
+    # Map our ISO file codes → YouTube BCP-47 codes (used for BOTH CC and localizations)
+    # CRITICAL: both must use the same code or YouTube creates duplicate rows per language
     _LANG_MAP = {
-        "zh-cn": "zh-Hans",  # Simplified Chinese
-        "zh-tw": "zh-Hant",  # Traditional Chinese
-        "sr":    "sr-Latn",  # Serbian Latin
+        "zh-cn":    "zh-Hans",   # Simplified Chinese
+        "zh-tw":    "zh-Hant",   # Traditional Chinese
+        "sr":       "sr-Latn",   # Serbian Latin
+        "he":       "iw",        # Hebrew (YouTube still uses legacy "iw")
+        "id":       "id",        # Indonesian (no change, but explicit)
+        "fil":      "fil",       # Filipino
+        "nb":       "no",        # Norwegian Bokmål → YouTube uses "no"
     }
 
     def _upload_localizations(self, youtube, video_id, output_dir, fmt):
@@ -546,8 +553,10 @@ class YTUploadTool(BaseTool):
             existing_langs = set()
 
         cc_files = sorted(f for f in os.listdir(cc_dir) if f.endswith(".txt"))
+        # Map raw filename codes to BCP-47 before comparing with existing_langs
         pending  = [f for f in cc_files
-                    if f.replace(".txt", "") not in existing_langs]
+                    if self._LANG_MAP.get(f.replace(".txt",""), f.replace(".txt",""))
+                    not in existing_langs]
         already  = len(cc_files) - len(pending)
 
         print(f"[YTUpload]   📝 CC: {len(cc_files)} total | {already} already uploaded | {len(pending)} to upload")
@@ -555,7 +564,8 @@ class YTUploadTool(BaseTool):
             stats["skipped"] += already
 
         for filename in pending:
-            lang_code = filename.replace(".txt", "")
+            raw_code  = filename.replace(".txt", "")
+            lang_code = self._LANG_MAP.get(raw_code, raw_code)  # map to YouTube BCP-47
             file_path = os.path.join(cc_dir, filename)
 
             try:
@@ -572,8 +582,8 @@ class YTUploadTool(BaseTool):
                     body={"snippet": {
                         "videoId":  video_id,
                         "language": lang_code,
-                        "name":     lang_code,
-                        "isDraft":  False,
+                        "name":     "",        # empty = YouTube uses the language display name
+                        "isDraft":  False,     # no suffix like "Arabic - ar" (was causing double rows)
                     }},
                     media_body=media
                 ).execute()
