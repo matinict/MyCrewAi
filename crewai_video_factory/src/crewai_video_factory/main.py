@@ -84,41 +84,53 @@ def load_config():
         # kickoff — even tasks not in final_tasks. Any missing key raises
         # a ValueError. Set harmless defaults here so interpolation never fails.
         _task_defaults = {
-            'animation_styles':        [],
-            'use_existing_csv':        False,
-            'definition_enabled':      False,
-            'use_existing_definition': False,
-            'definition_max_chars':    1500,
-            'definition_video':        False,
-            'intro_enabled':           False,
-            'intro_duration':          7,
-            'intro_duration_hd':       10,
-            'bar_race_video_enabled':  False,
-            'bar_merge_enabled':       False,
-            'video_enabled':           False,
-            'audio_enabled':           False,
-            'audio_speed':             1.0,
-            'audio_speed_hd':          1.0,
-            'merge_audio_video':       False,
-            'bar_race_audio_enabled':  False,
-            'generate_youtube_metadata': False,
-            'upload_youtube_video':    False,
-            'upload_privacy':          'private',
-            'upload_category_id':      '28',
-            'upload_cc':               False,
-            'upload_notify_subscribers': False,
+            # animation_config
+            'animation_styles':           [],
+            'use_existing_csv':           False,
+            'definition_enabled':         False,
+            'use_existing_definition':    False,
+            'definition_max_chars':       1500,
+            'definition_video':           False,
+            'intro_enabled':              False,
+            'intro_duration':             7,
+            'intro_duration_hd':          10,
+            'bar_race_video_enabled':     False,
+            'bar_merge_enabled':          False,
+            'video_enabled':              False,
+            'audio_enabled':              False,
+            'audio_speed':                1.0,
+            'audio_speed_hd':             1.0,
+            'merge_audio_video':          False,
+            'bar_race_audio_enabled':     False,
+            # metadata_prep_config
+            'generate_youtube_metadata':  False,
+            # publisher_config
+            'upload_youtube_video':       False,
+            'upload_privacy':             'private',
+            'upload_category_id':         '28',
+            'upload_cc':                  False,
+            'upload_notify_subscribers':  False,
             'upload_client_secrets_file': 'client_secrets.json',
-            'upload_token_file':       'token.json',
-            'social_share_enabled':    False,
-            'social_share_dry_run':    False,
-            'social_platforms':        [],
-            'watermark_enabled':       False,
-            'watermark_text':          '',
-            'watermark_opacity':       60,
-            'video_formats':           ['Shorts'],
-            'fps_hd_offset':           1.0,
-            'channel_lower':           '',
-            'website':                 '',
+            'upload_token_file':          'token.json',
+            # social_config
+            'social_share_enabled':       False,
+            'social_share_dry_run':       False,
+            'social_platforms':           [],
+            # watermark / branding
+            'watermark_enabled':          False,
+            'watermark_text':             '',
+            'watermark_opacity':          60,
+            # core fields with safe defaults
+            'video_formats':              ['Shorts'],
+            'fps_hd_offset':              1.0,
+            'channel_lower':              '',
+            'website':                    '',
+            'use_label_mappings':         False,
+            # computed at run() — must exist for tasks.yaml interpolation
+            'topic_slug':                 '',
+            'filename':                   '',
+            'output_dir':                 '',
+            'fmt':                        'HD',
         }
         for k, v in _task_defaults.items():
             config.setdefault(k, v)
@@ -156,6 +168,10 @@ def run():
     output_dir = f"output/{inputs['filename']}"
     os.makedirs(output_dir, exist_ok=True)
     inputs['output_dir'] = output_dir
+
+    # Required by tasks.yaml templates — must be set before kickoff
+    inputs['topic_slug'] = '_'.join(re.findall(r'\w+', inputs['topic'])[:4])
+    inputs.setdefault('fmt', 'HD')
 
     # FPS validation
     fps = float(inputs.get('fps', 0.5))
