@@ -1,56 +1,71 @@
 {
-  "topic": "LLM Optimization (Quantization)",
+  "topic": "LLM Deployment",
   "start": 2020,
   "end": 2026,
   "granularity": "yearly",
-  "animation_styles": [
-    "bar_race"
-  ],
-  "video_formats": [
-    "HD"
-  ],
+  "video_formats": ["Shorts"],
   "use_label_mappings": false,
   "fps": 4.9,
   "fps_hd_offset": 1.37,
-  "video_fps": 30,
-  "use_existing_csv": true,
-  "definition_enabled": true,
-  "use_existing_definition": true,
-  "definition_max_chars": 1500,
-  "definition_video": false,
-  "intro_enabled": false,
-  "intro_duration": 7,
-  "intro_duration_hd": 10,
-  "bar_race_video_enabled": false,
-  "bar_merge_enabled": false,
-  "video_enabled": false,
-  "audio_enabled": false,
   "audio_speed": 1.1,
   "audio_speed_hd": 1.0,
-  "merge_audio_video": false,
-  "generate_youtube_metadata": false,
-  "upload_youtube_video": true,
-  "upload_privacy": "private",
-  "upload_category_id": "28",
-  "upload_cc": true,
-  "upload_notify_subscribers": false,
-  "upload_client_secrets_file": "client_secrets.json",
-  "upload_token_file": "token.json",
-  "social_share_enabled": false,
-  "social_share_dry_run": false,
-  "social_platforms": ["LinkedIn","Instagram","Facebook"],
+  "video_fps": 30,
   "channel": "PlayOwnAi",
   "channel_lower": "playownai",
   "website": "youtube.com/@PlayOwnAi",
   "watermark_enabled": true,
   "watermark_text": "@PlayOwnAi",
   "watermark_opacity": 60,
-  "llm_researcher": "deepseek/deepseek-chat",
-  "llm_definition": "deepseek/deepseek-chat",
-  "llm_csv": "deepseek/deepseek-chat",
-  "llm_video": "ollama/llama3.1:8b",
-  "llm_audio": "ollama/deepseek-r1:1.5b",
-  "llm_youtube": "ollama/qwen2.5:latest",
-  "llm_upload": "ollama/qwen2.5-coder:3b",
-  "llm_embed": "ollama/nomic-embed-text:latest"
+
+"animation": false,
+  "animation_config": {
+    "animation_styles": [ "bar_race" ],
+      "use_existing_csv": true,
+      "definition_enabled": true,
+      "use_existing_definition": true,
+      "definition_max_chars": 1500,
+      "definition_video": true,
+      "intro_enabled": true,
+      "intro_duration": 7,
+      "intro_duration_hd": 10,
+      "bar_race_video_enabled": true,
+      "bar_merge_enabled": true,
+      "video_enabled": false,
+      "audio_enabled": false,
+      "merge_audio_video": false,
+      "llm_researcher": "deepseek/deepseek-chat",
+      "llm_definition": "deepseek/deepseek-chat",
+      "llm_csv": "deepseek/deepseek-chat",
+      "llm_video": "ollama/llama3.1:8b",
+      "llm_audio": "ollama/deepseek-r1:1.5b"
+    },
+
+"metadata_prep": true,
+  "metadata_prep_config": {
+    "generate_youtube_metadata": true
+  },
+
+"publisher": false,
+  "publisher_config": {
+    "upload_youtube_video": true,
+    "upload_privacy": "private",
+    "upload_category_id": "28",
+    "upload_cc": true,
+    "upload_notify_subscribers": false,
+    "upload_client_secrets_file": "client_secrets.json",
+    "upload_token_file": "token.json",
+    "llm_youtube": "ollama/qwen2.5:latest",
+    "llm_upload": "ollama/qwen2.5-coder:3b",
+    "llm_embed": "ollama/nomic-embed-text:latest"
+  },
+
+"social": false,
+  "social_config": {
+    "social_share_enabled": true,
+    "social_share_dry_run": false,
+    "social_platforms": ["LinkedIn","Instagram","Facebook"],
+    "llm_social": "ollama/nomic-embed-text:latest"
+
+  }
+
 }

@@ -83,9 +83,12 @@ define_topic:
 
     WHAT YOU WILL SEE IN THIS RACE
     [2 sentences on players, trends, and what to watch for]
+
+    Keep the total definition under {definition_max_chars} characters.
   expected_output: >
     The full definition text as plain prose — no tool calls, no JSON.
     Starting with "WHAT IS {topic}?" and ending with "WHAT YOU WILL SEE IN THIS RACE".
+    Must be under {definition_max_chars} characters total.
   agent: definition_specialist
 
 create_definition_video:
@@ -103,6 +106,7 @@ create_definition_video:
       channel: "{channel}"
       watermark_enabled: {watermark_enabled}
       watermark_text: "{watermark_text}"
+      watermark_opacity: {watermark_opacity}
 
     NOTE: filename must be "{filename}" (e.g. "LLMAlignmentRLHF") — NOT "definition_video_LLMAlignmentRLHF".
     The tool reads output/{filename}.txt automatically.

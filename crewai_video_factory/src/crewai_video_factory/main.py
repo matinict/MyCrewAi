@@ -2,9 +2,10 @@
 """
 🔥 ONE-COMMAND VIDEO FACTORY 🔥
 Usage via CrewAI CLI:
-  crewai run
+crewai run
 Or directly:
-  python main.py
+python main.py
+
 Configuration: Edit input/data.json to customize settings
 """
 import os
@@ -13,27 +14,27 @@ import json
 import re
 import warnings
 import logging
-from crewai_video_factory.crew import CrewaiVideoFactory
 
+from crewai_video_factory.crew import CrewaiVideoFactory
 # Silence Pydantic warnings
 warnings.filterwarnings("ignore", message=".*skip_file_prefixes.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
-
 # Silence LiteLLM proxy server import errors (fastapi/uvicorn not needed for client use)
 logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", message=".*fastapi.*")
 warnings.filterwarnings("ignore", message=".*litellm.*proxy.*")
-
 import os
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"  # prevents proxy server import
 
 def load_config():
     """Load configuration from input/data.json"""
     config_path = "input/data.json"
+
     if not os.path.exists(config_path):
         print("❌ Configuration file not found: input/data.json")
         print("📝 Please create input/data.json with your settings")
         print("📖 See input/data.schema.json for available options\n")
+
         # Create example file
         example_config = {
             "topic": "Programming Language",
@@ -51,6 +52,7 @@ def load_config():
             "merge_audio_video": True,
             "generate_youtube_metadata": True
         }
+
         os.makedirs("input", exist_ok=True)
         with open(config_path, 'w') as f:
             json.dump(example_config, f, indent=2)
@@ -61,6 +63,66 @@ def load_config():
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
+        # ── Parent-switch-aware flattening ────────────────────────────────
+        # When switch=true  → hoist all nested block keys to top level
+        # When switch=false → force master flag to False, discard nested content
+        _block_map = [
+            ("animation",     "animation_config",     "bar_race_video_enabled"),
+            ("metadata_prep", "metadata_prep_config", "generate_youtube_metadata"),
+            ("publisher",     "publisher_config",     "upload_youtube_video"),
+            ("social",        "social_config",        "social_share_enabled"),
+        ]
+        for _switch, _block, _flag in _block_map:
+            _nested = config.pop(_block, None)
+            if config.get(_switch, False):
+                if isinstance(_nested, dict):
+                    config.update(_nested)
+            else:
+                config[_flag] = False  # guarantee gate flag is off
+        # ── Safe defaults for ALL tasks.yaml template variables ─────────
+        # CrewAI interpolates {placeholders} in ALL task descriptions at
+        # kickoff — even tasks not in final_tasks. Any missing key raises
+        # a ValueError. Set harmless defaults here so interpolation never fails.
+        _task_defaults = {
+            'animation_styles':        [],
+            'use_existing_csv':        False,
+            'definition_enabled':      False,
+            'use_existing_definition': False,
+            'definition_max_chars':    1500,
+            'definition_video':        False,
+            'intro_enabled':           False,
+            'intro_duration':          7,
+            'intro_duration_hd':       10,
+            'bar_race_video_enabled':  False,
+            'bar_merge_enabled':       False,
+            'video_enabled':           False,
+            'audio_enabled':           False,
+            'audio_speed':             1.0,
+            'audio_speed_hd':          1.0,
+            'merge_audio_video':       False,
+            'bar_race_audio_enabled':  False,
+            'generate_youtube_metadata': False,
+            'upload_youtube_video':    False,
+            'upload_privacy':          'private',
+            'upload_category_id':      '28',
+            'upload_cc':               False,
+            'upload_notify_subscribers': False,
+            'upload_client_secrets_file': 'client_secrets.json',
+            'upload_token_file':       'token.json',
+            'social_share_enabled':    False,
+            'social_share_dry_run':    False,
+            'social_platforms':        [],
+            'watermark_enabled':       False,
+            'watermark_text':          '',
+            'watermark_opacity':       60,
+            'video_formats':           ['Shorts'],
+            'fps_hd_offset':           1.0,
+            'channel_lower':           '',
+            'website':                 '',
+        }
+        for k, v in _task_defaults.items():
+            config.setdefault(k, v)
+
         return config
     except json.JSONDecodeError as e:
         print(f"❌ Invalid JSON in {config_path}: {e}")
@@ -95,17 +157,12 @@ def run():
     os.makedirs(output_dir, exist_ok=True)
     inputs['output_dir'] = output_dir
 
-    # topic_slug used by tasks.yaml templates (e.g. upload_to_youtube)
-    inputs['topic_slug'] = '_'.join(re.findall(r'\w+', inputs['topic'])[:4])
-    # fmt placeholder — prevents CrewAI interpolation errors in tasks not being run
-    inputs.setdefault('fmt', 'HD')
-
     # FPS validation
     fps = float(inputs.get('fps', 0.5))
     if fps < 0.1 or fps > 30.0:
         print(f"⚠️  Invalid FPS {fps}. Clamping to valid range (0.1-30.0)")
         fps = max(0.1, min(30.0, fps))
-        inputs['fps'] = fps
+    inputs['fps'] = fps
 
     # ===== USE_EXISTING_CSV HANDLING =====
     csv_path = f"output/{inputs['filename']}.csv"
@@ -119,7 +176,16 @@ def run():
     print(f"📁 Output Subdirectory: {output_dir}/")
     print(f"⏱️  Speed: {fps} seconds per period")
 
-    if use_existing:
+    if not inputs.get('animation', False):
+        # Animation is OFF — CSV is only needed by animation tasks.
+        # metadata_prep/publisher/social all work with an existing CSV.
+        if os.path.exists(csv_path):
+            print("⭐️  Animation OFF — using existing CSV (research skipped)")
+        else:
+            print("⚠️  Animation OFF — no CSV found, research will run to generate one")
+        inputs['_skip_research'] = os.path.exists(csv_path)
+        inputs['_skip_csv']      = os.path.exists(csv_path)
+    elif use_existing:
         if not os.path.exists(csv_path):
             print(f"⚠️  use_existing_csv=True but CSV not found at {csv_path}")
             print("🔄 Auto-generating CSV data instead...")
@@ -134,24 +200,57 @@ def run():
         inputs['_skip_research'] = False
         inputs['_skip_csv'] = False
 
-    print(f"🎨 Animations: {', '.join(inputs['animation_styles'])}")
     print(f"📱 Formats: {', '.join(inputs['video_formats'])}")
-    print(f"🎬 Video Enabled: {inputs.get('video_enabled', True)}")
-    print(f"✨ Bar Race Video Enabled: {inputs.get('bar_race_video_enabled', False)}")
-    print(f"🎬 Intro Clip Enabled: {inputs.get('intro_enabled', False)}")
-    print(f"🔊 Audio Enabled: {inputs.get('audio_enabled', False)}")
-    print(f"📹 Merge Audio-Video: {inputs.get('merge_audio_video', False)}")
-    print(f"📺 YouTube Metadata: {inputs.get('generate_youtube_metadata', False)}")
-    upload_on = inputs.get('upload_youtube_video', False)
-    print(f"📤 YouTube Upload:   {upload_on}" + (f" [{inputs.get('upload_privacy','private')}]" if upload_on else ""))
-    social_on = inputs.get('social_share_enabled', False)
-    _plats = ", ".join(inputs.get('social_platforms', [])) if social_on else ""
-    print(f"📢 Social Share:     {social_on}" + (f" [{_plats}]" if social_on else ""))
-    print(f"🎬 Definition Video: {inputs.get('definition_video', False)}")
 
-    # LLM overrides banner
-    llm_keys = ['llm_researcher', 'llm_definition', 'llm_csv', 'llm_video', 'llm_audio', 'llm_youtube', 'llm_upload', 'llm_social']
-    llm_overrides = {k: inputs[k] for k in llm_keys if inputs.get(k) and str(inputs[k]).strip().lower() not in ('null','none','')}
+    # ── Animation block ──────────────────────────────────────
+    anim_on = inputs.get('animation', False)
+    print(f"🎬 Animation:        {anim_on}")
+    if anim_on:
+        styles = ', '.join(inputs.get('animation_styles', []) or ['(none)'])
+        print(f"   🎨 Styles:          {styles}")
+        print(f"   📊 Use Existing CSV:{inputs.get('use_existing_csv', False)}")
+        print(f"   📖 Definition:      {inputs.get('definition_enabled', False)}" +
+              (f"  [existing={inputs.get('use_existing_definition',False)}, max={inputs.get('definition_max_chars',1500)}ch]"
+               if inputs.get('definition_enabled') else ""))
+        print(f"   🎞️  Definition Video:{inputs.get('definition_video', False)}")
+        print(f"   🎬 Bar Race Video:  {inputs.get('bar_race_video_enabled', False)}")
+        print(f"   🎬 Intro Clip:      {inputs.get('intro_enabled', False)}" +
+              (f"  [Shorts={inputs.get('intro_duration',7)}s, HD={inputs.get('intro_duration_hd',10)}s]"
+               if inputs.get('intro_enabled') else ""))
+        print(f"   🔀 Bar Merge:       {inputs.get('bar_merge_enabled', False)}")
+        print(f"   🎞️  Video (standard):{inputs.get('video_enabled', False)}")
+        print(f"   🔊 Audio:           {inputs.get('audio_enabled', False)}" +
+              (f"  [Shorts={inputs.get('audio_speed',1.0)}x, HD={inputs.get('audio_speed_hd',1.0)}x]"
+               if inputs.get('audio_enabled') else ""))
+        print(f"   📹 Merge Audio+Video:{inputs.get('merge_audio_video', False)}")
+
+    # ── Metadata block ───────────────────────────────────────
+    meta_on = inputs.get('metadata_prep', False)
+    print(f"📺 Metadata Prep:    {meta_on}")
+    if meta_on:
+        print(f"   📋 YouTube Metadata:{inputs.get('generate_youtube_metadata', False)}")
+
+    # ── Publisher block ──────────────────────────────────────
+    pub_on = inputs.get('publisher', False)
+    print(f"📤 Publisher:        {pub_on}")
+    if pub_on:
+        upload_on = inputs.get('upload_youtube_video', False)
+        print(f"   ▶️  YouTube Upload:  {upload_on}" +
+              (f"  [{inputs.get('upload_privacy','private')}]" if upload_on else ""))
+
+    # ── Social block ─────────────────────────────────────────
+    soc_on = inputs.get('social', False)
+    print(f"📢 Social Share:     {soc_on}")
+    if soc_on:
+        plats = ', '.join(inputs.get('social_platforms', []))
+        print(f"   🌐 Platforms:       {plats or '(none)'}")
+        print(f"   🧪 Dry Run:         {inputs.get('social_share_dry_run', False)}")
+
+    # ── LLM overrides ────────────────────────────────────────
+    llm_keys = ['llm_researcher', 'llm_definition', 'llm_csv', 'llm_video',
+                'llm_audio', 'llm_youtube', 'llm_upload', 'llm_social']
+    llm_overrides = {k: inputs[k] for k in llm_keys
+                     if inputs.get(k) and str(inputs[k]).strip().lower() not in ('null','none','')}
     if llm_overrides:
         print("🤖 LLM Overrides:")
         for k, v in llm_overrides.items():
@@ -165,26 +264,26 @@ def run():
         full_crew = crew_instance.crew(inputs=inputs)
 
         # ===== CONDITIONAL TASK EXECUTION =====
-        # crew.py task index map (AFTER removing generate_thumbnail):
-        # [0] research_data           [1] generate_csv             [2] define_topic
-        # [3] create_definition_video [4] create_video             [5] create_bar_race_video
-        # [6] create_intro_clip       [7] bar_merge                [8] add_audio
-        # [9] merge_audio_video       [10] generate_youtube_metadata [11] upload_to_youtube
-        # [12] share_to_social
-
         final_tasks = []
 
         if not inputs.get('_skip_research', False):
             final_tasks.append(full_crew.tasks[0])  # research_data
-
         if not inputs.get('_skip_csv', False):
             final_tasks.append(full_crew.tasks[1])  # generate_csv
 
         if inputs.get('video_enabled', True):
             final_tasks.append(full_crew.tasks[4])  # create_video
 
+        # crew.py task index map:
+        # [0] research_data           [1] generate_csv             [2] define_topic
+        # [3] create_definition_video [4] create_video             [5] create_bar_race_video
+        # [6] create_intro_clip       [7] bar_merge                [8] add_audio
+        # [9] merge_audio_video       [10] generate_youtube_metadata [11] upload_to_youtube
+        # [12] share_to_social
+
         if inputs.get('bar_race_video_enabled', False):
             final_tasks.append(full_crew.tasks[5])  # create_bar_race_video
+
 
         if inputs.get('intro_enabled', False):
             final_tasks.append(full_crew.tasks[6])  # create_intro_clip
@@ -201,6 +300,7 @@ def run():
             if not use_existing_def:
                 final_tasks.append(full_crew.tasks[2])  # define_topic
 
+
         if inputs.get('audio_enabled', False):
             final_tasks.append(full_crew.tasks[8])  # add_audio
 
@@ -216,7 +316,9 @@ def run():
             final_tasks.append(full_crew.tasks[9])  # merge_audio_video
 
         if inputs.get('generate_youtube_metadata', False):
-            final_tasks.append(full_crew.tasks[10])  # generate_youtube_metadata (includes thumbnail!)
+            final_tasks.append(full_crew.tasks[10])  # generate_youtube_metadata
+
+
 
         if inputs.get('upload_youtube_video', False):
             final_tasks.append(full_crew.tasks[11])  # upload_to_youtube
@@ -232,8 +334,9 @@ def run():
 
         # ── Heartbeat: print progress every 10s while crew runs ──
         import threading, time as _time
+
         _crew_done = threading.Event()
-        _start_ts = _time.time()
+        _start_ts  = _time.time()
 
         def _heartbeat():
             step = 0
@@ -260,19 +363,22 @@ def run():
         if inputs.get('definition_enabled', False) and not inputs.get('use_existing_definition', False):
             try:
                 filename_clean = inputs.get('filename', '')
-                _main_dir = os.path.dirname(os.path.abspath(__file__))
+                # Use __file__ to anchor path — CWD unreliable in crewai
+                _main_dir     = os.path.dirname(os.path.abspath(__file__))
                 _project_root = os.path.dirname(os.path.dirname(_main_dir))
-                _output_root = os.path.join(_project_root, 'output')
-                txt_path = os.path.join(_output_root, f"{filename_clean}.txt")
+                _output_root  = os.path.join(_project_root, 'output')
+                txt_path      = os.path.join(_output_root, f"{filename_clean}.txt")
+
                 def_text = str(result.raw if hasattr(result, 'raw') else result).strip()
+
                 if def_text and ("WHAT IS" in def_text or "WHY DOES IT MATTER" in def_text):
                     channel = inputs.get('channel', 'PlayOwnAi')
-                    start = inputs.get('start', 2015)
-                    end = inputs.get('end', 2026)
-                    sep = "━" * 52
-                    header = f"{sep}\n📖 TOPIC: {inputs['topic']}\nChannel: @{channel}  |  Period: {start}–{end}\n{sep}\n"
-                    footer = f"\n{sep}\nSubscribe to @{channel} for more data-driven insights.\n{sep}\n"
-                    full = header + def_text + footer
+                    start   = inputs.get('start', 2015)
+                    end     = inputs.get('end', 2026)
+                    sep     = "━" * 52
+                    header  = f"{sep}\n📖 TOPIC: {inputs['topic']}\nChannel: @{channel}  |  Period: {start}–{end}\n{sep}\n\n"
+                    footer  = f"\n\n{sep}\nSubscribe to @{channel} for more data-driven insights.\n{sep}\n"
+                    full    = header + def_text + footer
                     os.makedirs(_output_root, exist_ok=True)
                     with open(txt_path, 'w', encoding='utf-8') as _df:
                         _df.write(full)
@@ -283,29 +389,6 @@ def run():
                 print(f"[Definition] ⚠️  Save error: {_de}")
 
         print("\n" + "="*60)
-
-        # -- Generate thumbnails directly (bypasses LLM, always runs) ------
-        try:
-            from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool
-            _csv_path = f"output/{inputs['filename']}.csv"
-            if os.path.exists(_csv_path):
-                print("\n Generating thumbnails...")
-                _meta_tool = YouTubeMetadataTool()
-                _thumb_result = _meta_tool._generate_thumbnail(
-                    topic=inputs['topic'],
-                    filename=inputs['filename'],
-                    output_dir=inputs['output_dir'],
-                    channel=inputs.get('channel', 'PlayOwnAi'),
-                    csv_path=_csv_path,
-                    start_year=inputs.get('start', 2015),
-                    end_year=inputs.get('end', 2026),
-                )
-                print(f"   {_thumb_result}")
-            else:
-                print(f"\n Thumbnail skipped - CSV not found: {_csv_path}")
-        except Exception as _te:
-            print(f"\n Thumbnail generation error: {_te}")
-
         print("✅ VIDEO FACTORY COMPLETED")
         print("="*60)
         print("\nResult:")
@@ -315,14 +398,128 @@ def run():
         print(f"   CSV: {csv_path}")
         print(f"   Subdirectory: {output_dir}/")
 
-        # ... rest of output reporting (unchanged from original) ...
+        if inputs.get('video_enabled', True):
+            print(f"   Videos (Standard):")
+            for style in inputs['animation_styles']:
+                for fmt in inputs['video_formats']:
+                    video_file = f"{output_dir}/{style}_{fmt}_{style}_{fmt}.mp4"
+                    if os.path.exists(video_file):
+                        print(f"      ✅ {video_file}")
+
+        if inputs.get('intro_enabled', False):
+            print(f"   Intro Clips:")
+            for fmt in inputs['video_formats']:
+                for suffix, label in [
+                    ('', 'video'),
+                    ('_audio.mp3', 'audio'),
+                    ('_with_audio.mp4', 'merged'),
+                ]:
+                    ext = '.mp4' if suffix == '' else ''
+                    intro_file = f"{output_dir}/intro_{fmt}{suffix}{ext}" if suffix else f"{output_dir}/intro_{fmt}.mp4"
+                    intro_file = f"{output_dir}/intro_{fmt}{suffix}" if suffix else f"{output_dir}/intro_{fmt}.mp4"
+                    if os.path.exists(intro_file):
+                        kb = os.path.getsize(intro_file) // 1024
+                        print(f"      ✅ {intro_file} ({kb} KB) [{label}]")
+
+        if inputs.get('bar_race_video_enabled', False):
+            print(f"   Videos (Bar Race):")
+            for fmt in inputs['video_formats']:
+                video_file = f"{output_dir}/bar_race_{fmt}.mp4"
+                audio_file = f"{output_dir}/bar_race_{fmt}_audio.mp3"
+                merged_file = f"{output_dir}/bar_race_{fmt}_with_audio.mp4"
+                if os.path.exists(video_file):
+                    kb = os.path.getsize(video_file) // 1024
+                    print(f"      ✅ {video_file} ({kb} KB)")
+                else:
+                    print(f"      ❌ Not found: {video_file}")
+                if os.path.exists(audio_file):
+                    kb = os.path.getsize(audio_file) // 1024
+                    print(f"      ✅ {audio_file} ({kb} KB)")
+                if os.path.exists(merged_file):
+                    kb = os.path.getsize(merged_file) // 1024
+                    print(f"      ✅ {merged_file} ({kb} KB)")
+
+        if inputs.get('audio_enabled', False):
+            print(f"   Audio (Standard):")
+            for style in inputs['animation_styles']:
+                for fmt in inputs['video_formats']:
+                    audio_file = f"{output_dir}/{style}_{fmt}_{style}_{fmt}_audio.mp3"
+                    if os.path.exists(audio_file):
+                        print(f"      ✅ {audio_file}")
+
+        if inputs.get('merge_audio_video', False):
+            print(f"   Merged:")
+            for style in inputs['animation_styles']:
+                for fmt in inputs['video_formats']:
+                    merged_file = f"{output_dir}/{style}_{fmt}_{style}_{fmt}_with_audio.mp4"
+                    if os.path.exists(merged_file):
+                        print(f"      ✅ {merged_file}")
+            # bar race merged already reported in the bar_race_video_enabled block above
+
+        if inputs.get('bar_merge_enabled', False):
+            print(f"   Bar Merged (Final):")
+            import re as _re
+            topic_slug = "_".join(_re.findall(r"\w+", inputs["topic"])[:4])
+            for fmt in inputs['video_formats']:
+                # Check renamed file first, then Final_ fallback
+                renamed   = f"{output_dir}/{inputs['channel']}_{topic_slug}_{fmt}.mp4"
+                final_raw = f"{output_dir}/Final_{fmt}.mp4"
+                if os.path.exists(renamed):
+                    size_mb = os.path.getsize(renamed) / (1024*1024)
+                    print(f"      ✅ {renamed} ({size_mb:.1f} MB)")
+                elif os.path.exists(final_raw):
+                    size_mb = os.path.getsize(final_raw) / (1024*1024)
+                    print(f"      ✅ {final_raw} ({size_mb:.1f} MB)  [yt_metadata not run — not renamed]")
+                else:
+                    print(f"      ❌ Not found: {renamed}")
+
+        if inputs.get('generate_youtube_metadata', False):
+            print(f"   YouTube Metadata:")
+            metadata_files = [
+                f"{output_dir}/cc_en.txt",
+                f"{output_dir}/YT_Metadata.json",
+                f"{output_dir}/YT_Metadata.txt",
+            ]
+            for mf in metadata_files:
+                if os.path.exists(mf):
+                    print(f"      ✅ {mf}")
+
+        if inputs.get('definition_enabled', False):
+            print(f"   Topic Definition:")
+            _main_dir2     = os.path.dirname(os.path.abspath(__file__))
+            _project_root2 = os.path.dirname(os.path.dirname(_main_dir2))
+            def_file = os.path.join(_project_root2, 'output', f"{inputs['filename']}.txt")
+            if os.path.exists(def_file):
+                size_kb = os.path.getsize(def_file) // 1024
+                print(f"      ✅ {def_file} ({size_kb} KB)")
+            else:
+                print(f"      ❌ Not found: {def_file}")
+
+        if inputs.get('definition_video', False):
+            print(f"   Definition Videos:")
+            for fmt in inputs['video_formats']:
+                vid        = f"{output_dir}/definition_video_{fmt}.mp4"
+                vid_audio  = f"{output_dir}/definition_video_{fmt}_audio.mp3"
+                vid_merged = f"{output_dir}/definition_video_{fmt}_with_audio.mp4"
+                if os.path.exists(vid):
+                    kb = os.path.getsize(vid) // 1024
+                    print(f"      ✅ {vid} ({kb} KB)")
+                else:
+                    print(f"      ❌ Not found: {vid}")
+                if os.path.exists(vid_audio):
+                    kb = os.path.getsize(vid_audio) // 1024
+                    print(f"      ✅ {vid_audio} ({kb} KB)")
+                if os.path.exists(vid_merged):
+                    kb = os.path.getsize(vid_merged) // 1024
+                    print(f"      ✅ {vid_merged} ({kb} KB)")
 
         print(f"\n⏱️  Duration tip: {fps} seconds per period")
         print("="*60 + "\n")
         sys.exit(0)
 
     except SystemExit:
-        raise
+        raise  # preserve sys.exit(0) success and sys.exit(1) errors
+
     except Exception as e:
         print("\n" + "="*60)
         print("❌ VIDEO FACTORY FAILED")
