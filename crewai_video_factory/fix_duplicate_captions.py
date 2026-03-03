@@ -6,11 +6,15 @@ Fixes YouTube Studio double rows by deleting caption tracks with name=lang_code
 and re-uploading them with name=''. Stops immediately on quota exceeded.
 Re-run tomorrow — already-fixed tracks are automatically skipped.
 
-Usage:
+Usage:Test
     .venv/bin/python fix_duplicate_captions.py \
-        --video_id M0ur9bkK8M4 \
+        --video_id L2PTGiN9JTQ \
         --cc_dir output/LLMOptimizationQuantization/YT/Shorts/CC \
-        [--dry_run]
+        --dry_run
+Usage:Real
+.venv/bin/python fix_duplicate_captions.py \
+  --video_id L2PTGiN9JTQ \
+  --cc_dir output/LLMOptimizationQuantization/YT/HD/CC
 """
 
 import os

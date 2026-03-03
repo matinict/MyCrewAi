@@ -2,15 +2,15 @@
 YouTube Upload Tool
 Automates video uploads and multi-language subtitle (CC) injection.
 Matches the directory structure: output/{Topic}/YT/{Format}/CC/
-
 Improvements:
 - Upload timeout (120s per chunk) with automatic retry (3 attempts)
 - quotaExceeded on video upload → fails fast immediately (no pointless retries)
 - Log saved IMMEDIATELY after video upload (before CC) — timeout won't lose video_id
 - CC quota-exceeded → stops immediately, logs failed langs for retry
 - Smart skip: already-uploaded formats skipped via upload_log.json
+- CRITICAL FIX: Auto-detect and fix duplicate captions (name=lang_code → name='')
+- Sync CC and localization language codes to prevent YouTube Studio double rows
 """
-
 import os
 import json
 import time
@@ -29,18 +29,18 @@ RETRY_BACKOFF   = [5, 15, 30]        # seconds between retries
 
 class YTUploadToolInput(BaseModel):
     """Input schema for YTUploadTool."""
-    topic:                str   = Field(...,  description="Topic name (e.g., 'LLM Alignment RLHF')")
-    output_dir:           str   = Field(...,  description="Full path to the output/Topic directory")
-    video_formats:        list  = Field(...,  description="Formats to upload: ['HD', 'Shorts']")
-    upload_youtube_video: bool  = Field(default=False,               description="Master switch — must be true to upload")
-    channel:              str   = Field(default="PlayOwnAi",         description="Channel prefix for video filename lookup")
-    privacy_status:       str   = Field(default="private",           description="private | unlisted | public")
-    category_id:          str   = Field(default="28",                description="YouTube category ID. 28=Science & Tech, 27=Education")
-    upload_cc:            bool  = Field(default=True,                description="Upload CC subtitle files after video upload")
-    notify_subscribers:   bool  = Field(default=False,               description="Notify subscribers on upload")
+    topic:                str   = Field(..., description="Topic name (e.g., 'LLM Alignment RLHF')")
+    output_dir:           str   = Field(..., description="Full path to the output/Topic directory")
+    video_formats:        list  = Field(..., description="Formats to upload: ['HD', 'Shorts']")
+    upload_youtube_video: bool  = Field(default=False, description="Master switch — must be true to upload")
+    channel:              str   = Field(default="PlayOwnAi", description="Channel prefix for video filename lookup")
+    privacy_status:       str   = Field(default="private", description="private | unlisted | public")
+    category_id:          str   = Field(default="28", description="YouTube category ID. 28=Science & Tech, 27=Education")
+    upload_cc:            bool  = Field(default=True, description="Upload CC subtitle files after video upload")
+    notify_subscribers:   bool  = Field(default=False, description="Notify subscribers on upload")
     client_secrets_file:  str   = Field(default="client_secrets.json", description="Path to OAuth2 client secrets JSON")
-    token_file:           str   = Field(default="token.json",        description="Path to saved OAuth2 token (auto-created on first run)")
-    thumbnail_path:       str   = Field(default="",                  description="Path to thumbnail image (JPG/PNG). Auto-detected if empty.")
+    token_file:           str   = Field(default="token.json", description="Path to saved OAuth2 token (auto-created on first run)")
+    thumbnail_path:       str   = Field(default="", description="Path to thumbnail image (JPG/PNG). Auto-detected if empty.")
 
 
 class YTUploadTool(BaseTool):
@@ -215,7 +215,7 @@ class YTUploadTool(BaseTool):
                 with open(log_path, "w") as _lf:
                     json.dump(log_entry, _lf, indent=2)
 
-                # ── Upload thumbnail ──────────────────────────────────
+                # ── Upload thumbnail ───────────────────────────────────────
                 thumb_note = ""
                 _thumb_path = thumbnail_path
                 if not _thumb_path:
@@ -259,7 +259,7 @@ class YTUploadTool(BaseTool):
         self._save_upload_summary(results, errors, output_dir, topic)
         return summary
 
-    # ── OAuth2 ────────────────────────────────────────────────────────────────
+    # ── OAuth2 ──────────────────────────────────────────────────────────────
 
     def _get_credentials(self, client_secrets_file="client_secrets.json", token_file="token.json"):
         """OAuth2 auth. Opens browser on first run, saves token.json for reuse."""
@@ -304,6 +304,22 @@ class YTUploadTool(BaseTool):
             t = _re.sub(r'[^\x09\x0A\x0D\x20-\x7E\u00C0-\u024F\u0400-\u04FF]', '', t)
             return t.strip()
 
+        title = _clean_text(metadata.get("title", "AI Video"))[:100]
+        raw_tags = list(metadata.get("tags", []))
+
+        # Sanitize tags: strip leading #, emoji, special chars, max 30 chars each
+        def _clean_tag(t):
+            import re as _re
+            t = str(t).strip().lstrip('#')
+            # Remove emoji and symbols (U+2000 and above covers all emoji)
+            t = _re.sub(u'[\U00002000-\U0010FFFF]', '', t)
+            # Remove YouTube-rejected chars
+            t = _re.sub(r'[<>&]', '', t)
+            t = t.replace('"', '').replace("'", '')
+            # Keep only safe printable chars
+            t = _re.sub(r'[^\x20-\x7E\u00C0-\u024F]', '', t)
+            return t[:30].strip()
+
         tags = []
         seen = set()
         total_len = 0
@@ -336,8 +352,8 @@ class YTUploadTool(BaseTool):
                 )[:5000],
                 "tags":            tags,
                 "categoryId":      category_id,
-                "defaultLanguage":      "en",
-                "defaultAudioLanguage": "en",
+                "defaultLanguage":       "en",
+                "defaultAudioLanguage":  "en",
             },
             "status": {
                 "privacyStatus":           privacy,
@@ -398,35 +414,15 @@ class YTUploadTool(BaseTool):
         print(f"[YTUpload] ✅ Upload complete → https://youtu.be/{video_id} ({int(time.time()-t0)}s)")
         return video_id
 
-
-        title = _clean_text(metadata.get("title", "AI Video"))[:100]
-        raw_tags = list(metadata.get("tags", []))
-
-        # Sanitize tags: strip leading #, emoji, special chars, max 30 chars each
-        def _clean_tag(t):
-            import re as _re
-            t = str(t).strip().lstrip('#')
-            # Remove emoji and symbols (U+2000 and above covers all emoji)
-            t = _re.sub(u'[\U00002000-\U0010FFFF]', '', t)
-            # Remove YouTube-rejected chars
-            t = _re.sub(r'[<>&]', '', t)
-            t = t.replace('"', '').replace("'", '')
-            # Keep only safe printable chars
-            t = _re.sub(r'[^\x20-\x7E\u00C0-\u024F]', '', t)
-            return t[:30].strip()
-
-
-        # Strip emoji from free-text fields (title, description)
-    # ── CC upload with quota early-exit ───────────────────────────────────────
+    # ── CC upload with quota early-exit and duplicate cleanup ───────────────
 
     @staticmethod
     def _text_to_srt(text: str) -> str:
         """Convert plain narration text to SRT subtitle format.
         Splits text into ~10-word chunks with auto-generated timestamps."""
-        import math
         words = text.split()
         if not words:
-            return "1\n00:00:00,000 --> 00:00:05,000\n \n"
+            return "1\n00:00:00,000 --> 00:00:05,000\n\n"
 
         chunk_size = 10  # words per subtitle line
         chunks = [words[i:i+chunk_size] for i in range(0, len(words), chunk_size)]
@@ -445,7 +441,7 @@ class YTUploadTool(BaseTool):
 
             lines.append(str(i + 1))
             lines.append(f"{_fmt(start_s)} --> {_fmt(end_s)}")
-            lines.append(" ".join(chunk))
+            lines.append("  ".join(chunk))
             lines.append("")
 
         return "\n".join(lines)
@@ -453,29 +449,72 @@ class YTUploadTool(BaseTool):
     # Map our ISO file codes → YouTube BCP-47 codes (used for BOTH CC and localizations)
     # CRITICAL: both must use the same code or YouTube creates duplicate rows per language
     _LANG_MAP = {
-        "zh-cn":    "zh-Hans",   # Simplified Chinese
-        "zh-tw":    "zh-Hant",   # Traditional Chinese
-        "sr":       "sr-Latn",   # Serbian Latin
-        "he":       "iw",        # Hebrew (YouTube still uses legacy "iw")
-        "id":       "id",        # Indonesian (no change, but explicit)
-        "fil":      "fil",       # Filipino
-        "nb":       "no",        # Norwegian Bokmål → YouTube uses "no"
+        "bn":        "bn",        # Bangla/Bengali
+        "zh-cn":     "zh-Hans",   # Simplified Chinese
+        "zh-tw":     "zh-Hant",   # Traditional Chinese
+        "zh":        "zh-Hans",   # Chinese (default to Simplified)
+        "sr":        "sr-Latn",   # Serbian Latin
+        "he":        "iw",        # Hebrew (YouTube legacy)
+        "id":        "id",        # Indonesian
+        "fil":       "fil",       # Filipino
+        "nb":        "no",        # Norwegian Bokmål
+        "fa":        "fa",        # Persian/Farsi
+        "pl":        "pl",        # Polish
+        "pt":        "pt",        # Portuguese
+        "ru":        "ru",        # Russian
+        "es":        "es",        # Spanish
+        "ta":        "ta",        # Tamil
+        "te":        "te",        # Telugu
+        "th":        "th",        # Thai
+        "tr":        "tr",        # Turkish
+        "uk":        "uk",        # Ukrainian
+        "ur":        "ur",        # Urdu
+        "vi":        "vi",        # Vietnamese
+        "ja":        "ja",        # Japanese
+        "ko":        "ko",        # Korean
+        "it":        "it",        # Italian
+        "de":        "de",        # German
+        "fr":        "fr",        # French
+        "hi":        "hi",        # Hindi
+        "ar":        "ar",        # Arabic
+        "my":        "my",        # Burmese
+        "ms":        "ms",        # Malay
+        "bs":        "bs",        # Bosnian
+        "bg":        "bg",        # Bulgarian
+        "ca":        "ca",        # Catalan
+        "hr":        "hr",        # Croatian
+        "cs":        "cs",        # Czech
+        "da":        "da",        # Danish
+        "nl":        "nl",        # Dutch
+        "en":        "en",        # English
+        "et":        "et",        # Estonian
+        "fi":        "fi",        # Finnish
+        "el":        "el",        # Greek
+        "hu":        "hu",        # Hungarian
+        "is":        "is",        # Icelandic
+        "lv":        "lv",        # Latvian
+        "lt":        "lt",        # Lithuanian
+        "ro":        "ro",        # Romanian
+        "sk":        "sk",        # Slovak
+        "sl":        "sl",        # Slovenian
+        "sv":        "sv",        # Swedish
     }
 
     def _upload_localizations(self, youtube, video_id, output_dir, fmt):
-        """Upload translated title & description for all languages via YouTube localizations API."""
+        """Upload translated title & description for all languages via YouTube localizations API.
+        CRITICAL: Only upload for languages that have corresponding CC files to prevent duplicates."""
         import re as _re2
 
         def _clean(t, limit):
-            t = _re2.sub(u"[ -􏿿]", "", str(t))
-            t = _re2.sub(r"[<>&]", "", t)
+            t = _re2.sub(u"[\u2000-\U0010FFFF]", " ", str(t))
+            t = _re2.sub(r"[<>&]", " ", t)
             return t.strip()[:limit]
 
         def _parse_md_txt(path):
             try:
                 text = open(path, encoding="utf-8").read()
-                title_m = _re2.search("TITLE:\n(.+?)(?:\n\n|\nDESCRIPTION:)", text, _re2.DOTALL)
-                desc_m  = _re2.search("DESCRIPTION:\n(.+?)(?:\n\n|\nTAGS:|$)",  text, _re2.DOTALL)
+                title_m = _re2.search(r"TITLE:\n(.+?)(?:\n\n|\nDESCRIPTION:)", text, _re2.DOTALL)
+                desc_m  = _re2.search(r"DESCRIPTION:\n(.+?)(?:\n\n|\nTAGS:|$)", text, _re2.DOTALL)
                 return (
                     title_m.group(1).strip() if title_m else "",
                     desc_m.group(1).strip()  if desc_m  else "",
@@ -488,6 +527,16 @@ class YTUploadTool(BaseTool):
             print(f"[YTUpload]   ⚠️  No MD dir: {md_dir}")
             return {"uploaded": 0, "failed": 0}
 
+        # CRITICAL: Get list of CC languages first (with proper code mapping)
+        cc_dir = os.path.join(output_dir, "YT", fmt, "CC")
+        cc_langs_mapped = set()
+        if os.path.exists(cc_dir):
+            for f in os.listdir(cc_dir):
+                if f.endswith(".txt"):
+                    raw_code = f.replace(".txt", "")
+                    mapped_code = self._LANG_MAP.get(raw_code, raw_code)
+                    cc_langs_mapped.add(mapped_code)
+
         # Fetch existing localizations so we can merge (not overwrite)
         try:
             existing_resp = youtube.videos().list(
@@ -497,12 +546,20 @@ class YTUploadTool(BaseTool):
             existing_locs = {}
 
         # Build localizations dict — merge with existing
-        localizations = dict(existing_locs)  # start from what's already there
+        localizations = dict(existing_locs)
         lang_files = [f for f in os.listdir(md_dir) if f.endswith(".txt") and f != "en.txt"]
         added = 0
+
         for fname in lang_files:
             raw_code = fname.replace(".txt", "")
-            yt_code  = self._LANG_MAP.get(raw_code, raw_code)  # map to YT BCP-47
+            yt_code = self._LANG_MAP.get(raw_code, raw_code)  # map to YT BCP-47
+
+            # CRITICAL FIX: Only upload localization if we have a matching CC file
+            # This prevents YouTube from creating duplicate language entries
+            if cc_langs_mapped and yt_code not in cc_langs_mapped:
+                print(f"[YTUpload]   ⏭️  Skipping localization for {raw_code} (no CC file)")
+                continue
+
             title, desc = _parse_md_txt(os.path.join(md_dir, fname))
             if title:
                 localizations[yt_code] = {
@@ -528,24 +585,56 @@ class YTUploadTool(BaseTool):
             return {"uploaded": 0, "failed": added}
 
     def _upload_cc_files(self, youtube, video_id, output_dir, fmt):
-        """Upload CC files from YT/{fmt}/CC/. Stops immediately on quota exceeded."""
+        """Upload CC files with automatic duplicate detection and cleanup."""
         from googleapiclient.http import MediaInMemoryUpload
         from googleapiclient.errors import HttpError
 
         cc_dir = os.path.join(output_dir, "YT", fmt, "CC")
-        stats  = {"uploaded": 0, "skipped": 0, "failed": 0, "quota_hit": False}
+        stats  = {"uploaded": 0, "skipped": 0, "failed": 0, "quota_hit": False, "cleaned": 0}
 
         if not os.path.exists(cc_dir):
             print(f"[YTUpload]   ⚠️  No CC dir: {cc_dir}")
             return stats
 
-        # Check what's already on the video
+        # ── SMART CLEANUP: Detect and fix duplicates BEFORE upload ─────────────
+        print(f"[YTUpload]   🔍 Scanning for duplicate captions...")
+        try:
+            existing = youtube.captions().list(part="snippet", videoId=video_id).execute()
+            items = existing.get("items", [])
+
+            # Find problematic tracks: name=lang_code (should be name='')
+            bad_tracks = [
+                it for it in items
+                if it["snippet"].get("name") == it["snippet"].get("language")
+                and it["snippet"].get("name") != ""
+                and it["snippet"].get("trackKind") != "asr"
+            ]
+
+            if bad_tracks:
+                print(f"[YTUpload]   🧹 Found {len(bad_tracks)} duplicate track(s) to fix...")
+                for track in bad_tracks:
+                    lang = track["snippet"]["language"]
+                    tid = track["id"]
+                    try:
+                        youtube.captions().delete(id=tid).execute()
+                        print(f"[YTUpload]     ✅ Deleted duplicate: {lang}")
+                        stats["cleaned"] += 1
+                        time.sleep(0.5)
+                    except HttpError as e:
+                        if "quotaExceeded" in str(e):
+                            print(f"[YTUpload]     🛑 Quota hit during cleanup — continuing with upload")
+                            break
+                        print(f"[YTUpload]     ⚠️  Could not delete {lang}: {e}")
+        except Exception as e:
+            print(f"[YTUpload]   ⚠️  Cleanup scan failed: {e}")
+
+        # ── Now proceed with normal upload ─────────────────────────────────────
         try:
             existing       = youtube.captions().list(part="snippet", videoId=video_id).execute()
             existing_langs = {c["snippet"]["language"] for c in existing.get("items", [])}
         except HttpError as e:
             if "quotaExceeded" in str(e):
-                print(f"[YTUpload]   🛑 CC quota exceeded on list() — skipping CC entirely. Try tomorrow.")
+                print(f"[YTUpload]   🛑 CC quota exceeded — skipping upload")
                 stats["failed"] = len([f for f in os.listdir(cc_dir) if f.endswith(".txt")])
                 return stats
             existing_langs = set()
@@ -553,9 +642,8 @@ class YTUploadTool(BaseTool):
             existing_langs = set()
 
         cc_files = sorted(f for f in os.listdir(cc_dir) if f.endswith(".txt"))
-        # Map raw filename codes to BCP-47 before comparing with existing_langs
         pending  = [f for f in cc_files
-                    if self._LANG_MAP.get(f.replace(".txt",""), f.replace(".txt",""))
+                    if self._LANG_MAP.get(f.replace(".txt", ""), f.replace(".txt", ""))
                     not in existing_langs]
         already  = len(cc_files) - len(pending)
 
@@ -565,7 +653,7 @@ class YTUploadTool(BaseTool):
 
         for filename in pending:
             raw_code  = filename.replace(".txt", "")
-            lang_code = self._LANG_MAP.get(raw_code, raw_code)  # map to YouTube BCP-47
+            lang_code = self._LANG_MAP.get(raw_code, raw_code)
             file_path = os.path.join(cc_dir, filename)
 
             try:
@@ -574,7 +662,6 @@ class YTUploadTool(BaseTool):
                     stats["skipped"] += 1
                     continue
 
-                # Convert plain text to SRT format for proper YouTube CC
                 srt_content = self._text_to_srt(cc_text)
                 media = MediaInMemoryUpload(srt_content.encode("utf-8"), mimetype="application/x-subrip")
                 youtube.captions().insert(
@@ -582,8 +669,8 @@ class YTUploadTool(BaseTool):
                     body={"snippet": {
                         "videoId":  video_id,
                         "language": lang_code,
-                        "name":     "",        # empty = YouTube uses the language display name
-                        "isDraft":  False,     # no suffix like "Arabic - ar" (was causing double rows)
+                        "name":      "",            # CRITICAL: prevents duplicates
+                        "isDraft":  False,
                     }},
                     media_body=media
                 ).execute()
@@ -593,14 +680,12 @@ class YTUploadTool(BaseTool):
 
             except HttpError as e:
                 if "quotaExceeded" in str(e):
-                    # Count remaining pending files (exclude already-processed ones)
                     pending_done = stats["uploaded"] + stats["failed"]
                     remaining = max(0, len(pending) - pending_done - 1)
                     stats["failed"] += 1 + remaining
                     stats["quota_hit"] = True
                     print(f"[YTUpload]     ❌ CC {lang_code}: quota exceeded")
-                    print(f"[YTUpload]   🛑 Quota hit — stopping CC upload. "
-                          f"{stats['failed']} lang(s) failed. Run again tomorrow to retry.")
+                    print(f"[YTUpload]   🛑 Quota hit — stopping. Run again tomorrow.")
                     break
                 else:
                     print(f"[YTUpload]     ❌ CC {lang_code}: {e}")
@@ -612,7 +697,7 @@ class YTUploadTool(BaseTool):
 
         return stats
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _load_metadata(self, path, topic):
         if os.path.exists(path):
@@ -644,7 +729,7 @@ class YTUploadTool(BaseTool):
             })
 
         for e in errors:
-            fmt = e.replace("❌ ", "").split(":")[0].strip()
+            fmt = e.replace("❌ ", "").split(": ")[0].strip()
             parsed.append({"format": fmt, "status": "failed", "error": e})
 
         data = {
@@ -684,7 +769,7 @@ class YTUploadTool(BaseTool):
         lines.append(sep)
 
         with open(txt_path, "w", encoding="utf-8") as f:
-            f.write("".join(lines))
+            f.write("\n".join(lines))
 
         print(f"[YTUpload] 💾 Summary → {json_path}")
         print(f"[YTUpload] 💾 Summary → {txt_path}")
