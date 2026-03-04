@@ -3,7 +3,7 @@
   "start": 2020,
   "end": 2026,
   "granularity": "yearly",
-  "video_formats": ["Shorts"],
+  "video_formats": ["HD"],
   "use_label_mappings": false,
   "fps": 4.9,
   "fps_hd_offset": 1.37,
@@ -45,7 +45,7 @@
     "generate_youtube_metadata": true
   },
 
-"publisher": false,
+"publisher": true,
   "publisher_config": {
     "upload_youtube_video": true,
     "upload_privacy": "private",

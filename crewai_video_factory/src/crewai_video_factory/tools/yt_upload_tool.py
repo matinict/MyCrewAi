@@ -449,6 +449,7 @@ class YTUploadTool(BaseTool):
     # Map our ISO file codes → YouTube BCP-47 codes (used for BOTH CC and localizations)
     # CRITICAL: both must use the same code or YouTube creates duplicate rows per language
     _LANG_MAP = {
+        "en":        "en",        # English
         "bn":        "bn",        # Bangla/Bengali
         "zh-cn":     "zh-Hans",   # Simplified Chinese
         "zh-tw":     "zh-Hant",   # Traditional Chinese
@@ -486,7 +487,6 @@ class YTUploadTool(BaseTool):
         "cs":        "cs",        # Czech
         "da":        "da",        # Danish
         "nl":        "nl",        # Dutch
-        "en":        "en",        # English
         "et":        "et",        # Estonian
         "fi":        "fi",        # Finnish
         "el":        "el",        # Greek
