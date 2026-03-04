@@ -33,7 +33,7 @@ class DefinitionVideoInput(BaseModel):
     channel:           str   = Field(default="PlayOwnAi", description="Channel name")
     watermark_enabled: bool  = Field(default=False, description="Show watermark")
     watermark_text:    str   = Field(default="@PlayOwnAi", description="Watermark text")
-    video_fps:         int   = Field(default=30, description="Output video frame rate. Must match all other tools. Default: 30.")
+    tts_engine:        str   = Field(default="gtts", description="TTS engine: 'gtts' or 'edge-tts'")
 
 class DefinitionVideoTool(BaseTool):
     """Creates a bottom-to-top streaming video from the topic definition .txt file."""
@@ -57,7 +57,7 @@ class DefinitionVideoTool(BaseTool):
         channel: str = "PlayOwnAi",
         watermark_enabled: bool = False,
         watermark_text: str = "@PlayOwnAi",
-        video_fps: int = 30,
+        tts_engine: str = "gtts",
     ) -> str:
 
         if not definition_video:
@@ -147,7 +147,7 @@ class DefinitionVideoTool(BaseTool):
 
                     self._render(raw_lines, out_path, w, h, secs_per_line,
                                  channel, watermark_enabled, watermark_text,
-                                 topic=topic, video_fps=video_fps)
+                                 topic=topic)
 
                     if not os.path.exists(out_path):
                         errors.append(f"❌ {fmt}: video missing after render")
@@ -157,7 +157,7 @@ class DefinitionVideoTool(BaseTool):
                 audio_path = os.path.join(output_dir, f"definition_video_{fmt}_audio.mp3")
                 final_path = os.path.join(output_dir, f"definition_video_{fmt}_with_audio.mp4")
                 video_dur  = self._get_duration(out_path)
-                self._generate_tts(spoken_text, audio_path, video_dur)
+                self._generate_tts(spoken_text, audio_path, video_dur, tts_engine)
 
                 # Merge audio into video
                 if os.path.exists(audio_path):
@@ -213,20 +213,27 @@ class DefinitionVideoTool(BaseTool):
         except Exception:
             return 0.0
 
-    def _generate_tts(self, text: str, audio_path: str, video_dur: float):
-        """Generate TTS MP3, then stretch/pad to match video_dur exactly."""
-        import subprocess, tempfile, os
-        try:
-            from gtts import gTTS
-        except ImportError:
-            print("[DefVideo] ⚠️ gTTS not installed — no audio. Run: pip install gTTS")
-            return
+    def _generate_tts(self, text: str, audio_path: str, video_dur: float, tts_engine: str = "gtts"):
+        """
+        Generate TTS MP3 then stretch/pad to match video_dur exactly.
+        tts_engine: 'gtts'     → gTTS (offline-friendly, pip install gTTS)
+                    'edge-tts' → Microsoft Edge Neural TTS (higher quality, pip install edge-tts)
+        Both engines use atempo to sync audio length to video duration.
+        """
+        import subprocess, os
+        engine = tts_engine.strip().lower()
+        print(f"[DefVideo] 🔊 TTS engine: {engine}  ({len(text)} chars)")
 
         tmp = audio_path.replace('.mp3', '_raw.mp3')
         try:
-            print(f"[DefVideo] 🔊 Generating TTS ({len(text)} chars) ...")
-            tts = gTTS(text=text, lang='en', slow=False)
-            tts.save(tmp)
+            if engine == "edge-tts":
+                self._tts_edge(text, tmp)
+            else:
+                self._tts_gtts(text, tmp)
+
+            if not os.path.exists(tmp):
+                print(f"[DefVideo] ⚠️ TTS produced no file — skipping audio")
+                return
 
             raw_dur = self._get_duration(tmp)
             if raw_dur <= 0:
@@ -252,6 +259,35 @@ class DefinitionVideoTool(BaseTool):
             print(f"[DefVideo] ⚠️ TTS error: {e}")
             if os.path.exists(tmp):
                 os.rename(tmp, audio_path)
+
+    def _tts_gtts(self, text: str, out_path: str):
+        """Generate audio using gTTS."""
+        try:
+            from gtts import gTTS
+        except ImportError:
+            print("[DefVideo] ⚠️ gTTS not installed. Run: pip install gTTS --break-system-packages")
+            return
+        tts = gTTS(text=text, lang='en', slow=False)
+        tts.save(out_path)
+        print(f"[DefVideo] ✅ gTTS saved: {out_path}")
+
+    def _tts_edge(self, text: str, out_path: str):
+        """Generate audio using edge-tts (async)."""
+        try:
+            import edge_tts, asyncio
+        except ImportError:
+            print("[DefVideo] ⚠️ edge-tts not installed. Run: pip install edge-tts --break-system-packages")
+            print("[DefVideo]    Falling back to gTTS ...")
+            self._tts_gtts(text, out_path)
+            return
+
+        async def _generate():
+            communicate = edge_tts.Communicate(text, voice="en-US-AriaNeural")
+            await communicate.save(out_path)
+
+        import asyncio
+        asyncio.run(_generate())
+        print(f"[DefVideo] ✅ edge-tts saved: {out_path}")
 
     def _merge_audio_video(self, video_path: str, audio_path: str,
                            output_path: str, video_dur: float):
@@ -392,9 +428,9 @@ class DefinitionVideoTool(BaseTool):
             cx += ww + gap
 
     def _render(self, raw_lines, out_path, w, h, secs_per_line,
-                channel, wm_enabled, wm_text, topic="", video_fps=30):
+                channel, wm_enabled, wm_text, topic=""):
         from PIL import Image, ImageDraw, ImageFont
-        FPS             = video_fps  # ✅ Controlled from data.json → video_fps
+        FPS             = 24
         frames_per_line = int(secs_per_line * FPS)
         fade_frames     = min(6, frames_per_line // 5)
         BASE_ACTIVE = w // 28

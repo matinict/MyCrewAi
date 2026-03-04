@@ -124,6 +124,9 @@ def load_config():
             # core fields with safe defaults
             'video_formats':              ['Shorts'],
             'fps_hd_offset':              1.0,
+            'audio_speed':                1.0,
+            'audio_speed_hd':             1.0,
+            'tts_engine':                 'gtts',    # 'gtts' or 'edge-tts'
             'channel_lower':              '',
             'website':                    '',
             'use_label_mappings':         False,
@@ -273,6 +276,7 @@ def run():
         print(f"   ✍️  Debate Text:     {inputs.get('debate_definition_enabled', False)}" +
               (f"  [max={inputs.get('debate_max_chars',10000)}ch]"
                if inputs.get('debate_definition_enabled') else ""))
+        print(f"   🎤 TTS Engine:      {inputs.get('tts_engine', 'gtts')}")
         print(f"   🎬 Debate Video:    {inputs.get('debate_video_enabled', False)}" +
               (f"  [secs/line={inputs.get('debate_secs_per_line', 3.5)}]"
                if inputs.get('debate_video_enabled') else ""))

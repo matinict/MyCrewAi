@@ -16,6 +16,7 @@ dependencies = [
   "litellm>=1.75.3",
   "gtts>=2.5.4",
   "dashscope>=1.25.13",
+  "edge-tts>=7.2.7",
 ]
 
 [tool.uv]

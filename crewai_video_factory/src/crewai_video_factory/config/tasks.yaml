@@ -107,6 +107,7 @@ create_definition_video:
       watermark_enabled: {watermark_enabled}
       watermark_text: "{watermark_text}"
       watermark_opacity: {watermark_opacity}
+      tts_engine: "{tts_engine}"
 
     NOTE: filename must be "{filename}" (e.g. "LLMAlignmentRLHF") — NOT "definition_video_LLMAlignmentRLHF".
     The tool reads output/{filename}.txt automatically.
@@ -453,6 +454,7 @@ create_debate_video:
       watermark_enabled: {watermark_enabled}
       watermark_text: "{watermark_text}"
       video_fps: {video_fps}
+      tts_engine: "{tts_engine}"
 
     Output files per format in {output_dir}/:
       debate_video_[format].mp4              (silent video)

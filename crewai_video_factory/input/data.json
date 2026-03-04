@@ -1,15 +1,16 @@
 {
-  "topic": "𝘔𝘪𝘥-𝘭𝘦𝘷𝘦𝘭 𝘦𝘯𝘨𝘪𝘯𝘦𝘦𝘳𝘴 𝘢𝘳𝘦 𝘨𝘰𝘪𝘯𝘨 𝘵𝘰 𝘣𝘦 𝘳𝘦𝘱𝘭𝘢𝘤𝘦𝘥 𝘸𝘪𝘵𝘩 𝘈𝘐",
+  "topic": "𝘔𝘪𝘥L𝘦𝘷𝘦𝘭 𝘦𝘯𝘨𝘪𝘯𝘦𝘦𝘳𝘴 𝘢𝘳𝘦 𝘨𝘰𝘪𝘯𝘨 𝘵𝘰 𝘣𝘦 𝘳𝘦𝘱𝘭𝘢𝘤𝘦𝘥 𝘸𝘪𝘵𝘩 𝘈𝘐",
   "start": 2025,
   "end": 2026,
   "granularity": "yearly",
   "video_formats": ["HD"],
   "use_label_mappings": false,
   "fps": 4.9,
+  "video_fps": 30,
   "fps_hd_offset": 1.37,
   "audio_speed": 1.1,
   "audio_speed_hd": 1.0,
-  "video_fps": 30,
+  "tts_engine": "edge-tts",
   "channel": "PlayOwnAi",
   "channel_lower": "playownai",
   "website": "youtube.com/@PlayOwnAi",
@@ -42,7 +43,7 @@
   "debate": true,
     "debate_config": {
       "debate_definition_enabled": true,
-      "debate_video_enabled": false,
+      "debate_video_enabled": true,
       "debate_secs_per_line": 3.5,
       "debate_max_chars": 10000,
       "llm_debate": "dashscope/qwen-plus"
