@@ -117,4 +117,6 @@ Thumbs.db
 **/input/token.json
 **/client_secrets.json
 **/token.json
-**/social_credentials.json
+**/social_credentials.json*.onnx
+*.mp4
+outputs/

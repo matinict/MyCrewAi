@@ -27,11 +27,25 @@ FONT_REGULAR = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 
 def _clean_text(text: str) -> str:
     """
-    Convert Mathematical Alphanumeric Symbols (e.g. italic 𝘔𝘪𝘥-𝘭𝘦𝘷𝘦𝘭) and other
-    unicode stylised chars to plain ASCII so LiberationSans can render them.
-    NFKD normalization decomposes math italic/bold/sans-serif variants to base ASCII.
+    Convert Mathematical Alphanumeric Symbols (e.g. italic 𝘔𝘪𝘥-𝘭𝘦𝘷𝘦𝘭) to plain ASCII
+    so LiberationSans can render them. Preserves common punctuation that NFKD would drop:
+    en-dash (–), em-dash (—), ellipsis (…), curly quotes, etc.
     """
     import unicodedata
+    # Replace common punctuation with ASCII equivalents BEFORE NFKD strips them
+    replacements = {
+        '–': '-',   # en-dash  –  → -
+        '—': '--',  # em-dash  —  → --
+        '…': '...', # ellipsis …  → ...
+        '‘': "'",   # left single quote
+        '’': "'",   # right single quote
+        '“': '"',   # left double quote
+        '”': '"',   # right double quote
+        '·': '.',   # middle dot
+        '•': '-',   # bullet
+    }
+    for uni, ascii_equiv in replacements.items():
+        text = text.replace(uni, ascii_equiv)
     normalized = unicodedata.normalize('NFKD', text)
     return normalized.encode('ascii', 'ignore').decode('ascii')
 
@@ -418,6 +432,58 @@ class DebateVideoTool(BaseTool):
         draw.text((x,   y  ), text, font=font, fill=face)
         draw.text((x-1, y-1), text, font=font, fill=bloom)
 
+    def _draw_diamond_title(self, draw, x, y, text, font, frame: int):
+        """
+        Diamond light effect for the header title.
+        Very slow, smooth prismatic colour shift — no flicker, no blink.
+        Cycle: pure white → soft gold → ice blue → soft violet → back to white.
+        Full cycle takes ~600 frames (~25s at 24fps) — barely perceptible drift.
+        """
+        import math
+
+        # Extremely slow cycle — 600 frames = ~25 seconds, barely noticeable
+        t = (frame % 600) / 600.0
+
+        # Gentle colour stops — all high-brightness, no jarring saturated jumps
+        stops = [
+            (0.00, (255, 255, 255)),   # pure white
+            (0.25, (255, 240, 180)),   # warm gold-white
+            (0.50, (200, 235, 255)),   # ice blue-white
+            (0.75, (235, 210, 255)),   # soft lavender-white
+            (1.00, (255, 255, 255)),   # back to pure white
+        ]
+
+        # Find surrounding stops and interpolate
+        c0, c1, f0, f1 = stops[0][1], stops[1][1], 0.0, 0.25
+        for i in range(len(stops) - 1):
+            if stops[i][0] <= t <= stops[i+1][0]:
+                f0, c0 = stops[i]
+                f1, c1 = stops[i+1]
+                break
+        seg     = (f1 - f0) if f1 != f0 else 1
+        local_t = (t - f0) / seg
+        # Smooth ease in-out — no abrupt transitions
+        local_t  = local_t * local_t * (3 - 2 * local_t)
+        face_col = tuple(int(c0[i] + (c1[i] - c0[i]) * local_t) for i in range(3))
+
+        # Layer 1 — soft deep shadow (grounded, no harsh edges)
+        shadow = (int(face_col[0]*0.08), int(face_col[1]*0.08), int(face_col[2]*0.08))
+        for dx, dy in [(-3,3),(3,3),(-3,-3),(3,-3)]:
+            draw.text((x+dx, y+dy), text, font=font, fill=shadow)
+
+        # Layer 2 — gentle colour bloom (constant, no pulse)
+        bloom = (int(face_col[0]*0.35), int(face_col[1]*0.35), int(face_col[2]*0.35))
+        for dx, dy in [(-2,2),(2,2),(-2,-2),(2,-2),(2,0),(-2,0),(0,2),(0,-2)]:
+            draw.text((x+dx, y+dy), text, font=font, fill=bloom)
+
+        # Layer 3 — inner soft glow (constant brightness)
+        inner = (int(face_col[0]*0.65), int(face_col[1]*0.65), int(face_col[2]*0.65))
+        for dx, dy in [(-1,1),(1,1),(-1,-1),(1,-1),(1,0),(-1,0),(0,1),(0,-1)]:
+            draw.text((x+dx, y+dy), text, font=font, fill=inner)
+
+        # Layer 4 — crisp face at full colour (no flicker multiplier)
+        draw.text((x, y), text, font=font, fill=face_col)
+
     def _justify(self, draw, x, y, text, font, max_w, fill):
         words = text.split()
         if len(words) <= 1:
@@ -465,7 +531,7 @@ class DebateVideoTool(BaseTool):
                 return ImageFont.load_default()
 
         pad_x         = int(w * 0.05)
-        header_h      = int(h * 0.10)
+        header_h      = int(h * 0.14)  # taller to fit multi-line title
         pad_top       = header_h + int(h * 0.02)
         wm_zone       = int(h * 0.88)
         body_h        = wm_zone - pad_top
@@ -473,13 +539,44 @@ class DebateVideoTool(BaseTool):
         active_y      = pad_top + body_h // 2 - active_font_h // 2
         max_px        = w - pad_x - int(w * 0.05)
 
-        hdr_topic_size = max(w // 22, 28)
-        try:
-            f_hdr_topic = ImageFont.truetype(FONT_BOLD, hdr_topic_size)
-        except Exception:
-            f_hdr_topic = ImageFont.load_default()
+        hdr_title  = _clean_text(topic) if topic else _clean_text(channel)
+        # Capitalize each word, but preserve known acronyms
+        _acronyms  = {'ai', 'ml', 'api', 'ui', 'ux', 'llm', 'gpt', 'ceo', 'cto', 'it'}
+        hdr_title  = ' '.join(
+            w.upper() if w.lower() in _acronyms else w.capitalize()
+            for w in hdr_title.split()
+        )
+        hdr_max_px = w - pad_x * 2
 
-        hdr_line1 = _clean_text(topic) if topic else _clean_text(channel)
+        # Auto-shrink header font until every word fits within hdr_max_px (no word clipping)
+        hdr_topic_size = max(w // 30, 22)
+        f_hdr_topic    = None
+        for size in range(hdr_topic_size, 18, -2):
+            try:
+                _f = ImageFont.truetype(FONT_BOLD, size)
+            except Exception:
+                _f = ImageFont.load_default()
+            hdr_lines = self._pixel_wrap(hdr_title, _f, hdr_max_px)
+            # Check no single wrapped line overflows
+            from PIL import Image as _TmpImg, ImageDraw as _TmpDraw
+            _tmp = _TmpImg.new("RGB", (1, 1))
+            _d   = _TmpDraw.Draw(_tmp)
+            max_line_w = max(
+                (_d.textbbox((0,0), ln, font=_f)[2] - _d.textbbox((0,0), ln, font=_f)[0])
+                for ln in hdr_lines
+            )
+            if max_line_w <= hdr_max_px:
+                hdr_topic_size = size
+                f_hdr_topic    = _f
+                break
+        if f_hdr_topic is None:
+            try:
+                f_hdr_topic = ImageFont.truetype(FONT_BOLD, 18)
+            except Exception:
+                f_hdr_topic = ImageFont.load_default()
+            hdr_lines = self._pixel_wrap(hdr_title, f_hdr_topic, hdr_max_px)
+
+        print(f"[DebateVideo]   Header font: {hdr_topic_size}pt  lines: {len(hdr_lines)}")
 
         lines: List[str] = []
         for raw in raw_lines:
@@ -524,15 +621,18 @@ class DebateVideoTool(BaseTool):
                 img   = Image.new("RGB", (w, h), (0, 0, 0))
                 draw  = ImageDraw.Draw(img)
 
-                # Header
-                hdr_bbox = draw.textbbox((0, 0), hdr_line1, font=f_hdr_topic)
-                hdr_w    = hdr_bbox[2] - hdr_bbox[0]
-                hdr_x    = (w - hdr_w) // 2
-                hdr_y    = int(h * 0.018)
-                draw.text((hdr_x, hdr_y), hdr_line1, font=f_hdr_topic, fill=(255, 255, 255))
+                # Header — multi-line centered with diamond prismatic light effect
+                hdr_line_h = int(hdr_topic_size * 1.35)
+                hdr_y      = int(h * 0.018)
+                for hdr_ln in hdr_lines:
+                    hdr_bbox = draw.textbbox((0, 0), hdr_ln, font=f_hdr_topic)
+                    hdr_w    = hdr_bbox[2] - hdr_bbox[0]
+                    hdr_x    = (w - hdr_w) // 2
+                    self._draw_diamond_title(draw, hdr_x, hdr_y, hdr_ln, f_hdr_topic, global_frame)
+                    hdr_y   += hdr_line_h
 
-                # Separator
-                sep_y = header_h - 2
+                # Separator — sits below however many header lines were drawn
+                sep_y = max(header_h - 2, hdr_y + int(h * 0.005))
                 draw.line([(pad_x, sep_y), (w - pad_x, sep_y)], fill=(50, 60, 80), width=1)
 
                 # Past lines (scroll up, shrinking)
