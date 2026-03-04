@@ -432,6 +432,7 @@ dependencies = [
     { name = "bar-chart-race", marker = "sys_platform == 'linux'" },
     { name = "crewai", extra = ["anthropic", "google-genai"], marker = "sys_platform == 'linux'" },
     { name = "crewai-tools", marker = "sys_platform == 'linux'" },
+    { name = "dashscope", marker = "sys_platform == 'linux'" },
     { name = "gtts", marker = "sys_platform == 'linux'" },
     { name = "langchain-core", marker = "sys_platform == 'linux'" },
     { name = "litellm", marker = "sys_platform == 'linux'" },
@@ -445,6 +446,7 @@ requires-dist = [
     { name = "bar-chart-race", specifier = ">=0.1.0" },
     { name = "crewai", extras = ["anthropic", "google-genai"], specifier = "==1.8.1" },
     { name = "crewai-tools", specifier = ">=0.17.0,<1.0.0" },
+    { name = "dashscope", specifier = ">=1.25.13" },
     { name = "gtts", specifier = ">=2.5.4" },
     { name = "langchain-core", specifier = "==0.3.37" },
     { name = "litellm", specifier = ">=1.75.3" },
@@ -497,6 +499,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a9/95/a3dbbb5028f35eafb79008e7522a75244477d2838f38cbb722248dabc2a8/cycler-0.12.1.tar.gz", hash = "sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c", size = 7615, upload-time = "2023-10-07T05:32:18.335Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e7/05/c19819d5e3d95294a6f5947fb9b9629efb316b96de511b418c53d245aae6/cycler-0.12.1-py3-none-any.whl", hash = "sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30", size = 8321, upload-time = "2023-10-07T05:32:16.783Z" },
+]
+
+[[package]]
+name = "dashscope"
+version = "1.25.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp", marker = "sys_platform == 'linux'" },
+    { name = "certifi", marker = "sys_platform == 'linux'" },
+    { name = "cryptography", marker = "sys_platform == 'linux'" },
+    { name = "requests", marker = "sys_platform == 'linux'" },
+    { name = "websocket-client", marker = "sys_platform == 'linux'" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/35/f1fbc93189da944ea1505647dd2ae3b7f8c2688e1f8087e08ffe043d3c3e/dashscope-1.25.13-py3-none-any.whl", hash = "sha256:03e7ce41954bacc3786ec3f45d5dc01e1a8ccf2741503ce3dc9e4ce60866386e", size = 1342636, upload-time = "2026-03-03T01:55:03.866Z" },
 ]
 
 [[package]]

@@ -35,7 +35,6 @@ definition_specialist:
     You use your LLM knowledge to write accurate, insightful definitions that
     add real value for viewers. Write in clear, jargon-free English.
     When definition_enabled is false, skip instantly.
-
 video_producer:
   role: >
     Video Production Specialist
@@ -134,33 +133,61 @@ definition_video_producer:
     Video production expert specializing in creating clean, readable scrolling text
     videos from plain text content. Generates definition_video clips ready to merge
     into the final pipeline. Skips instantly when definition_video is false.
+debate_video_producer:
+  role: >
+    Debate Video Producer
+  goal: >
+    Create a bottom-to-top streaming debate video from propose.md, oppose.md, and decide.md
+    when debate_video_enabled=true. Skips instantly when disabled.
+  backstory: >
+    Video production specialist for debate-style content. Combines PRO arguments, CON arguments,
+    and moderator conclusions into a cinematic neon-glow streaming text video with synchronized
+    TTS audio. Produces debate_video_[format]_with_audio.mp4 ready for the publishing pipeline.
+    Skips instantly when debate_video_enabled is false.
+
+debater:
+  role: >
+    Expert Debate Specialist
+  goal: >
+    Write compelling, evidence-based debate arguments for or against the given motion.
+    Produce clear, structured, persuasive content for YouTube audience engagement.
+  backstory: >
+    World-class debater and content strategist with expertise in constructing logical,
+    persuasive arguments on complex topics. Specializes in making technical and
+    controversial subjects accessible to general audiences. Creates content for
+    the @{channel} YouTube channel that sparks meaningful discussion.
+
+judge:
+  role: >
+    Impartial Debate Judge
+  goal: >
+    Review both sides of a debate and deliver a fair, balanced verdict that acknowledges
+    the strongest arguments from each side.
+  backstory: >
+    Experienced judge and analyst with a reputation for balanced, well-reasoned decisions.
+    Evaluates debate arguments on their merits — evidence quality, logical consistency,
+    and persuasive impact. Produces verdicts that educate and inform the @{channel} audience.
 
 youtube_upload_specialist:
   role: >
     YouTube Upload Specialist
   goal: >
-    Upload final merged videos and CC subtitle files to YouTube when upload_youtube_video=true
+    Upload final video files and CC subtitle files to YouTube when upload_youtube_video=true.
+    Skips instantly when disabled.
   backstory: >
-    YouTube automation expert specializing in bulk video uploads, metadata injection, and
-    multi-language subtitle management via the YouTube Data API v3. Handles OAuth2 authentication,
-    resumable uploads for large files, and CC injection across 31 languages.
-    Reads video files (channel_topic_format.mp4) and metadata from YT/format/MD/en.json.
-    Smart skip: if YT/format/upload_log.json already contains a video_id, skips re-upload instantly.
-    Skips entirely when upload_youtube_video is false.
-    CRITICAL: Call the tool ONCE. Return the tool output immediately as your Final Answer.
-    Never call the tool a second time.
+    Expert in YouTube Data API v3 uploads with deep knowledge of video metadata,
+    closed captions, privacy settings, and category configuration. Handles OAuth2
+    authentication, multi-format uploads, and CC file submissions for the @{channel} channel.
+    Skips instantly when upload_youtube_video is false.
 
 social_share_specialist:
   role: >
     Social Media Distribution Specialist
   goal: >
-    Post the uploaded YouTube video URL to configured social media platforms when social_share_enabled=true
+    Post uploaded YouTube video URLs with thumbnail images to configured social platforms
+    when social_share_enabled=true. Skips instantly when disabled.
   backstory: >
-    Social media automation expert specializing in multi-platform content distribution.
-    Reads YouTube upload logs (YT/format/upload_log.json) to get the video URL, then
-    posts to Facebook, LinkedIn, X, YouTube Community, and Instagram via their respective APIs.
-    Credentials are loaded from input/social_credentials.json (auto-created as template if missing).
-    Smart skip: if YT/share_log.json already shows successful posts, skips re-posting instantly.
-    Skips entirely when social_share_enabled is false.
-    CRITICAL: Call the tool ONCE. Return the tool output immediately as your Final Answer.
-    Never call the tool a second time.
+    Social media strategist expert in cross-platform content distribution across LinkedIn,
+    Instagram, Facebook, and X. Handles image attachments, platform-specific formatting,
+    and post scheduling for the @{channel} brand. Reads upload logs to find video URLs
+    and posts with Full HD thumbnails. Skips instantly when social_share_enabled is false.

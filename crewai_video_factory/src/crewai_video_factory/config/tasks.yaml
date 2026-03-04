@@ -432,3 +432,136 @@ share_to_social:
   dry_run: {social_share_dry_run}
   context:
     - upload_to_youtube
+
+create_debate_video:
+  description: >
+    Create a bottom-to-top streaming debate video for {topic} using PRO/CON/Moderator markdown files.
+    This task will automatically skip if debate_video_enabled is false in inputs.
+    Input files required in {output_dir}/:
+      - propose.md  (PRO arguments)
+      - oppose.md   (CON arguments)
+      - decide.md   (Moderator conclusion)
+
+    CRITICAL — call the Debate Video Tool with EXACTLY these values:
+      topic: "{topic}"
+      filename: "{filename}"
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      debate_video_enabled: {debate_video_enabled}
+      secs_per_line: {debate_secs_per_line}
+      channel: "{channel}"
+      watermark_enabled: {watermark_enabled}
+      watermark_text: "{watermark_text}"
+      video_fps: {video_fps}
+
+    Output files per format in {output_dir}/:
+      debate_video_[format].mp4              (silent video)
+      debate_video_[format]_audio.mp3        (TTS audio)
+      debate_video_[format]_with_audio.mp4   (final merged)
+      debate_video_[format]_cc_en.txt        (narration text)
+
+  expected_output: >
+    List of debate video files created per format, OR skip message if disabled.
+    Example: "✅ Shorts: debate_video_Shorts_with_audio.mp4 (4500 KB)  Duration: 120.0s"
+  agent: debate_video_producer
+
+debate_propose:
+  description: >
+    You are proposing the motion: "{topic}".
+    Write compelling, well-structured arguments IN FAVOR of this motion for the @{channel} channel.
+    This task runs only when debate_definition_enabled=true. If false, respond with just: SKIP
+
+    Format your response exactly like this:
+
+    PROPOSITION: {topic} ({start}–{end})
+
+    OPENING STATEMENT
+    [2-3 sentences establishing your position clearly]
+
+    ARGUMENT 1: [Title]
+    [3-4 sentences with evidence and reasoning]
+
+    ARGUMENT 2: [Title]
+    [3-4 sentences with evidence and reasoning]
+
+    ARGUMENT 3: [Title]
+    [3-4 sentences with evidence and reasoning]
+
+    CONCLUSION
+    [2-3 sentences summarizing why the motion should be upheld]
+
+    Keep total response under {debate_max_chars} characters.
+    Write ONLY the argument text — no tool calls, no JSON, no code.
+  expected_output: >
+    Full proposition argument as plain text, starting with "PROPOSITION: {topic} ({start}–{end})".
+    Must be under {debate_max_chars} characters. No tool calls or JSON.
+  agent: debater
+  output_file: output/{filename}/propose.md
+
+debate_oppose:
+  description: >
+    You are opposing the motion: "{topic}".
+    Write compelling, well-structured arguments AGAINST this motion for the @{channel} channel.
+    This task runs only when debate_definition_enabled=true. If false, respond with just: SKIP
+
+    Format your response exactly like this:
+
+    OPPOSITION: {topic} ({start}–{end})
+
+    OPENING STATEMENT
+    [2-3 sentences establishing your counter-position clearly]
+
+    COUNTER-ARGUMENT 1: [Title]
+    [3-4 sentences with evidence and reasoning]
+
+    COUNTER-ARGUMENT 2: [Title]
+    [3-4 sentences with evidence and reasoning]
+
+    COUNTER-ARGUMENT 3: [Title]
+    [3-4 sentences with evidence and reasoning]
+
+    CONCLUSION
+    [2-3 sentences summarizing why the motion should be rejected]
+
+    Keep total response under {debate_max_chars} characters.
+    Write ONLY the argument text — no tool calls, no JSON, no code.
+  expected_output: >
+    Full opposition argument as plain text, starting with "OPPOSITION: {topic} ({start}–{end})".
+    Must be under {debate_max_chars} characters. No tool calls or JSON.
+  agent: debater
+  context:
+    - debate_propose
+  output_file: output/{filename}/oppose.md
+
+debate_decide:
+  description: >
+    You are the judge. Review both sides of the debate on: "{topic}".
+    Read the proposition and opposition arguments and deliver a balanced verdict for the @{channel} channel.
+    This task runs only when debate_definition_enabled=true. If false, respond with just: SKIP
+
+    Format your response exactly like this:
+
+    VERDICT: {topic} ({start}–{end})
+
+    SUMMARY OF PROPOSITION
+    [2-3 sentences summarizing the PRO arguments]
+
+    SUMMARY OF OPPOSITION
+    [2-3 sentences summarizing the CON arguments]
+
+    ANALYSIS
+    [3-4 sentences comparing the strength of both sides]
+
+    DECISION
+    [2-3 sentences with your final verdict and reasoning]
+
+    Keep total response under {debate_max_chars} characters.
+    Write ONLY the verdict text — no tool calls, no JSON, no code.
+  expected_output: >
+    Full moderator verdict as plain text, starting with "VERDICT: {topic} ({start}–{end})".
+    Must be under {debate_max_chars} characters. No tool calls or JSON.
+  agent: judge
+  context:
+    - debate_propose
+    - debate_oppose
+  output_file: output/{filename}/decide.md

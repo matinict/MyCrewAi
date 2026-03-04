@@ -14,6 +14,7 @@ from crewai_video_factory.tools.definition_tool import DefinitionTool
 from crewai_video_factory.tools.definition_video_tool import DefinitionVideoTool
 from crewai_video_factory.tools.yt_upload_tool import YTUploadTool
 from crewai_video_factory.tools.social_share_tool import SocialShareTool
+from crewai_video_factory.tools.debate_video_tool import DebateVideoTool
 
 @CrewBase
 class CrewaiVideoFactory:
@@ -135,6 +136,27 @@ class CrewaiVideoFactory:
             kwargs['llm'] = self._llm('llm_social')
         return Agent(**kwargs)
 
+    @agent
+    def debater(self) -> Agent:
+        kwargs = dict(config=self.agents_config['debater'], verbose=True)
+        if self._llm('llm_debate'):
+            kwargs['llm'] = self._llm('llm_debate')
+        return Agent(**kwargs)
+
+    @agent
+    def judge(self) -> Agent:
+        kwargs = dict(config=self.agents_config['judge'], verbose=True)
+        if self._llm('llm_debate'):
+            kwargs['llm'] = self._llm('llm_debate')
+        return Agent(**kwargs)
+
+    @agent
+    def debate_video_producer(self) -> Agent:
+        kwargs = dict(config=self.agents_config['debate_video_producer'], tools=[DebateVideoTool()], verbose=True)
+        if self._llm('llm_debate'):
+            kwargs['llm'] = self._llm('llm_debate')
+        return Agent(**kwargs)
+
     @task
     def research_data(self) -> Task:
         return Task(config=self.tasks_config['research_data'])
@@ -186,6 +208,22 @@ class CrewaiVideoFactory:
     @task
     def share_to_social(self) -> Task:
         return Task(config=self.tasks_config['share_to_social'])
+
+    @task
+    def debate_propose(self) -> Task:
+        return Task(config=self.tasks_config['debate_propose'])
+
+    @task
+    def debate_oppose(self) -> Task:
+        return Task(config=self.tasks_config['debate_oppose'])
+
+    @task
+    def debate_decide(self) -> Task:
+        return Task(config=self.tasks_config['debate_decide'])
+
+    @task
+    def create_debate_video(self) -> Task:
+        return Task(config=self.tasks_config['create_debate_video'])
 
     @crew
     def crew(self, inputs: dict = None) -> Crew:

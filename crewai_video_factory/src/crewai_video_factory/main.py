@@ -71,6 +71,7 @@ def load_config():
             ("metadata_prep", "metadata_prep_config", "generate_youtube_metadata"),
             ("publisher",     "publisher_config",     "upload_youtube_video"),
             ("social",        "social_config",        "social_share_enabled"),
+            ("debate",        "debate_config",        "debate_video_enabled"),
         ]
         for _switch, _block, _flag in _block_map:
             _nested = config.pop(_block, None)
@@ -126,6 +127,11 @@ def load_config():
             'channel_lower':              '',
             'website':                    '',
             'use_label_mappings':         False,
+            # debate_config
+            'debate_definition_enabled':  False,
+            'debate_video_enabled':       False,
+            'debate_secs_per_line':       3.5,
+            'debate_max_chars':           10000,
             # computed at run() — must exist for tasks.yaml interpolation
             'topic_slug':                 '',
             'filename':                   '',
@@ -193,14 +199,12 @@ def run():
     print(f"⏱️  Speed: {fps} seconds per period")
 
     if not inputs.get('animation', False):
-        # Animation is OFF — CSV is only needed by animation tasks.
-        # metadata_prep/publisher/social all work with an existing CSV.
-        if os.path.exists(csv_path):
-            print("⭐️  Animation OFF — using existing CSV (research skipped)")
-        else:
-            print("⚠️  Animation OFF — no CSV found, research will run to generate one")
-        inputs['_skip_research'] = os.path.exists(csv_path)
-        inputs['_skip_csv']      = os.path.exists(csv_path)
+        # Animation is OFF — research & CSV are ONLY needed by animation tasks.
+        # debate / metadata_prep / publisher / social never need a CSV.
+        # Always skip — regardless of whether a CSV file exists on disk.
+        print("⭐️  Animation OFF — research & CSV generation skipped")
+        inputs['_skip_research'] = True
+        inputs['_skip_csv']      = True
     elif use_existing:
         if not os.path.exists(csv_path):
             print(f"⚠️  use_existing_csv=True but CSV not found at {csv_path}")
@@ -262,9 +266,20 @@ def run():
         print(f"   🌐 Platforms:       {plats or '(none)'}")
         print(f"   🧪 Dry Run:         {inputs.get('social_share_dry_run', False)}")
 
+    # ── Debate block ─────────────────────────────────────────
+    debate_on = inputs.get('debate', False)
+    print(f"🗣️  Debate Video:     {debate_on}")
+    if debate_on:
+        print(f"   ✍️  Debate Text:     {inputs.get('debate_definition_enabled', False)}" +
+              (f"  [max={inputs.get('debate_max_chars',10000)}ch]"
+               if inputs.get('debate_definition_enabled') else ""))
+        print(f"   🎬 Debate Video:    {inputs.get('debate_video_enabled', False)}" +
+              (f"  [secs/line={inputs.get('debate_secs_per_line', 3.5)}]"
+               if inputs.get('debate_video_enabled') else ""))
+
     # ── LLM overrides ────────────────────────────────────────
     llm_keys = ['llm_researcher', 'llm_definition', 'llm_csv', 'llm_video',
-                'llm_audio', 'llm_youtube', 'llm_upload', 'llm_social']
+                'llm_audio', 'llm_youtube', 'llm_upload', 'llm_social', 'llm_debate']
     llm_overrides = {k: inputs[k] for k in llm_keys
                      if inputs.get(k) and str(inputs[k]).strip().lower() not in ('null','none','')}
     if llm_overrides:
@@ -296,6 +311,7 @@ def run():
         # [6] create_intro_clip       [7] bar_merge                [8] add_audio
         # [9] merge_audio_video       [10] generate_youtube_metadata [11] upload_to_youtube
         # [12] share_to_social
+        # [13] debate_propose  [14] debate_oppose  [15] debate_decide  [16] create_debate_video
 
         if inputs.get('bar_race_video_enabled', False):
             final_tasks.append(full_crew.tasks[5])  # create_bar_race_video
@@ -341,6 +357,23 @@ def run():
 
         if inputs.get('social_share_enabled', False):
             final_tasks.append(full_crew.tasks[12])  # share_to_social
+
+        # Debate pipeline: text generation first, then video
+        if inputs.get('debate_definition_enabled', False):
+            # Check for existing debate files
+            _debate_dir = output_dir
+            _propose_exists = os.path.exists(os.path.join(_debate_dir, 'propose.md'))
+            _oppose_exists  = os.path.exists(os.path.join(_debate_dir, 'oppose.md'))
+            _decide_exists  = os.path.exists(os.path.join(_debate_dir, 'decide.md'))
+            if _propose_exists and _oppose_exists and _decide_exists:
+                print("⭐️  Debate files exist — skipping LLM generation (using existing)")
+            else:
+                final_tasks.append(full_crew.tasks[13])  # debate_propose
+                final_tasks.append(full_crew.tasks[14])  # debate_oppose
+                final_tasks.append(full_crew.tasks[15])  # debate_decide
+
+        if inputs.get('debate_video_enabled', False):
+            final_tasks.append(full_crew.tasks[16])  # create_debate_video
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
@@ -528,6 +561,19 @@ def run():
                 if os.path.exists(vid_merged):
                     kb = os.path.getsize(vid_merged) // 1024
                     print(f"      ✅ {vid_merged} ({kb} KB)")
+
+        if inputs.get('debate_video_enabled', False):
+            print(f"   Debate Video:")
+            for fmt in inputs['video_formats']:
+                for suffix, label in [
+                    (f'debate_video_{fmt}.mp4',            'silent'),
+                    (f'debate_video_{fmt}_audio.mp3',      'audio'),
+                    (f'debate_video_{fmt}_with_audio.mp4', 'merged'),
+                ]:
+                    fpath = f"{output_dir}/{suffix}"
+                    if os.path.exists(fpath):
+                        kb = os.path.getsize(fpath) // 1024
+                        print(f"      ✅ {fpath} ({kb} KB) [{label}]")
 
         print(f"\n⏱️  Duration tip: {fps} seconds per period")
         print("="*60 + "\n")
