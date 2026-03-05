@@ -43,6 +43,10 @@ class IntroClipToolInput(BaseModel):
     # FPS
     video_fps: int = Field(default=30, description="Output video frame rate. Must match all other tools. Default: 30.")
 
+    # Context label — drives narration wording (bar_race | debate | definition | custom)
+    intro_context: str = Field(default="bar_race", description="Context label: bar_race | debate | definition | custom string")
+    intro_slug: str    = Field(default="", description="Optional custom line 2 text — overrides context label when set")
+
     # Background color
     bg_color: tuple = Field(default=(20, 20, 40), description="RGB background color")
 
@@ -58,6 +62,18 @@ RESOLUTIONS = {
     "ShortsHD": (1080, 1920),
     "Shorts4K": (2160, 3840),
 }
+
+def _clean_text(text: str) -> str:
+    """Strip unicode math italic/bold to plain ASCII so fonts can render them."""
+    import unicodedata
+    replacements = {
+        '–': '-', '—': '--', '…': '...',
+        '‘': "'", '’': "'", '“': '"', '”': '"',
+    }
+    for uni, asc in replacements.items():
+        text = text.replace(uni, asc)
+    normalized = unicodedata.normalize('NFKD', text)
+    return normalized.encode('ascii', 'ignore').decode('ascii')
 
 FONT_SCALE = {
     "HD":       (160, 65),    # (title_size, subtitle_size)
@@ -105,6 +121,8 @@ class IntroClipTool(BaseTool):
         watermark_text: str = "@PlayOwnAi",
         watermark_opacity: int = 60,
         bg_color: tuple = (20, 20, 40),
+        intro_context: str = "bar_race",
+        intro_slug: str = "",
         audio_speed: float = 1.0,
         audio_speed_hd: float = 0.0,
         video_fps: int = 30,
@@ -166,12 +184,20 @@ class IntroClipTool(BaseTool):
                 is_portrait_fmt2 = RESOLUTIONS[fmt][1] > RESOLUTIONS[fmt][0]
                 spd = audio_speed if is_portrait_fmt2 else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
 
-                # ✅ ADD WELCOME MESSAGE
+                # intro_slug overrides context label when provided
+                _slug = intro_slug.strip() if intro_slug else ""
+                if not _slug:
+                    # Fall back to context-derived label
+                    _ctx = intro_context.strip().lower() if intro_context else "bar_race"
+                    _ctx_labels = {
+                        "bar_race":   "Watch the race — see how the leaders change over time.",
+                        "debate":     "One of the biggest debates right now.",
+                        "definition": "Let's explore what this really means.",
+                    }
+                    _slug = _ctx_labels.get(_ctx, intro_context.replace("_", " ").title())
                 narration_parts = [
                     f"Welcome to {channel}.",
-                    f"Exploring {topic} Race ",
-                    #from {start_year} to {end_year}.",
-                    "Let's see how landscape evolved, year by year."
+                    f"Exploring {topic}. {_slug}",
                 ]
                 narration = "  ".join(narration_parts)
 
@@ -299,6 +325,7 @@ class IntroClipTool(BaseTool):
         draw.text((cx, channel_y), channel, fill='white', font=title_font, anchor='mm')
 
         # --- TOPIC LINES (center) ---
+        topic = _clean_text(topic)   # strip unicode math italic → plain ASCII
         topic_words = topic.split()
         max_words_per_line = 2 if is_portrait else 4
         subtitle_lines = []

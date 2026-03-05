@@ -189,6 +189,8 @@ create_intro_clip:
       video_formats: {video_formats}
       intro_enabled: {intro_enabled}
       intro_duration: {intro_duration}
+      intro_context: "{intro_context}"
+      intro_slug: "{intro_slug}"
       channel: "{channel}"
       watermark_enabled: {watermark_enabled}
       watermark_text: "{watermark_text}"

@@ -139,7 +139,9 @@ def load_config():
             'debate_video_enabled':       False,
             'debate_secs_per_line':       3.5,
             'debate_max_chars':           10000,
-            'tts_voices':                 {},      # piper per-section voice overrides
+            'tts_voices':                 {},
+            'intro_context':              'bar_race',  # bar_race | debate | definition
+            'intro_slug':                 '',          # custom narration line 2      # piper per-section voice overrides
             # computed at run() — must exist for tasks.yaml interpolation
             'topic_slug':                 '',
             'filename':                   '',
@@ -185,6 +187,17 @@ def run():
 
     # Required by tasks.yaml templates — must be set before kickoff
     inputs['topic_slug'] = '_'.join(re.findall(r'\w+', inputs['topic'])[:4])
+
+    # Auto-set intro_context + resolve intro_slug from active pipeline
+    if not inputs.get('intro_context') or inputs.get('intro_context') == 'bar_race':
+        if inputs.get('debate', False):
+            inputs['intro_context'] = 'debate'
+        elif inputs.get('animation', False):
+            inputs['intro_context'] = 'bar_race'
+        else:
+            inputs['intro_context'] = 'bar_race'  # safe default
+    # intro_slug already flattened from active _config block by _block_map.update()
+    # — no extra work needed; setdefault ensures empty string if not in any config
     inputs.setdefault('fmt', 'HD')
 
     # FPS validation
