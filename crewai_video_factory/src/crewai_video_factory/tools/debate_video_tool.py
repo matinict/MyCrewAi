@@ -22,6 +22,31 @@ from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 
 FONT_BOLD    = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+
+# ── Piper voice configuration ─────────────────────────────────────────────────
+# Default model paths — override in data.json via piper_voices config
+PIPER_VOICES = {
+    "propose": {
+        "model":  "models/alba_medium.onnx",   # Female, confident
+        "speed":  1.05,
+    },
+    "oppose": {
+        "model":  "models/en_GB-scott-medium.onnx",  # Male, firm
+        "speed":  1.0,
+    },
+    "decide": {
+        "model":  "models/joe_medium.onnx",    # Male, authoritative moderator
+        "speed":  0.95,
+    },
+}
+
+# ── Edge-TTS 3-voice configuration ────────────────────────────────────────────
+# 3 distinct neural voices for edge-tts mode — override in data.json via tts_voices
+EDGE_TTS_VOICES = {
+    "propose": "en-US-AriaNeural",    # Female, confident, expressive
+    "oppose":  "en-US-GuyNeural",     # Male, firm, authoritative
+    "decide":  "en-GB-RyanNeural",    # Male, neutral British — moderator feel
+}
 FONT_REGULAR = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 
 
@@ -62,7 +87,8 @@ class DebateVideoInput(BaseModel):
     watermark_enabled:    bool  = Field(default=False, description="Show watermark")
     watermark_text:       str   = Field(default="@PlayOwnAi", description="Watermark text")
     video_fps:            int   = Field(default=30, description="Output video frame rate (ignored — uses 24 internally)")
-    tts_engine:           str   = Field(default="gtts", description="TTS engine: 'gtts' or 'edge-tts'")
+    tts_engine:           str   = Field(default="gtts", description="TTS engine: 'gtts', 'edge-tts', or 'piper'")
+    tts_voices:           dict  = Field(default_factory=dict, description="Per-section voice overrides for piper engine")
 
 
 class DebateVideoTool(BaseTool):
@@ -89,10 +115,23 @@ class DebateVideoTool(BaseTool):
         watermark_text: str = "@PlayOwnAi",
         video_fps: int = 30,
         tts_engine: str = "gtts",
+        tts_voices: dict = None,
     ) -> str:
 
         if not debate_video_enabled:
             return "⏭️ Debate video skipped (debate_video_enabled=false)"
+
+        # ── Merge per-run voice overrides into PIPER_VOICES ───────────────
+        # tts_voices from debate_config.piper_voices overrides module-level defaults
+        import copy
+        _voices = copy.deepcopy(PIPER_VOICES)
+        if tts_voices and isinstance(tts_voices, dict):
+            for role, vcfg in tts_voices.items():
+                if role in _voices and isinstance(vcfg, dict):
+                    _voices[role].update(vcfg)
+                elif isinstance(vcfg, dict):
+                    _voices[role] = vcfg
+            print(f"[DebateVideo] 🎤 Voice overrides applied: {list(tts_voices.keys())}")
 
         try:
             from PIL import Image, ImageDraw, ImageFont
@@ -178,7 +217,14 @@ class DebateVideoTool(BaseTool):
                 audio_path = os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")
                 final_path = os.path.join(output_dir, f"debate_video_{fmt}_with_audio.mp4")
                 video_dur  = self._get_duration(out_path)
-                self._generate_tts(spoken_text, audio_path, video_dur, tts_engine)
+                # Pass raw section texts for piper 3-voice mode
+                self._generate_tts(
+                    spoken_text, audio_path, video_dur, tts_engine,
+                    pro_text=self._section_to_spoken(pro_text,  "propose", channel),
+                    con_text=self._section_to_spoken(con_text,  "oppose",  channel),
+                    mod_text=self._section_to_spoken(moderator_text, "decide", channel),
+                    voices=_voices,
+                )
 
                 # ── Merge audio + video ───────────────────────────────────
                 if os.path.exists(audio_path):
@@ -224,6 +270,27 @@ class DebateVideoTool(BaseTool):
         text += f' Subscribe to {channel} for more insights.'
         return text
 
+    def _section_to_spoken(self, raw_md: str, role: str, channel: str) -> str:
+        """
+        Convert a single debate section (propose/oppose/decide) markdown
+        into clean spoken text suitable for piper TTS.
+        role: 'propose' | 'oppose' | 'decide'
+        """
+        import re as _re
+        lines = self._parse_lines(raw_md)
+        parts = []
+        for line in lines:
+            line = _re.sub(r'^PROPOSITION:\s*', 'In favour of the motion: ', line, flags=_re.I)
+            line = _re.sub(r'^OPPOSITION:\s*',  'Against the motion: ',      line, flags=_re.I)
+            line = _re.sub(r'^VERDICT:\s*',     'The verdict: ',              line, flags=_re.I)
+            line = _re.sub(r'^\*\*(.+?)\*\*$',  r'',                       line)
+            parts.append(line)
+        text = ' '.join(parts)
+        text = _clean_text(text)
+        if role == "decide":
+            text += f' Subscribe to {channel} for more insights.'
+        return text
+
     def _get_duration(self, video_path: str) -> float:
         """Get video duration in seconds via ffprobe."""
         r = subprocess.run(
@@ -236,12 +303,25 @@ class DebateVideoTool(BaseTool):
         except Exception:
             return 0.0
 
-    def _generate_tts(self, text: str, audio_path: str, video_dur: float, tts_engine: str = "gtts"):
+    def _generate_tts(self, text: str, audio_path: str, video_dur: float,
+                      tts_engine: str = "gtts",
+                      pro_text: str = "", con_text: str = "", mod_text: str = "",
+                      voices: dict = None):
         """
-        Generate TTS MP3 then stretch/pad to match video_dur exactly.
-        tts_engine: 'gtts'     → gTTS (offline-friendly, requires: pip install gTTS)
-                    'edge-tts' → Microsoft Edge TTS (higher quality, requires: pip install edge-tts)
-        Both engines use atempo to sync audio length to video duration.
+        Generate TTS audio then stretch to match video_dur exactly.
+
+        tts_engine:
+          'gtts'     → single gTTS voice for full text
+          'edge-tts' → single edge-tts voice for full text (en-US-AriaNeural)
+          'piper'    → 3 separate local ONNX voices:
+                         propose → alba_medium   (female, confident)
+                         oppose  → scott_medium  (male, firm)
+                         decide  → joe_medium    (male, authoritative)
+                       Requires: pip install piper-tts
+                       Falls back to gtts if piper not available.
+
+        pro_text / con_text / mod_text: section texts for piper 3-voice mode.
+        If empty, full `text` is used for all sections.
         """
         engine = tts_engine.strip().lower()
         print(f"[DebateVideo] 🔊 TTS engine: {engine}  ({len(text)} chars)  timeout=60s")
@@ -249,8 +329,20 @@ class DebateVideoTool(BaseTool):
         tmp = audio_path.replace('.mp3', '_raw.mp3')
 
         try:
-            if engine == "edge-tts":
-                self._tts_edge(text, tmp)
+            if engine == "piper":
+                self._tts_piper_3voice(
+                    pro_text or text,
+                    con_text or text,
+                    mod_text or text,
+                    tmp,
+                    voices=voices or PIPER_VOICES,
+                )
+            elif engine == "edge-tts":
+                # Use 3 distinct voices if section texts are available
+                if pro_text and con_text and mod_text:
+                    self._tts_edge_3voice(pro_text, con_text, mod_text, tmp, voices=voices)
+                else:
+                    self._tts_edge(text, tmp)
             else:
                 self._tts_gtts(text, tmp)
 
@@ -283,6 +375,120 @@ class DebateVideoTool(BaseTool):
             print(f"[DebateVideo] ⚠️ TTS error: {e}")
             if os.path.exists(tmp):
                 os.rename(tmp, audio_path)
+
+    def _tts_piper_3voice(self, pro_text: str, con_text: str, mod_text: str, out_path: str, voices: dict = None):
+        """
+        Generate 3-voice audio using local piper-tts ONNX models:
+          PRO  → alba_medium.onnx      (female, confident)
+          CON  → scott_medium.onnx     (male, firm)
+          MOD  → joe_medium.onnx       (male, authoritative)
+        Concatenates the 3 WAV clips → single MP3 via ffmpeg.
+        Falls back to gTTS on any error.
+        """
+        import tempfile
+
+        # Resolve model paths relative to project root
+        _tool_dir     = os.path.dirname(os.path.abspath(__file__))
+        _project_root = os.path.dirname(os.path.dirname(os.path.dirname(_tool_dir)))
+
+        def _abs_model(rel: str) -> str:
+            if os.path.isabs(rel):
+                return rel
+            # Try next to this file first, then project root
+            local = os.path.join(os.path.dirname(os.path.abspath(__file__)), rel)
+            if os.path.exists(local):
+                return local
+            return os.path.join(_project_root, rel)
+
+        _v = voices if voices else PIPER_VOICES
+        sections = [
+            ("PRO",  pro_text, _v.get("propose", PIPER_VOICES["propose"])),
+            ("CON",  con_text, _v.get("oppose",  PIPER_VOICES["oppose"])),
+            ("MOD",  mod_text, _v.get("decide",  PIPER_VOICES["decide"])),
+        ]
+
+        try:
+            import piper
+        except ImportError:
+            print("[DebateVideo] ⚠️ piper-tts not installed. Run: pip install piper-tts --break-system-packages")
+            print("[DebateVideo]    Falling back to gTTS ...")
+            full_text = f"{pro_text} {con_text} {mod_text}".strip()
+            self._tts_gtts(full_text, out_path)
+            return
+
+        wav_clips = []
+        tmp_dir   = tempfile.mkdtemp(prefix="debate_piper_")
+
+        try:
+            for label, text_chunk, vcfg in sections:
+                if not text_chunk.strip():
+                    print(f"[DebateVideo]   ⚠️ {label}: empty text — skipping")
+                    continue
+
+                model_path = _abs_model(vcfg["model"])
+                if not os.path.exists(model_path):
+                    print(f"[DebateVideo]   ⚠️ {label}: model not found: {model_path} — skipping")
+                    continue
+
+                wav_out = os.path.join(tmp_dir, f"debate_{label.lower()}.wav")
+                speed   = vcfg.get("speed", 1.0)
+
+                print(f"[DebateVideo]   🎤 {label}: piper {os.path.basename(model_path)} "
+                      f"speed={speed}  ({len(text_chunk)} chars)")
+
+                # piper CLI: echo "text" | piper --model model.onnx --output_file out.wav
+                result = subprocess.run(
+                    ["piper",
+                     "--model",       model_path,
+                     "--output_file", wav_out,
+                     "--length_scale", str(round(1.0 / speed, 3))],
+                    input=text_chunk.encode("utf-8"),
+                    capture_output=True,
+                    check=False
+                )
+                if result.returncode != 0 or not os.path.exists(wav_out):
+                    print(f"[DebateVideo]   ⚠️ {label}: piper failed — {result.stderr.decode()[:100]}")
+                    continue
+
+                wav_clips.append(wav_out)
+                print(f"[DebateVideo]   ✅ {label}: {wav_out}")
+
+            if not wav_clips:
+                print("[DebateVideo] ⚠️ No piper clips generated — falling back to gTTS")
+                full_text = f"{pro_text} {con_text} {mod_text}".strip()
+                self._tts_gtts(full_text, out_path)
+                return
+
+            # Concatenate WAV clips → single MP3
+            # Write ffmpeg concat list
+            concat_list = os.path.join(tmp_dir, "concat.txt")
+            with open(concat_list, "w") as _f:
+                for clip in wav_clips:
+                    _f.write(f"file '{clip}'\n")
+
+            concat_wav = os.path.join(tmp_dir, "debate_combined.wav")
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                 "-i", concat_list, "-c", "copy", concat_wav],
+                capture_output=True, check=False
+            )
+
+            # Convert combined WAV → MP3
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", concat_wav, "-q:a", "2", out_path],
+                capture_output=True, check=False
+            )
+            if result.returncode == 0 and os.path.exists(out_path):
+                print(f"[DebateVideo] ✅ piper 3-voice MP3 saved: {out_path}")
+            else:
+                print(f"[DebateVideo] ⚠️ WAV→MP3 failed — falling back to gTTS")
+                full_text = f"{pro_text} {con_text} {mod_text}".strip()
+                self._tts_gtts(full_text, out_path)
+
+        finally:
+            # Cleanup temp files
+            import shutil as _sh
+            _sh.rmtree(tmp_dir, ignore_errors=True)
 
     def _tts_gtts(self, text: str, out_path: str):
         """Generate audio using gTTS."""
@@ -334,6 +540,101 @@ class DebateVideoTool(BaseTool):
             if os.path.exists(out_path):
                 os.remove(out_path)
             self._tts_gtts(text, out_path)
+
+    def _tts_edge_3voice(self, pro_text: str, con_text: str, mod_text: str,
+                         out_path: str, voices: dict = None, timeout: int = 60):
+        """
+        Generate 3-voice audio using edge-tts neural voices:
+          PRO  → en-US-AriaNeural   (female, confident)
+          CON  → en-US-GuyNeural    (male, firm)
+          MOD  → en-GB-RyanNeural   (male, neutral British moderator)
+        Override voices via data.json debate_config.piper_voices (reuses same config key).
+        Concatenates 3 MP3 clips → single MP3 via ffmpeg.
+        Falls back to single-voice edge-tts on any error.
+        """
+        import asyncio, tempfile
+
+        # Resolve voice names — tts_voices dict reused for edge-tts too
+        _v = voices or {}
+        voice_map = {
+            "propose": _v.get("propose", {}).get("edge_voice", EDGE_TTS_VOICES["propose"])
+                       if isinstance(_v.get("propose"), dict) else EDGE_TTS_VOICES["propose"],
+            "oppose":  _v.get("oppose",  {}).get("edge_voice", EDGE_TTS_VOICES["oppose"])
+                       if isinstance(_v.get("oppose"),  dict) else EDGE_TTS_VOICES["oppose"],
+            "decide":  _v.get("decide",  {}).get("edge_voice", EDGE_TTS_VOICES["decide"])
+                       if isinstance(_v.get("decide"),  dict) else EDGE_TTS_VOICES["decide"],
+        }
+
+        try:
+            import edge_tts
+        except ImportError:
+            print("[DebateVideo] ⚠️ edge-tts not installed — falling back to gTTS")
+            full = f"{pro_text} {con_text} {mod_text}".strip()
+            self._tts_gtts(full, out_path)
+            return
+
+        sections = [
+            ("PRO", pro_text, voice_map["propose"]),
+            ("CON", con_text, voice_map["oppose"]),
+            ("MOD", mod_text, voice_map["decide"]),
+        ]
+
+        tmp_dir  = tempfile.mkdtemp(prefix="debate_edge_")
+        mp3_clips = []
+
+        async def _gen_clip(text: str, voice: str, clip_path: str):
+            communicate = edge_tts.Communicate(text, voice=voice)
+            await communicate.save(clip_path)
+
+        async def _gen_all():
+            for label, text_chunk, voice in sections:
+                if not text_chunk.strip():
+                    print(f"[DebateVideo]   ⚠️ {label}: empty — skipping")
+                    continue
+                clip_path = os.path.join(tmp_dir, f"debate_{label.lower()}.mp3")
+                print(f"[DebateVideo]   🎤 {label}: {voice}  ({len(text_chunk)} chars)")
+                try:
+                    await asyncio.wait_for(_gen_clip(text_chunk, voice, clip_path), timeout=timeout)
+                    if os.path.exists(clip_path):
+                        mp3_clips.append(clip_path)
+                        print(f"[DebateVideo]   ✅ {label}: saved {os.path.basename(clip_path)}")
+                    else:
+                        print(f"[DebateVideo]   ⚠️ {label}: no output file")
+                except asyncio.TimeoutError:
+                    print(f"[DebateVideo]   ⚠️ {label}: timed out after {timeout}s — skipping clip")
+                except Exception as e:
+                    print(f"[DebateVideo]   ⚠️ {label}: failed ({e}) — skipping clip")
+
+        try:
+            asyncio.run(_gen_all())
+
+            if not mp3_clips:
+                print("[DebateVideo] ⚠️ No edge-tts clips — falling back to single-voice")
+                full = f"{pro_text} {con_text} {mod_text}".strip()
+                self._tts_edge(full, out_path)
+                return
+
+            # Concatenate clips → single MP3 via ffmpeg concat demuxer
+            concat_list = os.path.join(tmp_dir, "concat.txt")
+            with open(concat_list, "w") as _f:
+                for clip in mp3_clips:
+                    _f.write(f"file '{clip}'\n")
+
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                 "-i", concat_list, "-c", "copy", out_path],
+                capture_output=True, check=False
+            )
+            if result.returncode == 0 and os.path.exists(out_path):
+                print(f"[DebateVideo] ✅ edge-tts 3-voice MP3 saved: {out_path}")
+            else:
+                print(f"[DebateVideo] ⚠️ concat failed — falling back to single-voice")
+                full = f"{pro_text} {con_text} {mod_text}".strip()
+                self._tts_edge(full, out_path)
+
+        finally:
+            import shutil as _sh
+            _sh.rmtree(tmp_dir, ignore_errors=True)
 
     def _merge_audio_video(self, video_path: str, audio_path: str,
                             output_path: str, video_dur: float):

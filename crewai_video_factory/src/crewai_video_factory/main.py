@@ -80,6 +80,10 @@ def load_config():
                     config.update(_nested)
             else:
                 config[_flag] = False  # guarantee gate flag is off
+
+        # Map piper_voices (from debate_config) → tts_voices for tasks.yaml interpolation
+        if config.get('piper_voices') and config.get('debate', False):
+            config.setdefault('tts_voices', config['piper_voices'])
         # ── Safe defaults for ALL tasks.yaml template variables ─────────
         # CrewAI interpolates {placeholders} in ALL task descriptions at
         # kickoff — even tasks not in final_tasks. Any missing key raises
@@ -135,6 +139,7 @@ def load_config():
             'debate_video_enabled':       False,
             'debate_secs_per_line':       3.5,
             'debate_max_chars':           10000,
+            'tts_voices':                 {},      # piper per-section voice overrides
             # computed at run() — must exist for tasks.yaml interpolation
             'topic_slug':                 '',
             'filename':                   '',
@@ -277,6 +282,11 @@ def run():
               (f"  [max={inputs.get('debate_max_chars',10000)}ch]"
                if inputs.get('debate_definition_enabled') else ""))
         print(f"   🎤 TTS Engine:      {inputs.get('tts_engine', 'gtts')}")
+        if inputs.get('tts_engine') == 'piper' and inputs.get('tts_voices'):
+            voices = inputs['tts_voices']
+            print(f"   🎙️  PRO voice:        {voices.get('propose', {}).get('model', 'default')}")
+            print(f"   🎙️  CON voice:        {voices.get('oppose',  {}).get('model', 'default')}")
+            print(f"   🎙️  MOD voice:        {voices.get('decide',  {}).get('model', 'default')}")
         print(f"   🎬 Debate Video:    {inputs.get('debate_video_enabled', False)}" +
               (f"  [secs/line={inputs.get('debate_secs_per_line', 3.5)}]"
                if inputs.get('debate_video_enabled') else ""))

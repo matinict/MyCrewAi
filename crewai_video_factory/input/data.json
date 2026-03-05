@@ -46,7 +46,24 @@
       "debate_video_enabled": true,
       "debate_secs_per_line": 3.5,
       "debate_max_chars": 10000,
-      "llm_debate": "dashscope/qwen-plus"
+      "llm_debate": "dashscope/qwen-plus",
+      "piper_voices": {
+        "propose": {
+          "model": "models/alba_medium.onnx",
+          "speed": 1.05,
+          "pitch": 0.5
+        },
+        "oppose": {
+          "model": "models/joe_medium.onnx",
+          "speed": 0.95,
+          "pitch": -0.5
+        },
+        "decide": {
+          "model": "models/en_GB-scott-medium.onnx",
+          "speed": 1,
+          "pitch": 0
+        }
+      }
   },
 
   "metadata_prep": false,
