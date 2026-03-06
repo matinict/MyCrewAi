@@ -1,19 +1,15 @@
 """
 Debate Definition Tool
 Saves agent-generated debate arguments to 3 separate files:
-  - output/{filename}/propose.md  (arguments FOR the motion)
-  - output/{filename}/oppose.md   (arguments AGAINST the motion)
-  - output/{filename}/decide.md   (moderator conclusion)
-
+output/{filename}/propose.md  (arguments FOR the motion)
+output/{filename}/oppose.md   (arguments AGAINST the motion)
+output/{filename}/decide.md   (moderator conclusion)
 Triggered by: "debate_definition_enabled": true in data.json
-
 The AGENT (deepseek/gpt-4o etc.) writes the actual debate content using its LLM.
 This tool simply saves whatever the agent writes to the correct file paths.
-
 Future use: These 3 files → debate_video_tool.py → debate videos with TTS audio
-            Pipeline: debate_video → add_audio → merge → upload
+Pipeline: debate_video → add_audio → merge → upload
 """
-
 import os
 import re
 import time
@@ -25,33 +21,33 @@ from pydantic import BaseModel, Field
 class DebateDefinitionToolInput(BaseModel):
     """Input schema for DebateDefinitionTool."""
     topic: str = Field(..., description=(
-        "Full debate topic/motion (can be long sentence). "
-        "Examples: 'AI Will Replace 80% of Jobs', "
-        "'Climate Change Is Primarily Human-Caused', "
-        "'Universal Basic Income Is Necessary'"
+        "Full debate topic/motion (can be long sentence).  "
+        "Examples: 'AI Will Replace 80% of Jobs',  "
+        "'Climate Change Is Primarily Human-Caused',  "
+        "'Universal Basic Income Is Necessary' "
     ))
     filename: str = Field(..., description=(
-        "Base filename slug generated from topic (e.g. 'AIWillReplace', 'ClimateChange'). "
-        "Topic slug from first 3-4 words, auto-generated or provided."
+        "Base filename slug generated from topic (e.g. 'AIWillReplace', 'ClimateChange').  "
+        "Topic slug from first 3-4 words, auto-generated or provided. "
     ))
     output_dir: str = Field(..., description=(
-        "Output subdirectory for debate files (e.g. 'output/AIWillReplace'). "
-        "All 3 debate files saved inside this directory."
+        "Output subdirectory for debate files (e.g. 'output/AIWillReplace').  "
+        "All 3 debate files saved inside this directory. "
     ))
     propose_text: str = Field(..., description=(
-        "Arguments supporting the motion (FOR). "
-        "Must be well-written, comprehensive arguments with reasoning. "
-        "2-3 paragraphs or bullet points."
+        "Arguments supporting the motion (FOR).  "
+        "Must be well-written, comprehensive arguments with reasoning.  "
+        "2-3 paragraphs or bullet points. "
     ))
     oppose_text: str = Field(..., description=(
-        "Arguments against the motion (AGAINST). "
-        "Must be well-written counter-arguments with reasoning. "
-        "2-3 paragraphs or bullet points."
+        "Arguments against the motion (AGAINST).  "
+        "Must be well-written counter-arguments with reasoning.  "
+        "2-3 paragraphs or bullet points. "
     ))
     decide_text: str = Field(..., description=(
-        "Moderator's conclusion/verdict. "
-        "Balanced analysis of both sides with final judgment. "
-        "2-3 paragraphs summarizing key points and conclusion."
+        "Moderator's conclusion/verdict.  "
+        "Balanced analysis of both sides with final judgment.  "
+        "2-3 paragraphs summarizing key points and conclusion. "
     ))
     debate_definition_enabled: bool = Field(default=False, description="Whether to save debate definitions")
     channel: str = Field(default="PlayOwnAi", description="Channel name for branding")
@@ -61,7 +57,6 @@ class DebateDefinitionToolInput(BaseModel):
 class DebateDefinitionTool(BaseTool):
     """
     Saves agent-written debate arguments to 3 separate files.
-
     The agent (deepseek/gpt-4o/claude etc.) writes the debate content
     using its own LLM knowledge. This tool saves the 3 argument texts:
       1. propose.md  → Arguments FOR the motion
@@ -83,9 +78,9 @@ class DebateDefinitionTool(BaseTool):
     """
     name: str = "Debate Definition Tool"
     description: str = (
-        "Saves agent-written debate arguments to 3 files (propose.md, oppose.md, decide.md). "
-        "Agent MUST write all three argument texts before calling this tool. "
-        "Triggered by debate_definition_enabled=true."
+        "Saves agent-written debate arguments to 3 files (propose.md, oppose.md, decide.md).  "
+        "Agent MUST write all three argument texts before calling this tool.  "
+        "Triggered by debate_definition_enabled=true. "
     )
     args_schema: Type[BaseModel] = DebateDefinitionToolInput
 
@@ -130,7 +125,7 @@ class DebateDefinitionTool(BaseTool):
                     f"  2. oppose_text (arguments AGAINST)\n"
                     f"  3. decide_text (moderator conclusion)\n"
                     f"Then call this tool with all three texts.\n"
-                    f"Do NOT call with empty texts."
+                    f"Do NOT call with empty texts. "
                 )
 
         # ── Anchor save path to project root via __file__ ──────────────────
@@ -171,7 +166,7 @@ class DebateDefinitionTool(BaseTool):
 
                 file_size = os.path.getsize(file_path)
                 print(f"[DebateDef] ✅ Saved: {file_path} ({file_size} bytes)")
-                print(f"[DebateDef]   Preview:")
+                print(f"[DebateDef]   Preview: ")
                 for line in cleaned_text[:300].split("\n"):
                     print(f"[DebateDef]      {line}")
 
@@ -191,13 +186,13 @@ class DebateDefinitionTool(BaseTool):
         elapsed = time.time() - t0
 
         if errors:
-            print(f"\n[DebateDef] ⚠️  Completed with errors:")
+            print(f"\n[DebateDef] ⚠️  Completed with errors: ")
             for error in errors:
                 print(f"[DebateDef]   {error}")
 
         # ── Generate summary ─────────────────────────────────────────────
         print(f"\n[DebateDef] ✅ All done in {elapsed:.1f}s")
-        print(f"[DebateDef] 📊 Summary:")
+        print(f"[DebateDef] 📊 Summary: ")
 
         summary = f"✅ Debate definitions saved in {elapsed:.1f}s\n\n"
         summary += f"Files created in: {output_dir}\n\n"
@@ -216,22 +211,48 @@ class DebateDefinitionTool(BaseTool):
             return summary
 
         summary += f"\nTopic: {topic}\n"
-        summary += f"All files ready for debate_video_tool →  debate video generation!\n"
+        summary += f"All files ready for debate_video_tool → debate video generation!\n"
 
         return summary
 
     def _clean_debate_text(self, text: str, max_chars: int = 2000) -> str:
         """
-        Clean and normalize debate argument text.
+        Clean and normalize debate argument text for video rendering.
+
+        Converts headers to wiki-style lowercase (video-friendly):
+        - "COUNTER-ARGUMENT 1:" → "argument 1"
+        - "OPENING STATEMENT:" → "opening"
+        - "CONCLUSION:" → "conclusion"
+        - "SUMMARY OF PROPOSITION:" → "pro side summary"
+        - "SUMMARY OF OPPOSITION:" → "con side summary"
 
         Removes:
         - Instruction leakage [like this]
         - Emoji icons
-        - Numbered headers that got duplicated
         - Extra blank lines
         - Trims to max_chars
         """
         lines_out = []
+
+        # Header conversion map (uppercase → wiki-style lowercase)
+        _header_map = {
+            r'^COUNTER[\s\-]?ARGUMENT\s+\d+\s*[:\-]?': 'argument',
+            r'^ARGUMENT\s+\d+\s*[:\-]?': 'argument',
+            r'^OPENING\s+STATEMENT\s*[:\-]?': 'opening',
+            r'^CLOSING\s+STATEMENT\s*[:\-]?': 'closing',
+            r'^CONCLUSION\s*[:\-]?': 'conclusion',
+            r'^SUMMARY\s+OF\s+PROPOSITION\s*[:\-]?': 'pro side summary',
+            r'^SUMMARY\s+OF\s+OPPOSITION\s*[:\-]?': 'con side summary',
+            r'^SUMMARY\s+OF\s+VERDICT\s*[:\-]?': 'verdict summary',
+            r'^ANALYSIS\s*[:\-]?': 'analysis',
+            r'^DECISION\s*[:\-]?': 'decision',
+            r'^VERDICT\s*[:\-]?': 'verdict',
+            r'^PROPOSITION\s*[:\-]?': 'proposition',
+            r'^OPPOSITION\s*[:\-]?': 'opposition',
+            r'^REBUTTAL\s*[:\-]?\d*\s*[:\-]?': 'rebuttal',
+            r'^KEY\s+POINTS?\s*[:\-]?': 'key points',
+            r'^MAIN\s+POINTS?\s*[:\-]?': 'main points',
+        }
 
         for ln in text.splitlines():
             s = ln.strip()
@@ -253,7 +274,18 @@ class DebateDefinitionTool(BaseTool):
             if re.match(r'^(Channel:|Subscribe to|Video|.*YouTube)', s, re.IGNORECASE):
                 continue
 
-            lines_out.append(s)
+            # Convert headers to wiki-style lowercase
+            for pattern, replacement in _header_map.items():
+                if re.match(pattern, s_clean, re.IGNORECASE):
+                    # Extract number if present (e.g., "ARGUMENT 1:" → "argument 1")
+                    num_match = re.search(r'\d+', s_clean)
+                    if num_match:
+                        s_clean = f"{replacement} {num_match.group()}"
+                    else:
+                        s_clean = replacement
+                    break
+
+            lines_out.append(s_clean)
 
         # Join and clean up
         text = '\n'.join(lines_out).strip()
@@ -290,11 +322,10 @@ class DebateDefinitionTool(BaseTool):
 def generate_debate_filename_slug(topic: str) -> str:
     """
     Generate a filename slug from a potentially long debate topic.
-
     Examples:
-      "AI Will Replace 80% of Jobs" → "AIWillReplace"
-      "Climate Change Is Primarily Human-Caused" → "ClimateChangeIsPrimarily"
-      "Universal Basic Income Is Necessary" → "UniversalBasicIncome"
+       "AI Will Replace 80% of Jobs" → "AIWillReplace"
+       "Climate Change Is Primarily Human-Caused" → "ClimateChangeIsPrimarily"
+       "Universal Basic Income Is Necessary" → "UniversalBasicIncome"
 
     Strategy:
       1. Extract first 3-4 words that are meaningful (skip "is", "the", "and")

@@ -680,8 +680,7 @@ class DebateVideoTool(BaseTool):
         )
         if result.returncode != 0:
             print(f"[DebateVideo] ⚠️ prepend failed: {result.stderr.decode()[:200]}")
-
- 
+     
     def _parse_lines(self, raw: str) -> List[Tuple[str, str]]:
         """
         Parse debate markdown into (line_text, section) tuples.
@@ -691,7 +690,7 @@ class DebateVideoTool(BaseTool):
         result  = []
         section = 'propose'
 
-        # ── FIXED: Remove $ anchor, allow text after colon ────────────────────
+        # ── Section headers: NO $ anchor, allow text after colon ─────────────
         _section_map = [
             (re.compile(r'^PROPOSITION\s*[:\-]?', re.I), 'propose'),
             (re.compile(r'^OPPOSITION\s*[:\-]?',     re.I), 'oppose'),
@@ -701,8 +700,8 @@ class DebateVideoTool(BaseTool):
             (re.compile(r'^DECISION\s*[:\-]?',       re.I), 'decide'),
         ]
 
-        # ── FIXED: Only skip standalone headers (with $ end anchor) ───────────
-        # Lines with content after the header (e.g., "SUMMARY: text...") are NOT skipped
+        # ── FIXED: Add $ anchor to skip ONLY standalone headers ──────────────
+        # Lines with content after colon (e.g., "SUMMARY: text...") are NOT skipped
         _skip = [
             re.compile(r'^SUMMARY\s+OF\s+(PROPOSITION|OPPOSITION|VERDICT)\s*$', re.I),  # ← Added $
             re.compile(r'^SUMMARY\s*[:\-]\s*$',                    re.I),  # ← Added $
@@ -744,19 +743,20 @@ class DebateVideoTool(BaseTool):
             matched = next((role for p, role in _section_map if p.match(line)), None)
             if matched:
                 section = matched
-                print(f"[DebateVideo] 📑 Section switch: {section}")  # ← Debug logging
+                print(f"[DebateVideo] 📑 Section switch: {section}")
                 continue
 
             # Then check skip patterns (only standalone headers now)
             if any(p.match(line) for p in _skip):
-                print(f"[DebateVideo]   ⏭️  Skipped header: {line[:50]}")  # ← Debug logging
+                print(f"[DebateVideo]   ⏭️  Skipped header: {line[:50]}")
                 continue
 
             line = line[0].upper() + line[1:]
             result.append((line, section))
 
-        print(f"[DebateVideo] 📊 Parsed {len(result)} content lines")  # ← Debug logging
+        print(f"[DebateVideo] 📊 Parsed {len(result)} content lines")
         return result
+
     def _pixel_wrap(self, text: str, font, max_px: int) -> List[str]:
         from PIL import Image as _Img, ImageDraw
         tmp  = _Img.new("RGB", (1, 1))

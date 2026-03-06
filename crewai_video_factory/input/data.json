@@ -1,9 +1,9 @@
 {
-  "topic": "𝘔𝘪𝘥L𝘦𝘷𝘦𝘭 𝘦𝘯𝘨𝘪𝘯𝘦𝘦𝘳𝘴 𝘢𝘳𝘦 𝘨𝘰𝘪𝘯𝘨 𝘵𝘰 𝘣𝘦 𝘳𝘦𝘱𝘭𝘢𝘤𝘦𝘥 𝘸𝘪𝘵𝘩 𝘈𝘐",
-  "start": 2025,
-  "end": 2026,
+  "topic": "AI Replace Entry Level Software Engineers",
+  "start":2026,
+  "end": 2027,
   "granularity": "yearly",
-  "video_formats": ["HD"],
+  "video_formats": ["HD","Shorts"],
   "use_label_mappings": false,
   "fps": 4.9,
   "video_fps": 30,
