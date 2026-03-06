@@ -27,6 +27,7 @@ class DebateDefinitionToolInput(BaseModel):
     debate_definition_enabled: bool = Field(default=False, description="Whether to process debate definitions")
     channel: str = Field(default="PlayOwnAi", description="Channel name for branding")
     debate_max_chars: int = Field(default=2000, description="Hard cap on each debate argument in characters")
+    lang_suffix: str = Field(default="En", description="Language suffix for output .md filenames. e.g. 'En', 'Bn', 'Fr'")
 
 
 class DebateDefinitionTool(BaseTool):
@@ -57,6 +58,7 @@ class DebateDefinitionTool(BaseTool):
         debate_definition_enabled: bool = False,
         channel: str = "PlayOwnAi",
         debate_max_chars: int = 2000,
+        lang_suffix: str = "En",
     ) -> str:
 
         if not debate_definition_enabled:
@@ -103,6 +105,21 @@ class DebateDefinitionTool(BaseTool):
             })
 
         elapsed = time.time() - t0
+
+        # ── Write lang-suffixed .md files ────────────────────────────────────
+        _lang = lang_suffix if lang_suffix else "En"
+        _md_map = {
+            'propose': propose_text,
+            'oppose':  oppose_text,
+            'decide':  decide_text,
+        }
+        os.makedirs(output_dir, exist_ok=True)
+        for _role, _raw in _md_map.items():
+            _cleaned = self._clean_debate_text(_raw, debate_max_chars)
+            _path = os.path.join(output_dir, f"{_role}_{_lang}.md")
+            with open(_path, 'w', encoding='utf-8') as _f:
+                _f.write(_cleaned)
+            print(f"[DebateDef] 📝 Saved: {_path} ({len(_cleaned)} chars)")
 
         summary = f"✅ Debate texts optimized in {elapsed:.1f}s\n\n"
         for r in results:

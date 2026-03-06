@@ -24,7 +24,9 @@ class DebateMergeToolInput(BaseModel):
     video_formats: List[str] = Field(..., description="List of video formats (HD, Shorts, etc.)")
     debate_merge_enabled: bool = Field(default=False, description="Whether to run debate merge")
     channel: str = Field(default="PlayOwnAi", description="Channel name for final filename")
-    topic: str = Field(default="", description="Topic name (for reference only)")
+    topic: str = Field(default="", description="Topic name used to build output filename slug")
+    topic_slug: str = Field(default="", description="Pre-computed topic slug (e.g. AI_Replace_Entry_Level). Falls back to auto-slug from topic.")
+    lang_suffix: str = Field(default="En", description="Language suffix for output filename. 'En' for English, 'Bn' for Bengali, etc.")
 
 
 class DebateMergeTool(BaseTool):
@@ -86,12 +88,20 @@ class DebateMergeTool(BaseTool):
         debate_merge_enabled: bool = False,
         channel: str = "PlayOwnAi",
         topic: str = "",
+        topic_slug: str = "",
+        lang_suffix: str = "En",
     ) -> str:
         if video_formats is None:
             video_formats = ["Shorts"]
 
         if not debate_merge_enabled:
             return "🔇 Debate merge skipped (debate_merge_enabled=false)"
+
+        # ── Build topic slug for output filename ──────────────────────────
+        import re as _re
+        if not topic_slug or topic_slug.strip() in ('', 'topic_slug'):
+            topic_slug = "_".join(_re.findall(r"\w+", topic)[:4])
+        print(f"[DebateMerge] 📛 topic_slug: {topic_slug}")
 
         # AUTO-DETECT output_dir if empty
         if not output_dir or output_dir == "" or output_dir == "output_directory":
@@ -117,20 +127,23 @@ class DebateMergeTool(BaseTool):
         for fmt in video_formats:
             fmt = fmt.strip()
 
-            # ✅ OUTPUT FILES WITH FINAL YOUTUBE-READY NAMES
-            final_video = os.path.join(output_dir, f"PlayOwnAi_Debate_AI_Replace_Entry_Level_{fmt}.mp4")
-            final_cc    = os.path.join(output_dir, f"PlayOwnAi_Debate_AI_Replace_Entry_Level_{fmt}_cc_en.txt")
+            # ✅ OUTPUT FILES — dynamic name: {channel}_{topic_slug}_{fmt}_{lang}.mp4
+            _lang = lang_suffix if lang_suffix else "En"
+            # ✅ SEGMENT DEFINITIONS
+            _lang = lang_suffix if lang_suffix else "En"
+            final_video = os.path.join(output_dir, f"{channel}_Debate_{topic_slug}_{fmt}_{_lang}.mp4")
+            final_cc    = os.path.join(output_dir, f"{channel}_Debate_{topic_slug}_{fmt}_{_lang}_cc.txt")
 
             # ✅ SMART SKIP: Check if FINAL merged video already exists
             if os.path.exists(final_video):
-                results.append(f"⏭️ {fmt}: Skipped (final video exists)")
+                size_mb = os.path.getsize(final_video) / (1024 * 1024)
+                results.append(f"✅ {fmt}: {os.path.basename(final_video)} ({size_mb:.1f} MB) — already exists, skipped")
                 print(f"[DebateMerge] ⏭️ {fmt}: Final video exists — skipping")
+                cleanup_count += self._cleanup_intermediate_files(output_dir, fmt, _lang)
                 continue
-
-            # ✅ SEGMENT DEFINITIONS
             segments = [
-                ("intro",          f"intro_{fmt}_with_audio.mp4",         f"intro_{fmt}_cc_en.txt"),
-                ("debate_video",   f"debate_video_{fmt}_with_audio.mp4",  f"debate_video_{fmt}_cc_en.txt"),
+                ("intro",          f"intro_{fmt}_{_lang}_with_audio.mp4",              f"intro_{fmt}_{_lang}_cc.txt"),
+                ("debate_video",   f"debate_video_{fmt}_{_lang}_with_audio.mp4",       f"debate_video_{fmt}_{_lang}_cc.txt"),
             ]
 
             # ── STEP 1: VERIFY ALL SEGMENT FILES EXIST ───────────────────────
@@ -169,18 +182,31 @@ class DebateMergeTool(BaseTool):
                 except Exception as e:
                     print(f"[DebateMerge] ⚠️  {fmt}: CC merge failed: {e}")
 
-            # ── STEP 3: PROBE SEGMENTS ───────────────────────────────────────
+            # ── STEP 3: PROBE SEGMENTS (video + audio) ──────────────────────
             print(f"[DebateMerge] 🔍 {fmt}: Probing compatibility...")
+            audio_signatures = set()   # full: codec,sample_rate,channels
             for vp in video_paths:
-                probe_cmd = [
-                    'ffprobe', '-v', 'error',
-                    '-select_streams', 'v:0',
+                v_probe = subprocess.run([
+                    'ffprobe', '-v', 'error', '-select_streams', 'v:0',
                     '-show_entries', 'stream=codec_name,width,height,r_frame_rate,pix_fmt',
                     '-of', 'csv=p=0', vp
-                ]
-                probe = subprocess.run(probe_cmd, capture_output=True, text=True)
-                if probe.stdout:
-                    print(f"[DebateMerge]   {os.path.basename(vp)}: {probe.stdout.strip()}")
+                ], capture_output=True, text=True)
+                a_probe = subprocess.run([
+                    'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+                    '-show_entries', 'stream=codec_name,sample_rate,channels',
+                    '-of', 'csv=p=0', vp
+                ], capture_output=True, text=True)
+                v_info = v_probe.stdout.strip() or 'no-video'
+                a_info = a_probe.stdout.strip() or 'NO-AUDIO'
+                print(f"[DebateMerge]   {os.path.basename(vp)}: V={v_info}  A={a_info}")
+                # Track FULL signature — codec+sample_rate+channels must ALL match
+                audio_signatures.add(a_probe.stdout.strip() if a_probe.stdout.strip() else 'missing')
+            # Always re-encode: mismatched sample rate (e.g. 24000 vs 44100) breaks stream-copy
+            _reencode_audio = len(audio_signatures) != 1 or 'missing' in audio_signatures
+            if _reencode_audio:
+                print(f"[DebateMerge]   ⚠️  Audio mismatch {audio_signatures} — re-encoding to aac/44100/stereo")
+            else:
+                print(f"[DebateMerge]   ✅ Audio identical ({audio_signatures}) — stream-copy safe")
 
             # ── STEP 4: CREATE CONCAT LIST ───────────────────────────────────
             concat_list = os.path.join(output_dir, f"_debate_concat_{fmt}.txt")
@@ -193,18 +219,30 @@ class DebateMergeTool(BaseTool):
                 errors.append(f"❌ {fmt}: Concat list failed: {e}")
                 continue
 
-            # ── STEP 5: FFMPEG STREAM-COPY MERGE ──────────────────────────────
+            # ── STEP 5: FFMPEG CONCAT MERGE ───────────────────────────────────
             try:
-                cmd = [
-                    'ffmpeg', '-y',
-                    '-f', 'concat',
-                    '-safe', '0',
-                    '-fflags', '+genpts',
-                    '-i', concat_list,
-                    '-c', 'copy',
-                    '-reset_timestamps', '1',
-                    final_video
-                ]
+                if _reencode_audio:
+                    # Re-encode audio to aac 44100Hz stereo — fixes codec/rate mismatches
+                    cmd = [
+                        'ffmpeg', '-y',
+                        '-f', 'concat', '-safe', '0',
+                        '-i', concat_list,
+                        '-c:v', 'copy',
+                        '-c:a', 'aac', '-ar', '44100', '-ac', '2', '-b:a', '128k',
+                        '-reset_timestamps', '1',
+                        final_video
+                    ]
+                else:
+                    cmd = [
+                        'ffmpeg', '-y',
+                        '-f', 'concat', '-safe', '0',
+                        '-fflags', '+genpts',
+                        '-i', concat_list,
+                        '-c', 'copy',
+                        '-reset_timestamps', '1',
+                        final_video
+                    ]
+                print(f"[DebateMerge]   🎬 {'re-encode audio' if _reencode_audio else 'stream-copy'} merge...")
                 result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
                 if result.returncode == 0 and os.path.exists(final_video):
@@ -213,7 +251,7 @@ class DebateMergeTool(BaseTool):
                     print(f"[DebateMerge] ✅ {fmt}: Final video created ({size_mb:.1f} MB)")
 
                     # ── STEP 6: CLEANUP ALL INTERMEDIATE + ORIGINAL FILES ──────
-                    cleanup_count += self._cleanup_intermediate_files(output_dir, fmt)
+                    cleanup_count += self._cleanup_intermediate_files(output_dir, fmt, _lang)
 
                 else:
                     stderr_msg = result.stderr.decode('utf-8', errors='ignore')[:150] if result.stderr else "Unknown"
@@ -247,7 +285,7 @@ class DebateMergeTool(BaseTool):
         print(summary)
         return summary
 
-    def _cleanup_intermediate_files(self, output_dir: str, fmt: str) -> int:
+    def _cleanup_intermediate_files(self, output_dir: str, fmt: str, lang: str = "En") -> int:
         """
         Delete ALL intro/debate files for format (intermediates + originals).
         Returns count of deleted files.
@@ -256,27 +294,27 @@ class DebateMergeTool(BaseTool):
           - intro_{fmt}.mp4 (original video)
           - intro_{fmt}_with_audio.mp4 (with audio)
           - intro_{fmt}_audio.mp3 (audio file)
-          - intro_{fmt}_cc_en.txt (CC file)
+          - intro_{fmt}_cc.txt (CC file)
           - debate_video_{fmt}.mp4 (original video)
           - debate_video_{fmt}_with_audio.mp4 (with audio)
           - debate_video_{fmt}_audio.mp3 (audio file)
-          - debate_video_{fmt}_cc_en.txt (CC file)
+          - debate_video_{fmt}_cc.txt (CC file)
 
         PRESERVES:
           - *.md files (propose.md, oppose.md, decide.md)
         """
         deleted = 0
         patterns = [
-            # All intro files (original + intermediates)
-            f"intro_{fmt}.mp4",           # original video
-            f"intro_{fmt}_with_audio.mp4",
-            f"intro_{fmt}_audio.mp3",
-            f"intro_{fmt}_cc_en.txt",
-            # All debate files (original + intermediates)
-            f"debate_video_{fmt}.mp4",     # original video
-            f"debate_video_{fmt}_with_audio.mp4",
-            f"debate_video_{fmt}_audio.mp3",
-            f"debate_video_{fmt}_cc_en.txt",
+            # debate intermediates — safe to delete after final merge
+            f"debate_video_{fmt}_{lang}.mp4",
+            f"debate_video_{fmt}_{lang}_with_audio.mp4",
+            f"debate_video_{fmt}_{lang}_audio.mp3",
+            f"debate_video_{fmt}_{lang}_cc.txt",
+            # intro CC only — keep _with_audio.mp4 so intro skips on next run
+            f"intro_{fmt}_{lang}_cc.txt",
+            f"debate_video_*.mp*", 
+            f"intro_*.txt",
+            f"intro_*.mp*",
         ]
 
         for pattern in patterns:

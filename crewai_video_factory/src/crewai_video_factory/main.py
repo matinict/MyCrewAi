@@ -5,6 +5,10 @@ Usage via CrewAI CLI:
 crewai run
 Or directly:
 python main.py
+crewai run          # English — loads input/data.json
+crewai run -bn      # Bengali — loads input/dataBn.json
+crewai run -fr      # French  — loads input/dataFr.json
+crewai run -ar      # Arabic  — loads input/dataAr.json
 Configuration: Edit input/data.json to customize settings
 """
 import os
@@ -24,13 +28,20 @@ warnings.filterwarnings("ignore", message=".*litellm.*proxy.*")
 import os
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"  # prevents proxy server import
 def load_config():
-    """Load configuration from input/data.json"""
-    config_path = "input/data.json"
-    if not os.path.exists(config_path):
+    """Load configuration from input/data.json, with optional override file.
+
+    Override file specified via INPUT_CONFIG env var:
+        INPUT_CONFIG=input/dataBn.json crewai run
+
+    Override keys are merged on top of data.json — only specify what changes.
+    """
+    base_path     = "input/data.json"
+    override_path = os.environ.get("INPUT_CONFIG", "").strip()
+
+    if not os.path.exists(base_path):
         print("❌ Configuration file not found: input/data.json")
         print("📝 Please create input/data.json with your settings")
         print("📖 See input/data.schema.json for available options")
-        # Create example file
         example_config = {
             "topic": "Programming Language",
             "start": 2015,
@@ -48,15 +59,35 @@ def load_config():
             "generate_youtube_metadata": True
         }
         os.makedirs("input", exist_ok=True)
-        with open(config_path, 'w') as f:
+        with open(base_path, 'w') as f:
             json.dump(example_config, f, indent=2)
-        print(f"✅ Created example config at: {config_path}")
+        print(f"✅ Created example config at: {base_path}")
         print("⚠️  Please edit it and run again")
         sys.exit(1)
 
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(base_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
+
+        # ── Apply override file if specified ──────────────────────────────
+        if override_path:
+            if not os.path.exists(override_path):
+                print(f"❌ INPUT_CONFIG file not found: {override_path}")
+                sys.exit(1)
+            with open(override_path, 'r', encoding='utf-8') as f:
+                overrides = json.load(f)
+            # Deep-merge nested *_config blocks; shallow-merge everything else
+            for k, v in overrides.items():
+                if k.startswith('_'):
+                    continue  # skip comment keys
+                if isinstance(v, dict) and isinstance(config.get(k), dict):
+                    config[k] = {**config[k], **v}
+                else:
+                    config[k] = v
+            print(f"✅ Override applied: {override_path}  "
+                  f"({len([k for k in overrides if not k.startswith('_')])} keys)")
+        else:
+            print(f"📄 Config: {base_path}")
 
         # ── Parent-switch-aware flattening ────────────────────────────────
         # When switch=true  → hoist all nested block keys to top level
@@ -77,15 +108,14 @@ def load_config():
             else:
                 config[_flag] = False  # guarantee gate flag is off
 
-        # Map voice config → tts_voices based on active tts_engine.
-        # piper_voices → tts_voices when tts_engine=piper
-        # edge_tts_voices → tts_voices when tts_engine=edge-tts
+        # Map engine-specific voices → tts_voices so debate_video_tool receives them.
         _engine = config.get('tts_engine', 'gtts').strip().lower()
         _is_debate = config.get('debate', False)
-        if _is_debate and _engine == 'piper' and config.get('piper_voices'):
-            config.setdefault('tts_voices', config['piper_voices'])
-        elif _is_debate and _engine == 'edge-tts' and config.get('edge_tts_voices'):
-            config['tts_voices'] = config['edge_tts_voices']
+        if _is_debate:
+            if _engine == 'piper' and config.get('piper_voices'):
+                config['tts_voices'] = config['piper_voices']
+            elif _engine == 'edge-tts' and config.get('edge_tts_voices'):
+                config['tts_voices'] = config['edge_tts_voices']
 
         # ── Safe defaults for ALL tasks.yaml template variables ─────────
         # CrewAI interpolates {placeholders} in ALL task descriptions at
@@ -151,6 +181,7 @@ def load_config():
             'filename':                   '',
             'output_dir':                 '',
             'fmt':                        'HD',
+            'lang_suffix':                 'En',
         }
         for k, v in _task_defaults.items():
             config.setdefault(k, v)
@@ -165,11 +196,32 @@ def load_config():
         print(f"❌ Error loading config: {e}")
         sys.exit(1)
 
-# Load configuration from input/data.json
+# ── Lang flag: crewai run -bn  →  INPUT_CONFIG=input/dataBn.json ─────────
+# Scans sys.argv for -xx flags (2-letter ISO code). Sets INPUT_CONFIG env var
+# so load_config() picks it up. Default (no flag) = input/data.json (English).
+_lang_flag = next((a for a in sys.argv[1:] if re.match(r'^-[a-z]{2}$', a)), None)
+if _lang_flag:
+    _lang_code   = _lang_flag[1:]          # e.g. "bn"
+    _config_file = f"input/data{_lang_code.upper()}.json"   # e.g. input/dataBN.json
+    # Also try camelCase: dataBn.json
+    import glob as _glob
+    _candidates = _glob.glob(f"input/data{_lang_code}*.json", ) +                   _glob.glob(f"input/data{_lang_code.upper()}*.json")
+    _candidates = [c for c in _candidates if c != "input/data.json"]
+    if _candidates:
+        _config_file = sorted(_candidates)[0]
+    os.environ["INPUT_CONFIG"] = _config_file
+    print(f"🌐 Lang flag: {_lang_flag}  →  {_config_file}")
+    # Remove flag from argv so crewai doesn't choke on it
+    sys.argv = [a for a in sys.argv if a != _lang_flag]
+
+_LANG_SUFFIX = _lang_flag[1:].capitalize() if _lang_flag else "En"  # e.g. "Bn", "Fr", "En"
+
+# Load configuration from input/data.json (+ optional INPUT_CONFIG override)
 DEFAULT_INPUTS = load_config()
 
 def run():
     inputs = DEFAULT_INPUTS.copy()
+    inputs['lang_suffix'] = _LANG_SUFFIX   # e.g. "En" | "Bn" | "Fr"
 
     # Parse CLI arguments (override input/data.json if provided)
     if len(sys.argv) > 1:
@@ -178,7 +230,7 @@ def run():
             inputs.update(custom_inputs)
             print("✅ CLI arguments override applied")
         except json.JSONDecodeError:
-            print("⚠️  Invalid JSON in CLI args. Using input/data.json values")
+            pass  # not JSON — already handled as lang flag above
 
     # Generate filename from topic
     words = re.findall(r'\w+', inputs['topic'])[:3]
@@ -300,18 +352,24 @@ def run():
         print(f"   ✍️  Debate Text:     {inputs.get('debate_definition_enabled', False)}" +
               (f"  [max={inputs.get('debate_max_chars',10000)}ch]"
                if inputs.get('debate_definition_enabled') else ""))
-        print(f"   🎤 TTS Engine:      {inputs.get('tts_engine', 'gtts')}")
-        if inputs.get('tts_engine') == 'piper' and inputs.get('tts_voices'):
-            voices = inputs['tts_voices']
-            print(f"   🎙️  PRO voice:        {voices.get('propose', {}).get('model', 'default')}")
-            print(f"   🎙️  CON voice:        {voices.get('oppose',  {}).get('model', 'default')}")
-            print(f"   🎙️  MOD voice:        {voices.get('decide',  {}).get('model', 'default')}")
+        _eng = inputs.get('tts_engine', 'gtts')
+        print(f"   🎤 TTS Engine:      {_eng}")
+        if inputs.get('tts_voices'):
+            _v = inputs['tts_voices']
+            if _eng == 'piper':
+                print(f"   🎙️  PRO voice:  {_v.get('propose', {}).get('model', 'default')}")
+                print(f"   🎙️  CON voice:  {_v.get('oppose',  {}).get('model', 'default')}")
+                print(f"   🎙️  MOD voice:  {_v.get('decide',  {}).get('model', 'default')}")
+            elif _eng == 'edge-tts':
+                print(f"   🎙️  PRO voice:  {_v.get('propose', {}).get('edge_voice', 'default')}")
+                print(f"   🎙️  CON voice:  {_v.get('oppose',  {}).get('edge_voice', 'default')}")
+                print(f"   🎙️  MOD voice:  {_v.get('decide',  {}).get('edge_voice', 'default')}")
+        else:
+            print(f"   🎙️  Voices:        (engine defaults)")
         print(f"   🎬 Debate Video:    {inputs.get('debate_video_enabled', False)}" +
               (f"  [secs/line={inputs.get('debate_secs_per_line', 3.5)}]"
                if inputs.get('debate_video_enabled') else ""))
-
-        print(f"   🔀 Debate Merge:    {inputs.get('debate_merge_enabled', False)}")  # ✅ ADD THIS
-        print(f"   [DEBUG] debate_merge_enabled value: {inputs.get('debate_merge_enabled')}")  # ✅ ADD THIS
+        print(f"   🔀 Debate Merge:    {inputs.get('debate_merge_enabled', False)}")
 
     # ── LLM overrides ────────────────────────────────────────
     llm_keys = ['llm_researcher', 'llm_definition', 'llm_csv', 'llm_video',
@@ -388,13 +446,19 @@ def run():
 
         # Debate pipeline: text generation first, then video, then merge
         if inputs.get('debate_definition_enabled', False):
-            # Check for existing debate files
+            # Check for existing lang-suffixed debate files
             _debate_dir = output_dir
-            _propose_exists = os.path.exists(os.path.join(_debate_dir, 'propose.md'))
-            _oppose_exists  = os.path.exists(os.path.join(_debate_dir, 'oppose.md'))
-            _decide_exists  = os.path.exists(os.path.join(_debate_dir, 'decide.md'))
+            _lang = inputs.get('lang_suffix', 'En')
+            _propose_exists = os.path.exists(os.path.join(_debate_dir, f'propose_{_lang}.md'))
+            _oppose_exists  = os.path.exists(os.path.join(_debate_dir, f'oppose_{_lang}.md'))
+            _decide_exists  = os.path.exists(os.path.join(_debate_dir, f'decide_{_lang}.md'))
+            # Fallback: check plain .md for backward compat
+            if not (_propose_exists and _oppose_exists and _decide_exists):
+                _propose_exists = _propose_exists or os.path.exists(os.path.join(_debate_dir, 'propose.md'))
+                _oppose_exists  = _oppose_exists  or os.path.exists(os.path.join(_debate_dir, 'oppose.md'))
+                _decide_exists  = _decide_exists  or os.path.exists(os.path.join(_debate_dir, 'decide.md'))
             if _propose_exists and _oppose_exists and _decide_exists:
-                print("⭐️  Debate files exist — skipping LLM generation (using existing)")
+                print(f"⭐️  Debate files exist ({_lang}) — skipping LLM generation (using existing)")
             else:
                 final_tasks.append(full_crew.tasks[13])  # debate_propose
                 final_tasks.append(full_crew.tasks[14])  # debate_oppose
@@ -487,19 +551,22 @@ def run():
                         print(f"      ✅ {video_file}")
 
         if inputs.get('intro_enabled', False):
-            print(f"   Intro Clips:")
+            _lang = inputs.get('lang_suffix', 'En')
+            _merge_ran = inputs.get('debate_merge_enabled', False)
+            _intro_files = []
             for fmt in inputs['video_formats']:
-                for suffix, label in [
-                    ('', 'video'),
-                    ('_audio.mp3', 'audio'),
-                    ('_with_audio.mp4', 'merged'),
+                for fpath, label in [
+                    (f"{output_dir}/intro_{fmt}_{_lang}.mp4",            'video'),
+                    (f"{output_dir}/intro_{fmt}_{_lang}_audio.mp3",      'audio'),
+                    (f"{output_dir}/intro_{fmt}_{_lang}_with_audio.mp4", 'merged'),
                 ]:
-                    ext = '.mp4' if suffix == '' else ''
-                    intro_file = f"{output_dir}/intro_{fmt}{suffix}{ext}" if suffix else f"{output_dir}/intro_{fmt}.mp4"
-                    intro_file = f"{output_dir}/intro_{fmt}{suffix}" if suffix else f"{output_dir}/intro_{fmt}.mp4"
-                    if os.path.exists(intro_file):
-                        kb = os.path.getsize(intro_file) // 1024
-                        print(f"      ✅ {intro_file} ({kb} KB) [{label}]")
+                    if os.path.exists(fpath):
+                        _intro_files.append((fpath, label))
+            if not _merge_ran and _intro_files:
+                print(f"   Intro Clips:")
+                for fpath, label in _intro_files:
+                    kb = os.path.getsize(fpath) // 1024
+                    print(f"      ✅ {fpath} ({kb} KB) [{label}]")
 
         if inputs.get('bar_race_video_enabled', False):
             print(f"   Videos (Bar Race):")
@@ -594,25 +661,32 @@ def run():
                     print(f"      ✅ {vid_merged} ({kb} KB)")
 
         if inputs.get('debate_video_enabled', False):
-            print(f"   Debate Video:")
+            _lang = inputs.get('lang_suffix', 'En')
+            _merge_ran = inputs.get('debate_merge_enabled', False)
+            _debate_files = []
             for fmt in inputs['video_formats']:
                 for suffix, label in [
-                    (f'debate_video_{fmt}.mp4',            'silent'),
-                    (f'debate_video_{fmt}_audio.mp3',      'audio'),
-                    (f'debate_video_{fmt}_with_audio.mp4', 'merged'),
+                    (f'debate_video_{fmt}_{_lang}.mp4',            'silent'),
+                    (f'debate_video_{fmt}_{_lang}_audio.mp3',      'audio'),
+                    (f'debate_video_{fmt}_{_lang}_with_audio.mp4', 'merged'),
                 ]:
                     fpath = f"{output_dir}/{suffix}"
                     if os.path.exists(fpath):
-                        kb = os.path.getsize(fpath) // 1024
-                        print(f"      ✅ {fpath} ({kb} KB) [{label}]")
+                        _debate_files.append((fpath, label))
+            if not _merge_ran and _debate_files:
+                print(f"   Debate Video:")
+                for fpath, label in _debate_files:
+                    kb = os.path.getsize(fpath) // 1024
+                    print(f"      ✅ {fpath} ({kb} KB) [{label}]")
 
         # ✅ NEW: Debate Merge Output Summary (ADDED)
         if inputs.get('debate_merge_enabled', False):
             print(f"   Debate Merged (Final):")
             import re as _re
             topic_slug = "_".join(_re.findall(r"\w+", inputs["topic"])[:4])
+            _lang = inputs.get('lang_suffix', 'En')
             for fmt in inputs['video_formats']:
-                merged = f"{output_dir}/{inputs['channel']}_{topic_slug}_{fmt}.mp4"
+                merged = f"{output_dir}/{inputs['channel']}_Debate_{topic_slug}_{fmt}_{_lang}.mp4"
                 if os.path.exists(merged):
                     size_mb = os.path.getsize(merged) / (1024*1024)
                     print(f"      ✅ {merged} ({size_mb:.1f} MB)")

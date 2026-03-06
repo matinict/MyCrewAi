@@ -46,6 +46,9 @@ class IntroClipToolInput(BaseModel):
     intro_context: str = Field(default="bar_race", description="Context label: bar_race | debate | definition | custom string")
     intro_slug: str    = Field(default="", description="Optional custom line 2 text — overrides context label when set")
 
+    # Language suffix for output filenames
+    lang_suffix: str = Field(default="En", description="Language suffix appended to output filenames. e.g. 'En', 'Bn', 'Fr'")
+
     # Background color
     bg_color: tuple = Field(default=(20, 20, 40), description="RGB background color")
 
@@ -125,6 +128,7 @@ class IntroClipTool(BaseTool):
         audio_speed: float = 1.0,
         audio_speed_hd: float = 0.0,
         video_fps: int = 30,
+        lang_suffix: str = "En",
     ) -> str:
 
         # --- SKIP ---
@@ -161,9 +165,10 @@ class IntroClipTool(BaseTool):
 
             try:
                 # ✅ SMART SKIP — check what already exists
-                silent_video = os.path.join(output_dir, f"intro_{fmt}.mp4")
-                audio_file = os.path.join(output_dir, f"intro_{fmt}_audio.mp3")
-                final_merged = os.path.join(output_dir, f"intro_{fmt}_with_audio.mp4")
+                _lang = lang_suffix if lang_suffix else "En"
+                silent_video = os.path.join(output_dir, f"intro_{fmt}_{_lang}.mp4")
+                audio_file = os.path.join(output_dir, f"intro_{fmt}_{_lang}_audio.mp3")
+                final_merged = os.path.join(output_dir, f"intro_{fmt}_{_lang}_with_audio.mp4")
 
                 # Skip everything if final merged exists
                 if os.path.exists(final_merged):
@@ -204,13 +209,13 @@ class IntroClipTool(BaseTool):
                 narration = "   ".join(narration_parts)
 
                 # Save narration as cc_en.txt alongside video
-                cc_path = os.path.join(output_dir, f"intro_{fmt}_cc_en.txt")
+                cc_path = os.path.join(output_dir, f"intro_{fmt}_{_lang}_cc.txt")
                 with open(cc_path, 'w', encoding='utf-8') as _f:
                     _f.write(narration)
                 print(f"[IntroClipTool] 📝 Narration saved: {cc_path} ({len(narration)} chars)")
 
                 # ── AUDIO FIRST (for auto-duration mode) ───────────────────
-                audio_path = os.path.join(output_dir, f"intro_{fmt}_audio.mp3")
+                audio_path = os.path.join(output_dir, f"intro_{fmt}_{_lang}_audio.mp3")
                 audio_duration = fmt_duration
 
                 if auto_duration or not os.path.exists(silent_video):
@@ -239,7 +244,7 @@ class IntroClipTool(BaseTool):
                     output_path = silent_video
                 else:
                     # Render silent video with calculated duration
-                    output_path = os.path.join(output_dir, f"intro_{fmt}.mp4")
+                    output_path = os.path.join(output_dir, f"intro_{fmt}_{_lang}.mp4")
                     print(f"[IntroClipTool] 🎬 Rendering {fmt} video ({audio_duration:.1f}s)...")
                     self._create_intro_clip(
                         fmt=fmt,
@@ -264,7 +269,7 @@ class IntroClipTool(BaseTool):
                 print(f"[IntroClipTool] ✅ {fmt} video created ({size_kb} KB)")
 
                 # ── MERGE: bake audio into video → intro_{fmt}_with_audio.mp4 ──
-                merged_path = os.path.join(output_dir, f"intro_{fmt}_with_audio.mp4")
+                merged_path = os.path.join(output_dir, f"intro_{fmt}_{_lang}_with_audio.mp4")
                 if audio_path and os.path.exists(audio_path):
                     import subprocess as _sp
                     merge_cmd = [
@@ -272,7 +277,7 @@ class IntroClipTool(BaseTool):
                         '-i', output_path,
                         '-i', audio_path,
                         '-c:v', 'copy',
-                        '-c:a', 'aac',
+                        '-c:a', 'aac', '-ar', '44100', '-ac', '1',
                         '-shortest',
                         merged_path,
                     ]

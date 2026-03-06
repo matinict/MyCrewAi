@@ -1,0 +1,16 @@
+{
+  "_comment": "Bengali override — all other settings inherited from data.json. Run with: python main.py dataBn.json",
+
+  "audio_lang": "bn",
+  "audio_tld": "com",
+
+  "tts_engine": "edge-tts",
+
+  "debate_config": {
+    "edge_tts_voices": {
+      "propose": { "edge_voice": "bn-BD-NabanitaNeural" },
+      "oppose":  { "edge_voice": "bn-BD-PradeepNeural" },
+      "decide":  { "edge_voice": "bn-IN-TanishaaNeural" }
+    }
+  }
+}

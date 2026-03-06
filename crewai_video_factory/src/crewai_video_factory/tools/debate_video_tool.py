@@ -79,6 +79,7 @@ class DebateVideoInput(BaseModel):
     video_fps:            int   = Field(default=30, description="Output video frame rate")
     tts_engine:           str   = Field(default="gtts", description="TTS engine: 'gtts', 'edge-tts', or 'piper'")
     tts_voices:           dict  = Field(default_factory=dict, description="Per-section voice overrides from data.json")
+    lang_suffix:          str   = Field(default="En", description="Language suffix for output filenames. e.g. 'En', 'Bn', 'Fr'")
 
 
 class DebateVideoTool(BaseTool):
@@ -114,6 +115,7 @@ class DebateVideoTool(BaseTool):
         video_fps: int = 30,
         tts_engine: str = "gtts",
         tts_voices: dict = None,
+        lang_suffix: str = "En",
     ) -> str:
 
         if not debate_video_enabled:
@@ -152,16 +154,26 @@ class DebateVideoTool(BaseTool):
             output_dir = os.path.join(_project_root, output_dir)
         os.makedirs(output_dir, exist_ok=True)
 
-        # ── Load debate content ────────────────────────────────────────────
-        propose_file = os.path.join(output_dir, "propose.md")
-        oppose_file  = os.path.join(output_dir, "oppose.md")
-        decide_file  = os.path.join(output_dir, "decide.md")
+        # ── Load debate content (lang-suffixed md files) ─────────────────────
+        _lang = lang_suffix if lang_suffix else "En"
+        propose_file = os.path.join(output_dir, f"propose_{_lang}.md")
+        oppose_file  = os.path.join(output_dir, f"oppose_{_lang}.md")
+        decide_file  = os.path.join(output_dir, f"decide_{_lang}.md")
 
-        for label, path in [("propose.md", propose_file),
-                             ("oppose.md",  oppose_file),
-                             ("decide.md",  decide_file)]:
+        # Fallback to plain .md if lang-suffixed not found (backward compat)
+        for label, path, fallback in [
+            (f"propose_{_lang}.md", propose_file, os.path.join(output_dir, "propose.md")),
+            (f"oppose_{_lang}.md",  oppose_file,  os.path.join(output_dir, "oppose.md")),
+            (f"decide_{_lang}.md",  decide_file,  os.path.join(output_dir, "decide.md")),
+        ]:
             if not os.path.exists(path):
-                return f"❌ {label} not found in {output_dir}"
+                if os.path.exists(fallback):
+                    print(f"[DebateVideo] ⚠️  {label} not found — using fallback {os.path.basename(fallback)}")
+                    if 'propose' in label: propose_file = fallback
+                    elif 'oppose' in label: oppose_file = fallback
+                    else: decide_file = fallback
+                else:
+                    return f"❌ {label} not found in {output_dir}"
 
         with open(propose_file, 'r', encoding='utf-8') as f:
             pro_text = f.read().strip()
@@ -182,10 +194,11 @@ class DebateVideoTool(BaseTool):
         for fmt in video_formats:
             try:
                 # ── File paths (intermediate — merge tool handles final naming) ──
-                silent_video = os.path.join(output_dir, f"debate_video_{fmt}.mp4")
-                audio_file   = os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")
-                final_merged = os.path.join(output_dir, f"debate_video_{fmt}_with_audio.mp4")
-                cc_path      = os.path.join(output_dir, f"debate_video_{fmt}_cc_en.txt")
+                _lang = lang_suffix if lang_suffix else "En"
+                silent_video = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}.mp4")
+                audio_file   = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_audio.mp3")
+                final_merged = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_with_audio.mp4")
+                cc_path      = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_cc.txt")
 
                 # ✅ SMART SKIP: Check if debate video with audio already exists
                 if os.path.exists(final_merged):

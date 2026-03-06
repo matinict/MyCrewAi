@@ -1,9 +1,11 @@
 {
   "topic": "AI Replace Entry Level Software Engineers",
-  "start":2026,
+  "start": 2026,
   "end": 2027,
   "granularity": "yearly",
-  "video_formats": ["Shorts"],
+  "video_formats": [
+     "Shorts"
+  ],
   "use_label_mappings": false,
   "fps": 4.9,
   "video_fps": 30,
@@ -11,6 +13,8 @@
   "audio_speed": 1.1,
   "audio_speed_hd": 1.0,
   "tts_engine": "edge-tts",
+  "audio_lang": "en",
+  "audio_tld": "com",
   "channel": "PlayOwnAi",
   "channel_lower": "playownai",
   "website": "youtube.com/@PlayOwnAi",
@@ -21,80 +25,93 @@
   "intro_duration": 0,
   "intro_duration_hd": 0,
 
+
   "animation": false,
-    "animation_config": {
-      "animation_styles": [ "bar_race" ],
-        "intro_slug":"Watch Race how the leaders change over time",
-        "use_existing_csv": true,
-        "definition_enabled": true,
-        "use_existing_definition": true,
-        "definition_max_chars": 1500,
-        "definition_video": true,
-        "bar_race_video_enabled": true,
-        "bar_merge_enabled": true,
-        "video_enabled": false,
-        "audio_enabled": false,
-        "merge_audio_video": false,
-        "llm_researcher": "deepseek/deepseek-chat",
-        "llm_definition": "deepseek/deepseek-chat",
-        "llm_csv": "deepseek/deepseek-chat",
-        "llm_video": "ollama/llama3.1:8b",
-        "llm_audio": "ollama/deepseek-r1:1.5b"
-      },
-  "debate": true,
-    "debate_config": {
-      "intro_slug":"One of the biggest debates in tech right now",
-      "debate_definition_enabled": true,
-      "debate_max_chars": 1000,
-      "llm_debate": "dashscope/qwen-plus",
-      "debate_video_enabled": true,
-      "debate_secs_per_line": 3.5,
-      "debate_merge_enabled": true,
-      "piper_voices": {
-        "propose": {
-          "model": "models/joe_medium.onnx",
-          "speed": 1.05,
-          "pitch": 0.5
-        },
-        "oppose": {
-          "model": "models/alba_medium.onnx",
-          "speed": 1.05,
-          "pitch": -0.5
-        },
-        "decide": {
-          "model": "models/en_GB-scott-medium.onnx",
-          "speed": 1,
-          "pitch": 0
-        }
-      }
+  "animation_config": {
+    "animation_styles": [
+      "bar_race"
+    ],
+    "intro_slug": "Watch Race how the leaders change over time",
+    "use_existing_csv": true,
+    "definition_enabled": true,
+    "use_existing_definition": true,
+    "definition_max_chars": 1500,
+    "definition_video": true,
+    "bar_race_video_enabled": true,
+    "bar_merge_enabled": true,
+    "video_enabled": false,
+    "audio_enabled": false,
+    "merge_audio_video": false,
+    "llm_researcher": "deepseek/deepseek-chat",
+    "llm_definition": "deepseek/deepseek-chat",
+    "llm_csv": "deepseek/deepseek-chat",
+    "llm_video": "ollama/llama3.1:8b",
+    "llm_audio": "ollama/deepseek-r1:1.5b"
   },
-
-  "metadata_prep": false,
-    "metadata_prep_config": {
-      "generate_youtube_metadata": true
+  "debate": true,
+  "debate_config": {
+    "intro_slug": "One of the biggest debates in tech right now",
+    "debate_definition_enabled": true,
+    "debate_max_chars": 1000,
+    "llm_debate": "dashscope/qwen-plus",
+    "debate_video_enabled": true,
+    "debate_secs_per_line": 3.5,
+    "debate_merge_enabled": false,
+    "piper_voices": {
+      "propose": {
+        "model": "models/joe_medium.onnx",
+        "speed": 1.05,
+        "pitch": 0.5
+      },
+      "oppose": {
+        "model": "models/alba_medium.onnx",
+        "speed": 1.05,
+        "pitch": -0.5
+      },
+      "decide": {
+        "model": "models/en_GB-scott-medium.onnx",
+        "speed": 1,
+        "pitch": 0
+      }
     },
-
-  "publisher": false,
-    "publisher_config": {
-      "upload_youtube_video": true,
-      "upload_privacy": "private",
-      "upload_category_id": "28",
-      "upload_cc": true,
-      "upload_notify_subscribers": false,
-      "upload_client_secrets_file": "client_secrets.json",
-      "upload_token_file": "token.json",
-      "llm_youtube": "ollama/qwen2.5:latest",
-      "llm_upload": "ollama/qwen2.5-coder:3b",
-      "llm_embed": "ollama/nomic-embed-text:latest"
-    },
-
-  "social": false,
-    "social_config": {
-      "social_share_enabled": true,
-      "social_share_dry_run": false,
-      "social_platforms": ["LinkedIn","Instagram","Facebook"],
-      "llm_social": "ollama/nomic-embed-text:latest"
-
+    "edge_tts_voices": {
+      "propose": {
+        "edge_voice": "en-US-GuyNeural"
+      },
+      "oppose": {
+        "edge_voice": "en-US-AriaNeural"
+      },
+      "decide": {
+        "edge_voice": "en-GB-RyanNeural"
+      }
     }
-
+  },
+  "metadata_prep": false,
+  "metadata_prep_config": {
+    "generate_youtube_metadata": true
+  },
+  "publisher": false,
+  "publisher_config": {
+    "upload_youtube_video": true,
+    "upload_privacy": "private",
+    "upload_category_id": "28",
+    "upload_cc": true,
+    "upload_notify_subscribers": false,
+    "upload_client_secrets_file": "client_secrets.json",
+    "upload_token_file": "token.json",
+    "llm_youtube": "ollama/qwen2.5:latest",
+    "llm_upload": "ollama/qwen2.5-coder:3b",
+    "llm_embed": "ollama/nomic-embed-text:latest"
+  },
+  "social": false,
+  "social_config": {
+    "social_share_enabled": true,
+    "social_share_dry_run": false,
+    "social_platforms": [
+      "LinkedIn",
+      "Instagram",
+      "Facebook"
+    ],
+    "llm_social": "ollama/nomic-embed-text:latest"
+  }
 }

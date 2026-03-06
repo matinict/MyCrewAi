@@ -99,13 +99,35 @@
     "description": "TTS engine used for ALL video audio generation (definition_video, debate_video, and future tools). Set once here — applies globally.",
     "enum": [
       "gtts",
-      "edge-tts"
+      "edge-tts",
+      "piper"
     ],
     "default": "gtts",
     "example": "edge-tts",
     "options": {
-      "gtts": "Google Text-to-Speech. Offline-friendly. Install: pip install gTTS",
-      "edge-tts": "Microsoft Edge Neural TTS. Higher quality voice (en-US-AriaNeural). Install: pip install edge-tts. Falls back to gtts if not installed."
+      "gtts": "Google Text-to-Speech. Free, offline-friendly. Install: pip install gTTS",
+      "edge-tts": "Microsoft Edge Neural TTS. High-quality neural voices. Install: pip install edge-tts. Uses edge_tts_voices config. Falls back to gtts if not installed.",
+      "piper": "Local offline neural TTS via ONNX models. Fastest, no internet needed. Install: pip install piper-tts. Uses piper_voices config. Falls back to gtts if not installed."
+    }
+  },
+  "audio_lang": {
+    "type": "string",
+    "description": "Language code for gTTS narration (non-debate audio tools: bar_race, definition_video). Only applies when tts_engine=gtts.",
+    "default": "en",
+    "example": "en",
+    "tip": "Use standard BCP-47 codes: 'en', 'fr', 'de', 'es', 'zh', etc."
+  },
+  "audio_tld": {
+    "type": "string",
+    "description": "Top-level domain for gTTS accent selection. Only applies when tts_engine=gtts and audio_lang=en.",
+    "default": "com",
+    "example": "com",
+    "options": {
+      "com": "US English (default)",
+      "co.uk": "British English",
+      "com.au": "Australian English",
+      "co.in": "Indian English",
+      "ca": "Canadian English"
     }
   },
   "use_label_mappings": {
@@ -303,12 +325,23 @@
       },
       "debate_video_enabled": {
         "type": "boolean",
-        "description": "Render debate video from propose.md + oppose.md + decide.md. Output: debate_video_{fmt}_with_audio.mp4. Same rendering engine as definition_video_tool.",
+        "description": "Render debate video from propose.md + oppose.md + decide.md. Output: debate_video_{fmt}_with_audio.mp4.",
         "example": true
+      },
+      "debate_merge_enabled": {
+        "type": "boolean",
+        "description": "Concatenate debate_video segments into final video per format. Output: {channel}_{topic_slug}_{fmt}.mp4.",
+        "example": true,
+        "note": "Requires debate_video_{fmt}_with_audio.mp4 to exist."
+      },
+      "intro_slug": {
+        "type": "string",
+        "description": "Custom subtitle line shown in the debate intro clip (if intro_enabled=true). Replaces the default second line.",
+        "example": "One of the biggest debates in tech right now"
       },
       "debate_secs_per_line": {
         "type": "number",
-        "description": "Seconds each line is shown as active in the debate video. Same as secs_per_line in definition_video_tool.",
+        "description": "Seconds each line is shown as active in the debate video.",
         "minimum": 0.5,
         "maximum": 10.0,
         "default": 3.5,
@@ -320,18 +353,18 @@
       },
       "debate_max_chars": {
         "type": "integer",
-        "description": "Maximum characters for each debate argument (propose, oppose, decide). Hard cap applied by DebateDefinitionTool.",
+        "description": "Maximum characters for each debate section (propose, oppose, decide). Hard cap applied by DebateDefinitionTool.",
         "minimum": 500,
         "maximum": 50000,
         "default": 10000,
-        "example": 10000
+        "example": 1000
       },
       "llm_debate": {
         "type": [
           "string",
           "null"
         ],
-        "description": "LLM for debater and judge agents (debate_propose, debate_oppose, debate_decide tasks). null=project default. Tip: use a strong model for better argument quality.",
+        "description": "LLM for debater and judge agents. null=project default.",
         "examples": {
           "null": "Use project default model",
           "deepseek/deepseek-chat": "Cost-effective, strong reasoning",
@@ -340,7 +373,210 @@
           "anthropic/claude-3-5-sonnet": "Excellent balanced reasoning"
         },
         "example": "dashscope/qwen-plus"
+      },
+      "piper_voices": {
+        "type": "object",
+        "description": "Per-role voice config for tts_engine=piper. Only read when tts_engine=piper. Install: pip install piper-tts. Download models from https://huggingface.co/rhasspy/piper-voices",
+        "properties": {
+          "propose": {
+            "type": "object",
+            "description": "Voice for PROPOSITION section.",
+            "properties": {
+              "model": {
+                "type": "string",
+                "description": "Path to .onnx model file.",
+                "example": "models/joe_medium.onnx"
+              },
+              "speed": {
+                "type": "number",
+                "description": "Speed multiplier. 1.0=normal.",
+                "default": 1.0,
+                "example": 1.05
+              },
+              "pitch": {
+                "type": "number",
+                "description": "Pitch in semitones. 0=neutral.",
+                "default": 0,
+                "example": 0.5
+              }
+            }
+          },
+          "oppose": {
+            "type": "object",
+            "description": "Voice for OPPOSITION section.",
+            "properties": {
+              "model": {
+                "type": "string",
+                "example": "models/alba_medium.onnx"
+              },
+              "speed": {
+                "type": "number",
+                "default": 1.0,
+                "example": 1.05
+              },
+              "pitch": {
+                "type": "number",
+                "default": 0,
+                "example": -0.5
+              }
+            }
+          },
+          "decide": {
+            "type": "object",
+            "description": "Voice for VERDICT section.",
+            "properties": {
+              "model": {
+                "type": "string",
+                "example": "models/en_GB-scott-medium.onnx"
+              },
+              "speed": {
+                "type": "number",
+                "default": 1.0,
+                "example": 1.0
+              },
+              "pitch": {
+                "type": "number",
+                "default": 0,
+                "example": 0
+              }
+            }
+          }
+        }
+      },
+      "edge_tts_voices": {
+        "type": "object",
+        "description": "Per-role neural voice config for tts_engine=edge-tts. Only read when tts_engine=edge-tts. Install: pip install edge-tts. List voices: python -c \"import asyncio, edge_tts; asyncio.run(edge_tts.list_voices_async())\"",
+        "properties": {
+          "propose": {
+            "type": "object",
+            "description": "Voice for PROPOSITION section.",
+            "properties": {
+              "edge_voice": {
+                "type": "string",
+                "description": "Edge TTS voice name.",
+                "example": "en-US-GuyNeural"
+              }
+            }
+          },
+          "oppose": {
+            "type": "object",
+            "description": "Voice for OPPOSITION section.",
+            "properties": {
+              "edge_voice": {
+                "type": "string",
+                "example": "en-US-AriaNeural"
+              }
+            }
+          },
+          "decide": {
+            "type": "object",
+            "description": "Voice for VERDICT section.",
+            "properties": {
+              "edge_voice": {
+                "type": "string",
+                "example": "en-GB-RyanNeural"
+              }
+            }
+          }
+        }
       }
+    }
+  },
+  "_section_lang": "════════════════════════════════════════",
+  "lang_suffix": {
+    "type": "string",
+    "description": "Auto-injected at runtime from CLI flag (e.g. -bn → 'Bn'). Do NOT set this manually in data.json — it is always derived from the CLI flag. Defaults to 'En' when no flag is given.",
+    "example": "En",
+    "runtime_values": {
+      "crewai run": "En  (default)",
+      "crewai run -bn": "Bn",
+      "crewai run -fr": "Fr",
+      "crewai run -ar": "Ar",
+      "crewai run -de": "De",
+      "crewai run -es": "Es",
+      "crewai run -zh": "Zh"
+    },
+    "affects": [
+      "propose_{lang}.md / oppose_{lang}.md / decide_{lang}.md",
+      "intro_{fmt}_{lang}.mp4 / intro_{fmt}_{lang}_with_audio.mp4 / intro_{fmt}_{lang}_cc.txt",
+      "debate_video_{fmt}_{lang}.mp4 / debate_video_{fmt}_{lang}_with_audio.mp4 / debate_video_{fmt}_{lang}_cc.txt",
+      "{channel}_Debate_{topic_slug}_{fmt}_{lang}.mp4",
+      "{channel}_Debate_{topic_slug}_{fmt}_{lang}_cc.txt"
+    ]
+  },
+  "_lang_override_files": {
+    "description": "To run in a different language, create input/dataXx.json (where Xx = capitalized ISO code). Only fields that differ from data.json need to be included — the override is deep-merged on top of data.json.",
+    "convention": "input/data{Lang}.json — e.g. dataBn.json, dataFr.json, dataAr.json",
+    "cli": "crewai run -{xx}  — e.g.  crewai run -bn  |  crewai run -fr  |  crewai run -ar",
+    "minimal_override_example": {
+      "_comment": "Bengali override — only fields that differ from data.json",
+      "tts_engine": "edge-tts",
+      "debate_config": {
+        "edge_tts_voices": {
+          "propose": {
+            "edge_voice": "bn-BD-NabanitaNeural"
+          },
+          "oppose": {
+            "edge_voice": "bn-BD-PradeepNeural"
+          },
+          "decide": {
+            "edge_voice": "bn-IN-TanishaaNeural"
+          }
+        }
+      }
+    },
+    "supported_edge_tts_voices_by_lang": {
+      "Bengali (bn)": [
+        "bn-BD-NabanitaNeural",
+        "bn-BD-PradeepNeural",
+        "bn-IN-TanishaaNeural",
+        "bn-IN-BashkarNeural"
+      ],
+      "French (fr)": [
+        "fr-FR-DeniseNeural",
+        "fr-FR-HenriNeural",
+        "fr-CA-SylvieNeural",
+        "fr-CA-JeanNeural"
+      ],
+      "Arabic (ar)": [
+        "ar-SA-ZariyahNeural",
+        "ar-SA-HamedNeural",
+        "ar-EG-SalmaNeural",
+        "ar-EG-ShakirNeural"
+      ],
+      "German (de)": [
+        "de-DE-KatjaNeural",
+        "de-DE-ConradNeural",
+        "de-AT-IngridNeural"
+      ],
+      "Spanish (es)": [
+        "es-ES-ElviraNeural",
+        "es-ES-AlvaroNeural",
+        "es-MX-DaliaNeural",
+        "es-MX-JorgeNeural"
+      ],
+      "Chinese (zh)": [
+        "zh-CN-XiaoxiaoNeural",
+        "zh-CN-YunxiNeural",
+        "zh-TW-HsiaoChenNeural"
+      ],
+      "Hindi (hi)": [
+        "hi-IN-SwaraNeural",
+        "hi-IN-MadhurNeural"
+      ],
+      "Japanese (ja)": [
+        "ja-JP-NanamiNeural",
+        "ja-JP-KeitaNeural"
+      ],
+      "Korean (ko)": [
+        "ko-KR-SunHiNeural",
+        "ko-KR-InJoonNeural"
+      ],
+      "Portuguese (pt)": [
+        "pt-BR-FranciscaNeural",
+        "pt-BR-AntonioNeural",
+        "pt-PT-RaquelNeural"
+      ]
     }
   },
   "_section_metadata": "════════════════════════════════════════",
