@@ -8,25 +8,24 @@ import matplotlib
 matplotlib.use('Agg')
 matplotlib.rcParams['figure.max_open_warning'] = 0
 
-# ---------------------------------------------------------------------------
-# Input Schema
-# ---------------------------------------------------------------------------
+# ── Input Schema ───────────────────────────────────────────────────────────
 class IntroClipToolInput(BaseModel):
     """Input schema for IntroClipTool."""
     topic: str = Field(..., description="Topic name (e.g. 'LLM Popularity')")
     start_year: int = Field(..., description="First year in the dataset")
     end_year: int = Field(..., description="Last year in the dataset")
     output_dir: str = Field(..., description="Directory to save the intro clip(s)")
+
     # Format control
     video_formats: list = Field(
         default=["Shorts", "HD"],
         description="Formats to generate intro for: 'HD', 'Shorts', '2K', '4K', 'Shorts4K'"
     )
 
-    # Intro settings
+    # Intro settings — 0 or null = auto-calculate from audio
     intro_enabled: bool = Field(default=True, description="Generate intro clip(s)")
-    intro_duration: int = Field(default=10, description="Duration of intro in seconds for Shorts/portrait formats")
-    intro_duration_hd: int = Field(default=15, description="Duration of intro in seconds for HD/landscape formats. 0 = use intro_duration for all formats.")
+    intro_duration: int = Field(default=0, description="Duration of intro in seconds for Shorts/portrait formats. 0 = auto from audio")
+    intro_duration_hd: int = Field(default=0, description="Duration of intro in seconds for HD/landscape formats. 0 = auto from audio")
 
     # Branding
     channel: str = Field(default="PlayOwnAi", description="Channel name shown on intro screen")
@@ -50,9 +49,7 @@ class IntroClipToolInput(BaseModel):
     # Background color
     bg_color: tuple = Field(default=(20, 20, 40), description="RGB background color")
 
-# ---------------------------------------------------------------------------
-# Resolution map (matches bar_race_video_tool.py conventions)
-# ---------------------------------------------------------------------------
+# ── Resolution map (matches bar_race_video_tool.py conventions) ───────────
 RESOLUTIONS = {
     "HD":       (1920, 1080),
     "2K":       (2560, 1440),
@@ -68,7 +65,7 @@ def _clean_text(text: str) -> str:
     import unicodedata
     replacements = {
         '–': '-', '—': '--', '…': '...',
-        '‘': "'", '’': "'", '“': '"', '”': '"',
+        '‘': "'", '’': "'", '"': '"', '"': '"',
     }
     for uni, asc in replacements.items():
         text = text.replace(uni, asc)
@@ -87,9 +84,7 @@ FONT_SCALE = {
 
 OPTIMAL_THREADS = min(multiprocessing.cpu_count(), 6)
 
-# ---------------------------------------------------------------------------
-# Tool
-# ---------------------------------------------------------------------------
+# ── Tool ───────────────────────────────────────────────────────────────────
 class IntroClipTool(BaseTool):
     """
     Generates intro screen video clip(s) for bar race videos.
@@ -97,11 +92,15 @@ class IntroClipTool(BaseTool):
     for each requested video format (HD, Shorts, 2K, 4K, etc.).
     Optionally overlays a semi-transparent watermark.
     Triggered by intro_enabled=true in data.json.
+
+    AUTO-DURATION MODE:
+    Set intro_duration=0 or intro_duration_hd=0 to auto-calculate from audio length.
     """
     name: str = "Intro Clip Tool"
     description: str = (
-        "Creates branded intro screen MP4 clip(s) for bar race videos. "
-        "Supports HD, Shorts, 2K, 4K formats. "
+        "Creates branded intro screen MP4 clip(s) for bar race videos.  "
+        "Supports HD, Shorts, 2K, 4K formats.  "
+        "Set intro_duration=0 for auto-duration from audio.  "
         "Triggered by intro_enabled=true."
     )
     args_schema: Type[BaseModel] = IntroClipToolInput
@@ -114,8 +113,8 @@ class IntroClipTool(BaseTool):
         output_dir: str,
         video_formats: list = None,
         intro_enabled: bool = True,
-        intro_duration: int = 10,
-        intro_duration_hd: int = 15,
+        intro_duration: int = 0,
+        intro_duration_hd: int = 0,
         channel: str = "PlayOwnAi",
         watermark_enabled: bool = False,
         watermark_text: str = "@PlayOwnAi",
@@ -137,7 +136,7 @@ class IntroClipTool(BaseTool):
 
         # --- DEPENDENCY CHECK ---
         try:
-            from PIL import Image, ImageDraw, ImageFont  # noqa: F401
+            from PIL import Image, ImageDraw, ImageFont
         except ImportError:
             return "❌ FATAL: Pillow not installed. Run: pip install Pillow"
 
@@ -145,7 +144,7 @@ class IntroClipTool(BaseTool):
             return "❌ FATAL: ffmpeg not found. Install: sudo apt install ffmpeg"
 
         try:
-            from gtts import gTTS  # noqa: F401
+            from gtts import gTTS
         except ImportError:
             return "❌ FATAL: gTTS not installed. Run: pip install gTTS"
 
@@ -171,35 +170,38 @@ class IntroClipTool(BaseTool):
                     results.append(f"⏭️ {fmt}: Skipped (final exists: {os.path.basename(final_merged)})")
                     continue
 
-                # Per-format duration
+                # Per-format duration — 0 = auto from audio
                 is_portrait_fmt = RESOLUTIONS[fmt][1] > RESOLUTIONS[fmt][0]
                 fmt_duration = (
                     intro_duration if is_portrait_fmt
                     else (intro_duration_hd if intro_duration_hd > 0 else intro_duration)
                 )
-                print(f"[IntroClipTool] {fmt} duration: {fmt_duration}s ({'portrait' if is_portrait_fmt else 'landscape'})")
 
-                # ✅ CRITICAL FIX: Build & save narration text IMMEDIATELY per format
-                # This ensures intro_{fmt}_cc_en.txt is created for EVERY format BEFORE video rendering
+                # Check if auto-duration mode (0 or null)
+                auto_duration = (fmt_duration == 0 or fmt_duration is None)
+
+                print(f"[IntroClipTool] {fmt} duration: {'AUTO (from audio)' if auto_duration else f'{fmt_duration}s'} ({'portrait' if is_portrait_fmt else 'landscape'})")
+
+                # Build narration text
                 is_portrait_fmt2 = RESOLUTIONS[fmt][1] > RESOLUTIONS[fmt][0]
                 spd = audio_speed if is_portrait_fmt2 else (audio_speed_hd if audio_speed_hd > 0.0 else audio_speed)
 
                 # intro_slug overrides context label when provided
                 _slug = intro_slug.strip() if intro_slug else ""
                 if not _slug:
-                    # Fall back to context-derived label
                     _ctx = intro_context.strip().lower() if intro_context else "bar_race"
                     _ctx_labels = {
-                        "bar_race":   "Watch the race — see how the leaders change over time.",
-                        "debate":     "One of the biggest debates right now.",
-                        "definition": "Let's explore what this really means.",
+                        "bar_race":    "Watch the race — see how the leaders change over time.",
+                        "debate":      "One of the biggest debates right now.",
+                        "definition":  "Let's explore what this really means.",
                     }
                     _slug = _ctx_labels.get(_ctx, intro_context.replace("_", " ").title())
+
                 narration_parts = [
                     f"Welcome to {channel}.",
                     f"Exploring {topic}. {_slug}",
                 ]
-                narration = "  ".join(narration_parts)
+                narration = "   ".join(narration_parts)
 
                 # Save narration as cc_en.txt alongside video
                 cc_path = os.path.join(output_dir, f"intro_{fmt}_cc_en.txt")
@@ -207,16 +209,41 @@ class IntroClipTool(BaseTool):
                     _f.write(narration)
                 print(f"[IntroClipTool] 📝 Narration saved: {cc_path} ({len(narration)} chars)")
 
-                # If silent video exists but merged doesn't, skip rendering
+                # ── AUDIO FIRST (for auto-duration mode) ───────────────────
+                audio_path = os.path.join(output_dir, f"intro_{fmt}_audio.mp3")
+                audio_duration = fmt_duration
+
+                if auto_duration or not os.path.exists(silent_video):
+                    # Generate audio first to measure duration
+                    print(f"[IntroClipTool] 🎙 Generating {fmt} intro audio (speed={spd}) → {audio_path}")
+                    try:
+                        self._generate_audio(narration, audio_path, spd)
+                        if os.path.exists(audio_path):
+                            audio_duration = self._get_duration(audio_path)
+                            print(f"[IntroClipTool] 🔊 Audio duration: {audio_duration:.1f}s")
+                        else:
+                            errors.append(f"⚠️ {fmt} audio failed to generate")
+                            audio_duration = fmt_duration if fmt_duration > 0 else 10
+                    except Exception as ae:
+                        errors.append(f"⚠️ {fmt} audio failed: {ae}")
+                        audio_duration = fmt_duration if fmt_duration > 0 else 10
+                else:
+                    # Audio exists from previous run
+                    if os.path.exists(audio_path):
+                        audio_duration = self._get_duration(audio_path)
+                        print(f"[IntroClipTool] 🔊 Using existing audio: {audio_duration:.1f}s")
+
+                # ── VIDEO RENDER ───────────────────────────────────────────
                 if os.path.exists(silent_video):
                     print(f"[IntroClipTool] ⏭️ {fmt}: Silent video exists — skipping render")
                     output_path = silent_video
                 else:
-                    # Render silent video (missing)
+                    # Render silent video with calculated duration
                     output_path = os.path.join(output_dir, f"intro_{fmt}.mp4")
+                    print(f"[IntroClipTool] 🎬 Rendering {fmt} video ({audio_duration:.1f}s)...")
                     self._create_intro_clip(
                         fmt=fmt,
-                        duration=fmt_duration,
+                        duration=audio_duration,  # ✅ Use audio duration
                         output_path=output_path,
                         topic=topic,
                         start_year=start_year,
@@ -236,16 +263,7 @@ class IntroClipTool(BaseTool):
                 size_kb = os.path.getsize(output_path) // 1024
                 print(f"[IntroClipTool] ✅ {fmt} video created ({size_kb} KB)")
 
-                # --- AUDIO: generate intro narration MP3 using PRE-SAVED narration ---
-                audio_path = os.path.join(output_dir, f"intro_{fmt}_audio.mp3")
-                print(f"[IntroClipTool] 🎙 Generating {fmt} intro audio (speed={spd}) → {audio_path}")
-                try:
-                    self._generate_audio(narration, audio_path, spd)
-                except Exception as ae:
-                    errors.append(f"⚠️ {fmt} audio failed: {ae}")
-                    audio_path = None
-
-                # --- MERGE: bake audio into video → intro_{fmt}_with_audio.mp4 ---
+                # ── MERGE: bake audio into video → intro_{fmt}_with_audio.mp4 ──
                 merged_path = os.path.join(output_dir, f"intro_{fmt}_with_audio.mp4")
                 if audio_path and os.path.exists(audio_path):
                     import subprocess as _sp
@@ -261,8 +279,8 @@ class IntroClipTool(BaseTool):
                     merge_result = _sp.run(merge_cmd, capture_output=True, check=False)
                     if merge_result.returncode == 0 and os.path.exists(merged_path):
                         merged_kb = os.path.getsize(merged_path) // 1024
-                        results.append(f"intro_{fmt}.mp4 ({size_kb} KB) + audio → intro_{fmt}_with_audio.mp4 ({merged_kb} KB)")
-                        print(f"[IntroClipTool] ✅ {fmt} merged: intro_{fmt}_with_audio.mp4 ({merged_kb} KB)")
+                        results.append(f"intro_{fmt}.mp4 ({size_kb} KB) + audio → intro_{fmt}_with_audio.mp4 ({merged_kb} KB, {audio_duration:.1f}s)")
+                        print(f"[IntroClipTool] ✅ {fmt} merged: intro_{fmt}_with_audio.mp4 ({merged_kb} KB, {audio_duration:.1f}s)")
                     else:
                         results.append(f"intro_{fmt}.mp4 ({size_kb} KB) [audio merge failed]")
                         errors.append(f"⚠️ {fmt} merge failed: {merge_result.stderr.decode()[:150]}")
@@ -285,14 +303,11 @@ class IntroClipTool(BaseTool):
             summary += "\n\n⚠️ Some issues:\n" + "\n".join(errors)
         return summary
 
-    # ---------------------------------------------------------------------------
-    # Core: create a single intro clip for one format
-    # ---------------------------------------------------------------------------
-
+    # ── Core: create a single intro clip for one format ───────────────────
     def _create_intro_clip(
         self,
         fmt: str,
-        duration: int,
+        duration: float,  # ✅ Now float for auto-duration
         output_path: str,
         topic: str,
         start_year: int,
@@ -310,7 +325,7 @@ class IntroClipTool(BaseTool):
         width, height = RESOLUTIONS[fmt]
         title_size, subtitle_size = FONT_SCALE[fmt]
         is_portrait = height > width
-        fps = video_fps  # ✅ Controlled from data.json → video_fps
+        fps = video_fps
 
         # --- BACKGROUND ---
         img = Image.new('RGB', (width, height), color=tuple(bg_color))
@@ -325,7 +340,7 @@ class IntroClipTool(BaseTool):
         draw.text((cx, channel_y), channel, fill='white', font=title_font, anchor='mm')
 
         # --- TOPIC LINES (center) ---
-        topic = _clean_text(topic)   # strip unicode math italic → plain ASCII
+        topic = _clean_text(topic)
         topic_words = topic.split()
         max_words_per_line = 2 if is_portrait else 4
         subtitle_lines = []
@@ -355,12 +370,12 @@ class IntroClipTool(BaseTool):
         temp_img_path = output_path.replace('.mp4', '_frame.png')
         img.save(temp_img_path)
 
-        # --- CONVERT PNG → MP4 via ffmpeg (no moviepy needed) ---
+        # --- CONVERT PNG → MP4 via ffmpeg ---
         cmd = [
             'ffmpeg', '-y',
             '-loop', '1',
             '-i', temp_img_path,
-            '-t', str(duration),
+            '-t', str(duration),  # ✅ Float duration supported
             '-c:v', 'libx264',
             '-preset', 'faster',
             '-crf', '18',
@@ -377,10 +392,7 @@ class IntroClipTool(BaseTool):
         if os.path.exists(temp_img_path):
             os.remove(temp_img_path)
 
-    # ---------------------------------------------------------------------------
-    # Helpers
-    # ---------------------------------------------------------------------------
-
+    # ── Helpers ────────────────────────────────────────────────────────────
     def _generate_audio(self, text: str, output_path: str, speed: float):
         """Generate MP3 from text via gTTS + ffmpeg atempo speed control."""
         from gtts import gTTS
@@ -425,6 +437,19 @@ class IntroClipTool(BaseTool):
 
         size_kb = os.path.getsize(output_path) // 1024 if os.path.exists(output_path) else 0
         print(f"[IntroClipTool] ✅ {label} audio done in {elapsed:.1f}s ({size_kb}KB)")
+
+    def _get_duration(self, media_path: str) -> float:
+        """Get media duration in seconds via ffprobe."""
+        import subprocess
+        r = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "csv=p=0", media_path],
+            capture_output=True, text=True
+        )
+        try:
+            return float(r.stdout.strip())
+        except Exception:
+            return 0.0
 
     def _load_fonts(self, title_size: int, subtitle_size: int):
         from PIL import ImageFont
