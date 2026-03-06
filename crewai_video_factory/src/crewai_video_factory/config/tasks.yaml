@@ -576,33 +576,34 @@ debate_merge:
   description: >
     Concatenate intro + debate video segments WITH AUDIO into a single final MP4 per format.
     This task will automatically skip if debate_merge_enabled is false in inputs.
-  Pipeline per format (where [format] is each entry in {video_formats}):
-    intro_[format]_with_audio.mp4
-      +
-    debate_video_[format]_with_audio.mp4
-        → ffmpeg concat (with -reset_timestamps 1 for perfect sync)
-        → {channel}_{topic_slug}_[format].mp4
 
-  Also merges CC text files:
-    intro_[format]_cc_en.txt
-      +
-    debate_video_[format]_cc_en.txt
-        → {channel}_{topic_slug}_[format]_cc_en.txt
+    Pipeline per format (where [format] is each entry in {video_formats}):
+      intro_[format]_with_audio.mp4
+        +
+      debate_video_[format]_with_audio.mp4
+          ffmpeg concat (with -reset_timestamps 1 for perfect sync)
+          {channel}_{topic_slug}_[format].mp4
 
-  CRITICAL — call the Debate Merge Tool with EXACTLY these values:
-    output_dir: "{output_dir}"
-    video_formats: {video_formats}
-    debate_merge_enabled: {debate_merge_enabled}    # ✅ Must match _task_defaults key
-    channel: "{channel}"
-    topic: "{topic}"
+    Also merges CC text files:
+      intro_[format]_cc_en.txt
+        +
+      debate_video_[format]_cc_en.txt
+          {channel}_{topic_slug}_[format]_cc_en.txt
 
-  Output files per format:
-    • {channel}_{topic_slug}_[format].mp4          (final video with perfect audio sync)
-    • {channel}_{topic_slug}_[format]_cc_en.txt    (merged closed captions text)
+    CRITICAL — call the Debate Merge Tool with EXACTLY these values:
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      debate_merge_enabled: {debate_merge_enabled}
+      channel: "{channel}"
+      topic: "{topic}"
 
-  Example for HD format:
-    output/{filename}/PlayOwnAi_AIReplaceEntry_HD.mp4
-    output/{filename}/PlayOwnAi_AIReplaceEntry_HD_cc_en.txt
+    Output files per format:
+      {channel}_{topic_slug}_[format].mp4          (final video with perfect audio sync)
+      {channel}_{topic_slug}_[format]_cc_en.txt    (merged closed captions text)
+
+    Example for Shorts format:
+      output/{filename}/PlayOwnAi_AIReplaceEntry_Shorts.mp4
+      output/{filename}/PlayOwnAi_AIReplaceEntry_Shorts_cc_en.txt
 
   expected_output: >
     A message starting with "✅ SUCCESS" listing the final files created.

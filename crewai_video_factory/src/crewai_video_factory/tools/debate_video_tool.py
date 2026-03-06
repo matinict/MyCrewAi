@@ -199,11 +199,21 @@ class DebateVideoTool(BaseTool):
                         os.remove(_stale)
                         print(f"[DebateVideo] 🗑️  Removed stale: {os.path.basename(_stale)}")
 
-                # ── Parse lines ───────────────────────────────────────────
-                raw_lines   = self._parse_lines(raw)
+                # ── Parse lines ─────────────────────────────────────────────
+                # HD/4K/landscape formats → full content, no filtering
+                # Shorts/portrait formats → short-form (ARG 1 + COUNTER-ARG 1 + DECISION only)
+                _is_short_form = fmt in ("Shorts", "ShortsHD", "Shorts4K")
+                raw_lines = self._parse_lines(raw, short_form=_is_short_form)
+
+                # Append subscribe line to video lines so audio & video end together
+                _subscribe_text = _clean_text(f'Subscribe to {channel} for more insights.')
+                raw_lines.append((_subscribe_text, 'decide'))
+
                 spoken_text = self._lines_to_spoken(raw_lines, topic, channel)
 
-                print(f"[DebateVideo] [{fmt}] Parsed {len(raw_lines)} lines")
+                print(f"[DebateVideo] [{fmt}] Parsed {len(raw_lines)} lines  "
+                      f"({'short-form' if _is_short_form else 'full content'})")
+
 
                 # ── Save narration text ───────────────────────────────────
                 with open(cc_path, 'w', encoding='utf-8') as _f:
@@ -229,9 +239,9 @@ class DebateVideoTool(BaseTool):
                 video_dur  = self._get_duration(out_path)
                 self._generate_tts(
                     spoken_text, audio_path, video_dur, tts_engine,
-                    pro_text=self._section_to_spoken(pro_text,   "propose", channel),
-                    con_text=self._section_to_spoken(con_text,   "oppose",  channel),
-                    mod_text=self._section_to_spoken(moderator_text,  "decide", channel),
+                    pro_text=self._section_to_spoken(pro_text,        "propose", channel, short_form=_is_short_form),
+                    con_text=self._section_to_spoken(con_text,        "oppose",  channel, short_form=_is_short_form),
+                    mod_text=self._section_to_spoken(moderator_text,  "decide",  channel, short_form=_is_short_form),
                     voices=_voices,
                 )
 
@@ -266,25 +276,29 @@ class DebateVideoTool(BaseTool):
     # ── Helpers ───────────────────────────────────────────────────────────
 
     def _lines_to_spoken(self, lines: list, topic: str, channel: str) -> str:
-        """Convert display (line, section) tuples to spoken narration."""
+        """Convert display (line, section) tuples to spoken narration.
+        Subscribe line is already appended to raw_lines before this is called.
+        """
         parts = []
         for item in lines:
             parts.append(item[0] if isinstance(item, tuple) else item)
-        text  = ' '.join(parts)
-        text  = _clean_text(text)
-        text += f'  Subscribe to {channel} for more insights.'
+        text = ' '.join(parts)
+        text = _clean_text(text)
         return text
 
-    def _section_to_spoken(self, raw_md: str, role: str, channel: str) -> str:
-        """Convert a single debate section to clean spoken text (short-form filtered)."""
-        items = self._parse_lines(raw_md, default_section=role)
+    def _section_to_spoken(self, raw_md: str, role: str, channel: str,
+                           short_form: bool = True) -> str:
+        """Convert a single debate section to clean spoken text.
+        short_form=True  → Shorts filtering (ARG 1 / COUNTER-ARG 1 / post-DECISION only)
+        short_form=False → HD full content, no restrictions
+        """
+        items = self._parse_lines(raw_md, default_section=role, short_form=short_form)
         parts = []
         for item in items:
             parts.append(item[0] if isinstance(item, tuple) else item)
         text = ' '.join(parts)
-        text  = _clean_text(text)
-        if role == "decide":
-            text += f' Subscribe to {channel} for more insights.'
+        text = _clean_text(text)
+        # Subscribe is appended as the last raw_line — spoken via the main spoken_text
         return text
 
     def _get_duration(self, video_path: str) -> float:
@@ -603,16 +617,13 @@ class DebateVideoTool(BaseTool):
         if result.returncode != 0:
             print(f"[DebateVideo] ⚠️ merge failed: {result.stderr.decode()[:150]}")
 
-    def _parse_lines(self, raw: str, default_section: str = 'propose') -> List[Tuple[str, str]]:
+    def _parse_lines(self, raw: str, default_section: str = 'propose', short_form: bool = True) -> List[Tuple[str, str]]:
         """
         Parse debate markdown into (line_text, section) tuples.
 
-        Short-form mode:
-          - propose : only ARGUMENT 1 content included
-                      (opening statement / conclusion / arg 2+ are skipped)
-          - oppose  : only COUNTER-ARGUMENT 1 content included  (same logic)
-          - decide  : only content after DECISION: included
-                      (summary of proposition/opposition and analysis are skipped)
+        short_form=True  (Shorts/portrait) → filter to ARG 1 only, COUNTER-ARG 1 only,
+                                              skip SUMMARY OF both, start from DECISION:
+        short_form=False (HD/landscape)    → full content, no restrictions
         """
         result  = []
         section = default_section
@@ -653,13 +664,70 @@ class DebateVideoTool(BaseTool):
             re.compile(r'^REBUTTAL\s*[:\-]?\d*\s*$',        re.I),
         ]
 
-        # State
-        include_content         = False   # True only inside ARG 1 / COUNTER-ARG 1 / post-DECISION
+        # ── HD / full-content mode: no filtering ──────────────────────────
+        if not short_form:
+            for raw_line in raw.splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("━") or line.startswith("─") or line.startswith("==="):
+                    continue
+                line = re.sub(
+                    r'^[\U00010000-\U0010ffff\U0001f300-\U0001f9ff'
+                    r'\u2600-\u27ff\u2000-\u206f\ufe00-\ufe0f]+\s*',
+                    '', line
+                ).strip()
+                if not line: continue
+                line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
+                line = re.sub(r'\[.*?\]', '', line).strip()
+                if not line: continue
+                line = _clean_text(line)
+                if not line: continue
+                # detect section changes (section headers are skipped from output)
+                matched_section = next((role for p, role in [
+                    (re.compile(r'^PROPOSITION\s*[:\-]?', re.I), 'propose'),
+                    (re.compile(r'^OPPOSITION\s*[:\-]?',  re.I), 'oppose'),
+                    (re.compile(r'^VERDICT\s*[:\-]?',     re.I), 'decide'),
+                    (re.compile(r'^MODERATOR\s*[:\-]?',   re.I), 'decide'),
+                    (re.compile(r'^JUDGE\s*[:\-]?',       re.I), 'decide'),
+                ] if p.match(line)), None)
+                if matched_section:
+                    section = matched_section
+                    print(f"[DebateVideo] 📑 Section: {section}")
+                    continue
+                # drop pure structural markers
+                _hdr_skip = [
+                    re.compile(r'^-{3,}$'), re.compile(r'^\*{3,}$'), re.compile(r'^#{1,6}\s+'),
+                    re.compile(r'^(ARGUMENT|POINT)\s+\d+\s*[:\-]\s*$', re.I),
+                    re.compile(r'^COUNTER[\s\-]?ARGUMENT\s+\d+\s*[:\-]\s*$', re.I),
+                    re.compile(r'^OPENING\s+STATEMENT\s*[:\-]?\s*$',  re.I),
+                    re.compile(r'^CLOSING\s+STATEMENT\s*[:\-]?\s*$',  re.I),
+                    re.compile(r'^CONCLUSION\s*[:\-]?\s*$',            re.I),
+                    re.compile(r'^SUMMARY\s+OF\s+\w+',                 re.I),
+                    re.compile(r'^SUMMARY\s*[:\-]?\s*$',               re.I),
+                    re.compile(r'^ANALYSIS\s*[:\-]?\s*$',              re.I),
+                ]
+                if any(p.match(line) for p in _hdr_skip):
+                    continue
+                line = line[0].upper() + line[1:]
+                result.append((line, section))
+            print(f"[DebateVideo] 📊 Parsed {len(result)} content lines (full)")
+            return result
+
+        # ── Short-form state ───────────────────────────────────────────────
+        # propose / oppose : include_content starts True so OPENING STATEMENT
+        #   body flows immediately; closes permanently at ARGUMENT 2+ /
+        #   COUNTER-ARGUMENT 2+, or at CONCLUSION / CLOSING STATEMENT.
+        # decide            : starts False; opens only after DECISION: header.
+        include_content         = (default_section in ('propose', 'oppose'))
         decide_decision_reached = False
+
+        _opening_re = re.compile(r'^OPENING\s+STATEMENT\s*[:\-]?', re.I)
+        _closing_re = re.compile(
+            r'^(CLOSING\s+STATEMENT|CONCLUSION|IN\s+CONCLUSION'
+            r'|FINAL\s+(VERDICT|DECISION|THOUGHTS?))\s*[:\-]?', re.I)
 
         for raw_line in raw.splitlines():
             line = raw_line.strip()
-            if not line or line.startswith("━") or line.startswith("─") or line.startswith("==="):
+            if not line or line.startswith("\u254b") or line.startswith("\u2500") or line.startswith("==="):
                 continue
             line = re.sub(
                 r'^[\U00010000-\U0010ffff\U0001f300-\U0001f9ff'
@@ -678,9 +746,10 @@ class DebateVideoTool(BaseTool):
             if matched_section:
                 if matched_section != section:
                     section                 = matched_section
-                    include_content         = False
+                    # Re-open gate for new propose/oppose section; close for decide
+                    include_content         = (section in ('propose', 'oppose'))
                     decide_decision_reached = False
-                    print(f"[DebateVideo] 📑 Section switch: {section}")
+                    print(f"[DebateVideo] \U0001f4c4 Section switch: {section}")
                 continue  # never render a section-header line
 
             # ── DECISION header (decide section) ───────────────────────────
@@ -688,44 +757,59 @@ class DebateVideoTool(BaseTool):
                 if section == 'decide':
                     decide_decision_reached = True
                     include_content         = True
-                    print(f"[DebateVideo]   ✅ DECISION: reached — including content")
-                    # Capture any inline text that follows the header token
+                    print(f"[DebateVideo]   \u2705 DECISION: reached \u2014 including content")
                     rest = line[_decision_re.match(line).end():].strip()
                     if rest:
                         rest = rest[0].upper() + rest[1:]
                         result.append((rest, section))
                 continue  # skip the header token itself
 
-            # ── propose / oppose: numbered argument headers ─────────────────
+            # ── propose / oppose: numbered argument / counter-argument headers
             if section in ('propose', 'oppose'):
                 arg_m     = _arg_re.match(line)
                 counter_m = _counter_arg_re.match(line)
                 if arg_m or counter_m:
-                    m               = arg_m or counter_m
-                    num             = int(m.group(1))
-                    include_content = (num == 1)
-                    tag    = "ARG" if arg_m else "COUNTER-ARG"
-                    status = "✅ including" if include_content else "⏭️  skipping"
-                    print(f"[DebateVideo]   {status} {tag} {num}")
-                    # Capture inline content that follows on the same line
-                    if include_content:
+                    m   = arg_m or counter_m
+                    num = int(m.group(1))
+                    tag = "ARG" if arg_m else "COUNTER-ARG"
+                    if num == 1:
+                        # ARGUMENT 1 / COUNTER-ARGUMENT 1 — keep gate open
+                        include_content = True
+                        print(f"[DebateVideo]   \u2705 {tag} 1 \u2014 continuing to include")
+                        # Capture any inline content on the header line itself
                         rest = line[m.end():].strip()
                         if rest:
                             rest = rest[0].upper() + rest[1:]
                             result.append((rest, section))
+                    else:
+                        # ARGUMENT 2+ / COUNTER-ARGUMENT 2+ — stop permanently
+                        include_content = False
+                        print(f"[DebateVideo]   \u23ed\ufe0f  {tag} {num} \u2014 short-form limit reached, stopping")
                     continue  # skip the header token itself
 
-                # Block-end headers close the includable window
-                if any(p.match(line) for p in _block_end_headers):
+                # OPENING STATEMENT — skip the token, capture any inline text
+                if _opening_re.match(line):
+                    print(f"[DebateVideo]   \U0001f4e2 OPENING STATEMENT header \u2014 content included")
+                    rest = line[_opening_re.match(line).end():].strip()
+                    if rest and include_content:
+                        rest = rest[0].upper() + rest[1:]
+                        result.append((rest, section))
+                    continue
+
+                # Closing / conclusion headers — close the gate
+                if _closing_re.match(line):
                     include_content = False
-                    print(f"[DebateVideo]   ⏭️  Block closed: {line[:50]}")
+                    print(f"[DebateVideo]   \u23ed\ufe0f  Closing block: {line[:50]}")
+                    continue
+
+                # SUMMARY / ANALYSIS — always skip the header line
+                if any(p.match(line) for p in _block_end_headers):
+                    print(f"[DebateVideo]   \u23ed\ufe0f  Header skipped: {line[:50]}")
                     continue
 
             # ── decide: skip everything before DECISION: ────────────────────
             if section == 'decide' and not decide_decision_reached:
-                if any(p.match(line) for p in _block_end_headers):
-                    include_content = False
-                print(f"[DebateVideo]   ⏭️  Pre-DECISION skipped: {line[:50]}")
+                print(f"[DebateVideo]   \u23ed\ufe0f  Pre-DECISION skipped: {line[:50]}")
                 continue
 
             # ── Always-skip structural lines ────────────────────────────────
@@ -739,7 +823,7 @@ class DebateVideoTool(BaseTool):
             line = line[0].upper() + line[1:]
             result.append((line, section))
 
-        print(f"[DebateVideo] 📊 Parsed {len(result)} content lines")
+        print(f"[DebateVideo] \U0001f4ca Parsed {len(result)} content lines (short-form)")
         return result
 
     def _pixel_wrap(self, text: str, font, max_px: int) -> List[str]:
