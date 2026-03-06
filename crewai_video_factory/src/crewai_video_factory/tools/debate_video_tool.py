@@ -212,7 +212,7 @@ class DebateVideoTool(BaseTool):
                 spoken_text = self._lines_to_spoken(raw_lines, topic, channel)
 
                 print(f"[DebateVideo] [{fmt}] Parsed {len(raw_lines)} lines  "
-                      f"({'short-form' if _is_short_form else 'full content'})")
+                      f"({'short-form: opening+ARG1/COUNTER-ARG1, DECISION-only verdict' if _is_short_form else 'full content'})")
 
 
                 # ── Save narration text ───────────────────────────────────
@@ -237,16 +237,62 @@ class DebateVideoTool(BaseTool):
                 # ── TTS audio ─────────────────────────────────────────────
                 audio_path = os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")
                 video_dur  = self._get_duration(out_path)
+
+                # Build per-section spoken text (no subscribe — appended separately below)
+                _pro_spoken = self._section_to_spoken(pro_text,      "propose", channel, short_form=_is_short_form)
+                _con_spoken = self._section_to_spoken(con_text,      "oppose",  channel, short_form=_is_short_form)
+                _mod_spoken = self._section_to_spoken(moderator_text,"decide",  channel, short_form=_is_short_form)
+                _sub_spoken = _clean_text(f'Subscribe to {channel} for more insights.')
+
+                # spoken_text_no_sub = pro + con + mod only (subscribe appended as separate clip)
+                _spoken_no_sub = f"{_pro_spoken} {_con_spoken} {_mod_spoken}".strip()
+
+                _pre_sub_audio = audio_path.replace('.mp3', '_presub.mp3')
+                _sub_audio     = audio_path.replace('.mp3', '_sub.mp3')
+
                 self._generate_tts(
-                    spoken_text, audio_path, video_dur, tts_engine,
-                    pro_text=self._section_to_spoken(pro_text,        "propose", channel, short_form=_is_short_form),
-                    con_text=self._section_to_spoken(con_text,        "oppose",  channel, short_form=_is_short_form),
-                    mod_text=self._section_to_spoken(moderator_text,  "decide",  channel, short_form=_is_short_form),
+                    _spoken_no_sub, _pre_sub_audio,
+                    max(1.0, video_dur - secs_per_line),   # exclude subscribe frame slot
+                    tts_engine,
+                    pro_text=_pro_spoken,
+                    con_text=_con_spoken,
+                    mod_text=_mod_spoken,
                     voices=_voices,
                 )
 
+                # Generate subscribe clip in gTTS (always), then concatenate.
+                # Use filter_complex with re-encode — handles sample rate mismatch
+                # (edge-tts=24000Hz vs gTTS=22050Hz). -c copy would fail silently.
+                self._tts_gtts(_sub_spoken, _sub_audio)
+                if os.path.exists(_pre_sub_audio) and os.path.exists(_sub_audio):
+                    _r = subprocess.run(
+                        ["ffmpeg", "-y",
+                         "-i", _pre_sub_audio,
+                         "-i", _sub_audio,
+                         "-filter_complex",
+                         "[0:a]aresample=44100[a0];[1:a]aresample=44100[a1];"
+                         "[a0][a1]concat=n=2:v=0:a=1[aout]",
+                         "-map", "[aout]",
+                         "-q:a", "2",
+                         audio_path],
+                        capture_output=True, check=False
+                    )
+                    if _r.returncode == 0 and os.path.exists(audio_path):
+                        print(f"[DebateVideo] 🎤 Subscribe appended in gTTS voice ✅")
+                    else:
+                        print(f"[DebateVideo] ⚠️ Subscribe concat failed: {_r.stderr.decode()[:120]}")
+                        os.replace(_pre_sub_audio, audio_path)
+                    for _tmp in [_pre_sub_audio, _sub_audio]:
+                        if os.path.exists(_tmp):
+                            os.remove(_tmp)
+                elif os.path.exists(_pre_sub_audio):
+                    os.replace(_pre_sub_audio, audio_path)
+
                 # ── Merge audio + video ───────────────────────────────────
                 if os.path.exists(audio_path):
+                    _audio_dur = self._get_duration(audio_path)
+                    print(f"[DebateVideo] 🔊 audio={_audio_dur:.1f}s  video={video_dur:.1f}s  "
+                          f"delta={_audio_dur - video_dur:+.1f}s")
                     self._merge_audio_video(out_path, audio_path, final_merged, video_dur)
 
                     merged_kb = os.path.getsize(final_merged) // 1024
@@ -346,7 +392,10 @@ class DebateVideoTool(BaseTool):
                 if pro_text and con_text and mod_text:
                     self._tts_edge_3voice(pro_text, con_text, mod_text, tmp, voices=_voices)
                 else:
-                    self._tts_edge(text, tmp)
+                    _fallback_voice = DEFAULT_EDGE_TTS_VOICES.get("propose", "en-US-AriaNeural")
+                    if isinstance(_voices.get("propose"), dict):
+                        _fallback_voice = _voices["propose"].get("edge_voice", _fallback_voice)
+                    self._tts_edge(text, tmp, voice=_fallback_voice)
             else:
                 self._tts_gtts(text, tmp)
 
@@ -356,7 +405,49 @@ class DebateVideoTool(BaseTool):
 
             raw_dur = self._get_duration(tmp)
             print(f"[DebateVideo] 🔊 TTS raw_dur={raw_dur:.1f}s  video_dur={video_dur:.1f}s")
-            os.rename(tmp, audio_path)
+
+            # ── atempo sync: stretch/compress audio to exactly match video ──
+            # Keeps voice pitch natural while eliminating silence gaps.
+            # atempo range: 0.5–2.0 per filter; chain two filters for extreme ratios.
+            if video_dur > 0 and raw_dur > 0:
+                ratio = raw_dur / video_dur
+                ratio = max(0.25, min(4.0, ratio))   # safety clamp
+                print(f"[DebateVideo] 🔊 atempo ratio={ratio:.4f}  "
+                      f"({'speeding up' if ratio > 1 else 'slowing down'} audio to match video)")
+
+                # Build atempo filter chain (each filter handles 0.5–2.0)
+                if ratio <= 2.0 and ratio >= 0.5:
+                    atempo_filter = f"atempo={ratio:.6f}"
+                elif ratio > 2.0:
+                    # e.g. ratio=3.0 → atempo=1.732,atempo=1.732
+                    import math
+                    r1 = math.sqrt(ratio)
+                    atempo_filter = f"atempo={r1:.6f},atempo={r1:.6f}"
+                else:
+                    # ratio < 0.5 → atempo=0.707,atempo=0.707
+                    import math
+                    r1 = math.sqrt(ratio)
+                    atempo_filter = f"atempo={r1:.6f},atempo={r1:.6f}"
+
+                synced = audio_path.replace('.mp3', '_synced.mp3')
+                r = subprocess.run(
+                    ["ffmpeg", "-y", "-i", tmp,
+                     "-filter:a", atempo_filter,
+                     "-q:a", "2", synced],
+                    capture_output=True, check=False
+                )
+                if r.returncode == 0 and os.path.exists(synced):
+                    synced_dur = self._get_duration(synced)
+                    print(f"[DebateVideo] ✅ atempo synced: {synced_dur:.1f}s "
+                          f"(target={video_dur:.1f}s  delta={synced_dur-video_dur:+.2f}s)")
+                    os.replace(synced, audio_path)
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                else:
+                    print(f"[DebateVideo] ⚠️ atempo failed — using raw audio")
+                    os.rename(tmp, audio_path)
+            else:
+                os.rename(tmp, audio_path)
 
         except Exception as e:
             print(f"[DebateVideo] ⚠️ TTS error: {e}")
@@ -474,7 +565,7 @@ class DebateVideoTool(BaseTool):
         tts.save(out_path)
         print(f"[DebateVideo] ✅ gTTS saved: {out_path}")
 
-    def _tts_edge(self, text: str, out_path: str, timeout: int = 60):
+    def _tts_edge(self, text: str, out_path: str, voice: str = "en-US-AriaNeural", timeout: int = 60):
         """Generate audio using edge-tts with timeout."""
         try:
             import edge_tts
@@ -486,7 +577,7 @@ class DebateVideoTool(BaseTool):
             return
 
         async def _generate():
-            communicate = edge_tts.Communicate(text, voice="en-US-AriaNeural")
+            communicate = edge_tts.Communicate(text, voice=voice)
             await communicate.save(out_path)
 
         async def _with_timeout():
@@ -600,7 +691,10 @@ class DebateVideoTool(BaseTool):
 
     def _merge_audio_video(self, video_path: str, audio_path: str,
                             output_path: str, video_dur: float):
-        """Merge audio into video with silence padding if needed."""
+        """Merge audio into video, padding audio to exactly match video duration.
+        Uses -t video_dur (not -shortest) so the subscribe line frame is never cut.
+        apad ensures silence fills any gap if audio finishes before video ends.
+        """
         print(f"[DebateVideo] 🎬 Merging audio+video → {os.path.basename(output_path)}")
         result = subprocess.run([
             "ffmpeg", "-y",
@@ -608,21 +702,24 @@ class DebateVideoTool(BaseTool):
             "-i", audio_path,
             "-c:v", "copy",
             "-c:a", "aac",
-            "-filter_complex", "[1:a]apad[aout]",
+            # Pad audio with silence then trim/extend to exact video length
+            "-filter_complex", f"[1:a]apad=whole_dur={video_dur:.3f}[aout]",
             "-map", "0:v",
             "-map", "[aout]",
-            "-shortest",
+            "-t", str(round(video_dur, 3)),
             output_path
         ], capture_output=True, check=False)
         if result.returncode != 0:
-            print(f"[DebateVideo] ⚠️ merge failed: {result.stderr.decode()[:150]}")
+            print(f"[DebateVideo] ⚠️ merge failed: {result.stderr.decode()[:200]}")
 
     def _parse_lines(self, raw: str, default_section: str = 'propose', short_form: bool = True) -> List[Tuple[str, str]]:
         """
         Parse debate markdown into (line_text, section) tuples.
 
-        short_form=True  (Shorts/portrait) → filter to ARG 1 only, COUNTER-ARG 1 only,
-                                              skip SUMMARY OF both, start from DECISION:
+        short_form=True  (Shorts/portrait) → PROPOSITION and OPPOSITION show
+                                              OPENING STATEMENT + ARG 1 / COUNTER-ARG 1
+                                              only. Stops permanently at ARG 2+.
+                                              VERDICT: starts from DECISION: header only.
         short_form=False (HD/landscape)    → full content, no restrictions
         """
         result  = []
@@ -713,9 +810,8 @@ class DebateVideoTool(BaseTool):
             return result
 
         # ── Short-form state ───────────────────────────────────────────────
-        # propose / oppose : include_content starts True so OPENING STATEMENT
-        #   body flows immediately; closes permanently at ARGUMENT 2+ /
-        #   COUNTER-ARGUMENT 2+, or at CONCLUSION / CLOSING STATEMENT.
+        # propose / oppose : include OPENING STATEMENT + ARGUMENT 1 /
+        #   COUNTER-ARGUMENT 1 body only. Gate closes permanently at ARG 2+.
         # decide            : starts False; opens only after DECISION: header.
         include_content         = (default_section in ('propose', 'oppose'))
         decide_decision_reached = False
@@ -764,7 +860,7 @@ class DebateVideoTool(BaseTool):
                         result.append((rest, section))
                 continue  # skip the header token itself
 
-            # ── propose / oppose: numbered argument / counter-argument headers
+            # ── propose / oppose: structural header handling ────────────────
             if section in ('propose', 'oppose'):
                 arg_m     = _arg_re.match(line)
                 counter_m = _counter_arg_re.match(line)
