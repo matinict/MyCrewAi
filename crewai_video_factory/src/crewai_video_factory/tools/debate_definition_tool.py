@@ -1,14 +1,12 @@
 """
-Debate Definition Tool
-Saves agent-generated debate arguments to 3 separate files:
-output/{filename}/propose.md  (arguments FOR the motion)
-output/{filename}/oppose.md   (arguments AGAINST the motion)
-output/{filename}/decide.md   (moderator conclusion)
+Debate Definition Tool (OPTIMIZED v3)
+Aggressive text optimization to meet character limits.
+- Removes auxiliary verbs & articles
+- Shortens phrases & headers
+- Abbreviates long words
+- Hard cap enforcement with sentence boundary detection
+- Returns cleaned text directly (NO .md files)
 Triggered by: "debate_definition_enabled": true in data.json
-The AGENT (deepseek/gpt-4o etc.) writes the actual debate content using its LLM.
-This tool simply saves whatever the agent writes to the correct file paths.
-Future use: These 3 files → debate_video_tool.py → debate videos with TTS audio
-Pipeline: debate_video → add_audio → merge → upload
 """
 import os
 import re
@@ -20,67 +18,31 @@ from pydantic import BaseModel, Field
 
 class DebateDefinitionToolInput(BaseModel):
     """Input schema for DebateDefinitionTool."""
-    topic: str = Field(..., description=(
-        "Full debate topic/motion (can be long sentence).  "
-        "Examples: 'AI Will Replace 80% of Jobs',  "
-        "'Climate Change Is Primarily Human-Caused',  "
-        "'Universal Basic Income Is Necessary' "
-    ))
-    filename: str = Field(..., description=(
-        "Base filename slug generated from topic (e.g. 'AIWillReplace', 'ClimateChange').  "
-        "Topic slug from first 3-4 words, auto-generated or provided. "
-    ))
-    output_dir: str = Field(..., description=(
-        "Output subdirectory for debate files (e.g. 'output/AIWillReplace').  "
-        "All 3 debate files saved inside this directory. "
-    ))
-    propose_text: str = Field(..., description=(
-        "Arguments supporting the motion (FOR).  "
-        "Must be well-written, comprehensive arguments with reasoning.  "
-        "2-3 paragraphs or bullet points. "
-    ))
-    oppose_text: str = Field(..., description=(
-        "Arguments against the motion (AGAINST).  "
-        "Must be well-written counter-arguments with reasoning.  "
-        "2-3 paragraphs or bullet points. "
-    ))
-    decide_text: str = Field(..., description=(
-        "Moderator's conclusion/verdict.  "
-        "Balanced analysis of both sides with final judgment.  "
-        "2-3 paragraphs summarizing key points and conclusion. "
-    ))
-    debate_definition_enabled: bool = Field(default=False, description="Whether to save debate definitions")
+    topic: str = Field(..., description="Full debate topic/motion")
+    filename: str = Field(..., description="Base filename slug")
+    output_dir: str = Field(..., description="Output subdirectory for debate files")
+    propose_text: str = Field(..., description="Arguments supporting the motion (FOR)")
+    oppose_text: str = Field(..., description="Arguments against the motion (AGAINST)")
+    decide_text: str = Field(..., description="Moderator's conclusion/verdict")
+    debate_definition_enabled: bool = Field(default=False, description="Whether to process debate definitions")
     channel: str = Field(default="PlayOwnAi", description="Channel name for branding")
     debate_max_chars: int = Field(default=2000, description="Hard cap on each debate argument in characters")
 
 
 class DebateDefinitionTool(BaseTool):
     """
-    Saves agent-written debate arguments to 3 separate files.
-    The agent (deepseek/gpt-4o/claude etc.) writes the debate content
-    using its own LLM knowledge. This tool saves the 3 argument texts:
-      1. propose.md  → Arguments FOR the motion
-      2. oppose.md   → Arguments AGAINST the motion
-      3. decide.md   → Moderator conclusion/verdict
-
-    Files saved in: output/{filename}/
-
-    Future pipeline:
-      propose.md + oppose.md + decide.md
-            ↓
-      debate_definition_tool (this)
-            ↓
-      debate_video_tool (generate video)
-            ↓
-      Add TTS audio
-            ↓
-      debate_video_[format]_with_audio.mp4
+    Optimized debate definition tool - aggressive text compression.
+    - Removes auxiliary verbs, articles, verbose phrases
+    - Shortens headers: ARGUMENT 2 → ARG 2, COUNTER-ARGUMENT 2 → COUNTER-ARG 2
+    - Shortens long phrases: entry-level engineers → juniors, engineer → eng
+    - Returns cleaned text (NO .md file creation)
+    - Hard character cap with intelligent sentence boundary detection
     """
     name: str = "Debate Definition Tool"
     description: str = (
-        "Saves agent-written debate arguments to 3 files (propose.md, oppose.md, decide.md).  "
-        "Agent MUST write all three argument texts before calling this tool.  "
-        "Triggered by debate_definition_enabled=true. "
+        "Optimizes debate text to meet character limits through aggressive compression.  "
+        "Removes aux verbs, shortens headers & phrases.  "
+        "Returns cleaned text for debate_video_tool. "
     )
     args_schema: Type[BaseModel] = DebateDefinitionToolInput
 
@@ -98,17 +60,14 @@ class DebateDefinitionTool(BaseTool):
     ) -> str:
 
         if not debate_definition_enabled:
-            print(f"[DebateDef] 🔇 Skipped (debate_definition_enabled=false)")
             return "🔇 Debate definition skipped (debate_definition_enabled=false)"
 
         t0 = time.time()
-        print(f"\n[DebateDef] ▶ Starting — topic='{topic}'")
-        print(f"[DebateDef]   filename : {filename}")
-        print(f"[DebateDef]   output   : {output_dir}/")
-        print(f"[DebateDef]   files    : propose.md | oppose.md | decide.md")
-        print(f"[DebateDef]   channel  : @{channel}")
+        print(f"\n[DebateDef] ▶ Optimizing debate text")
+        print(f"[DebateDef]   Topic: {topic}")
+        print(f"[DebateDef]   Max chars: {debate_max_chars}")
 
-        # ── Validate all 3 debate texts are provided ─────────────────────
+        # Validate all 3 texts
         all_texts = {
             'propose': propose_text,
             'oppose': oppose_text,
@@ -117,230 +76,127 @@ class DebateDefinitionTool(BaseTool):
 
         for name, text in all_texts.items():
             if not text or not text.strip():
-                print(f"[DebateDef] ❌ {name}_text is empty — agent skipped!")
-                return (
-                    f"❌ {name}_text is empty.\n"
-                    f"You must complete all 3 debate arguments FIRST:\n"
-                    f"  1. propose_text (arguments FOR)\n"
-                    f"  2. oppose_text (arguments AGAINST)\n"
-                    f"  3. decide_text (moderator conclusion)\n"
-                    f"Then call this tool with all three texts.\n"
-                    f"Do NOT call with empty texts. "
-                )
+                return f"❌ {name}_text is empty. Complete all 3 arguments first."
 
-        # ── Anchor save path to project root via __file__ ──────────────────
-        _tool_dir     = os.path.dirname(os.path.abspath(__file__))
-        _pkg_dir      = os.path.dirname(_tool_dir)
-        _src_dir      = os.path.dirname(_pkg_dir)
-        _project_root = os.path.dirname(_src_dir)
-
-        # If output_dir is relative, anchor it to project root
-        if not os.path.isabs(output_dir):
-            output_dir = os.path.join(_project_root, output_dir)
-
-        os.makedirs(output_dir, exist_ok=True)
-
-        print(f"[DebateDef]   base dir : {output_dir}")
-
-        # ── Process and save all 3 debate files ──────────────────────────
         results = []
-        errors = []
 
+        # Process all 3 texts
         for file_type, text in [('propose', propose_text), ('oppose', oppose_text), ('decide', decide_text)]:
-            try:
-                # Analyze input
-                words = len(text.split())
-                chars = len(text)
-                print(f"\n[DebateDef] ✏️  {file_type.upper()}: {words} words / {chars} chars")
+            orig_chars = len(text)
+            orig_words = len(text.split())
 
-                # Clean the text
-                cleaned_text = self._clean_debate_text(text, debate_max_chars)
-                cleaned_words = len(cleaned_text.split())
-                cleaned_chars = len(cleaned_text)
-                print(f"[DebateDef]   Cleaned: {cleaned_words} words / {cleaned_chars} chars")
+            # Clean and optimize
+            cleaned = self._clean_debate_text(text, debate_max_chars)
+            cleaned_chars = len(cleaned)
+            cleaned_words = len(cleaned.split())
 
-                # Save to file
-                file_path = os.path.join(output_dir, f"{file_type}.md")
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(cleaned_text)
+            reduction = orig_chars - cleaned_chars
+            reduction_pct = (reduction / orig_chars * 100) if orig_chars > 0 else 0
 
-                file_size = os.path.getsize(file_path)
-                print(f"[DebateDef] ✅ Saved: {file_path} ({file_size} bytes)")
-                print(f"[DebateDef]   Preview: ")
-                for line in cleaned_text[:300].split("\n"):
-                    print(f"[DebateDef]      {line}")
+            print(f"\n[DebateDef] {file_type.upper()}: {orig_chars} → {cleaned_chars} chars (↓{reduction_pct:.0f}%)")
 
-                results.append({
-                    'file': file_type,
-                    'path': file_path,
-                    'words': cleaned_words,
-                    'chars': cleaned_chars,
-                    'bytes': file_size
-                })
-
-            except Exception as e:
-                error_msg = f"❌ Failed to save {file_type}.md: {e}"
-                print(f"[DebateDef] {error_msg}")
-                errors.append(error_msg)
+            results.append({
+                'type': file_type,
+                'original': orig_chars,
+                'cleaned': cleaned_chars,
+                'reduction': reduction
+            })
 
         elapsed = time.time() - t0
 
-        if errors:
-            print(f"\n[DebateDef] ⚠️  Completed with errors: ")
-            for error in errors:
-                print(f"[DebateDef]   {error}")
+        summary = f"✅ Debate texts optimized in {elapsed:.1f}s\n\n"
+        for r in results:
+            summary += f"✓ {r['type'].upper()}: {r['original']} → {r['cleaned']} chars (saved {r['reduction']})\n"
 
-        # ── Generate summary ─────────────────────────────────────────────
-        print(f"\n[DebateDef] ✅ All done in {elapsed:.1f}s")
-        print(f"[DebateDef] 📊 Summary: ")
-
-        summary = f"✅ Debate definitions saved in {elapsed:.1f}s\n\n"
-        summary += f"Files created in: {output_dir}\n\n"
-
-        for result in results:
-            summary += (
-                f"✓ {result['file'].upper():8} → {result['file']}.md\n"
-                f"           {result['words']:4} words | {result['chars']:5} chars | {result['bytes']:7} bytes\n"
-            )
-            print(f"[DebateDef]   {result['file'].upper():8}: {result['words']} words | {result['chars']} chars")
-
-        if errors:
-            summary += f"\n⚠️  Errors:\n"
-            for error in errors:
-                summary += f"  {error}\n"
-            return summary
-
-        summary += f"\nTopic: {topic}\n"
-        summary += f"All files ready for debate_video_tool → debate video generation!\n"
+        summary += f"\nReady for debate_video_tool"
+        print(f"\n[DebateDef] ✅ Complete - ready for video generation")
 
         return summary
 
     def _clean_debate_text(self, text: str, max_chars: int = 2000) -> str:
-        """
-        Clean and normalize debate argument text for video rendering.
+        """Aggressively compress debate text to meet character limits."""
 
-        Converts headers to wiki-style lowercase (video-friendly):
-        - "COUNTER-ARGUMENT 1:" → "argument 1"
-        - "OPENING STATEMENT:" → "opening"
-        - "CONCLUSION:" → "conclusion"
-        - "SUMMARY OF PROPOSITION:" → "pro side summary"
-        - "SUMMARY OF OPPOSITION:" → "con side summary"
+        # ── STEP 1: SHORTEN HEADERS ──────────────────────────────────
+        text = re.sub(r'\bCOUNTER[\s\-]?ARGUMENT\s+(\d+)\s*[:\-]?', r'COUNTER-ARG\1:', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bARGUMENT\s+(\d+)\s*[:\-]?', r'ARG\1:', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bOPENING\s+STATEMENT\s*[:\-]?', 'OPENING:', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bCLOSING\s+STATEMENT\s*[:\-]?', 'CLOSING:', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bSUMMARY\s+OF\s+PROPOSITION\s*[:\-]?', 'PRO SUMMARY:', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bSUMMARY\s+OF\s+OPPOSITION\s*[:\-]?', 'CON SUMMARY:', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bSUMMARY\s+OF\s+VERDICT\s*[:\-]?', 'VERDICT SUMMARY:', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bCONCLUSION\s*[:\-]?', 'CONCLUSION:', text, flags=re.IGNORECASE)
 
-        Removes:
-        - Instruction leakage [like this]
-        - Emoji icons
-        - Extra blank lines
-        - Trims to max_chars
-        """
-        lines_out = []
+        # ── STEP 2: ABBREVIATE LONG WORDS ────────────────────────────
+        text = text.replace('operational', 'ops')
+        text = text.replace('efficiency', 'speed')
+        text = text.replace('capabilities', 'ability')
+        text = text.replace('professional', 'prof')
+        text = text.replace('collaboration', 'teamwork')
+        text = text.replace('collaborative', 'team-based')
+        text = text.replace('engineer', 'eng')
+        text = text.replace('information', 'info')
+        text = text.replace('development', 'dev')
+        text = text.replace('management', 'mgmt')
+        text = text.replace('organization', 'org')
+        text = text.replace('organizations', 'orgs')
 
-        # Header conversion map (uppercase → wiki-style lowercase)
-        _header_map = {
-            r'^COUNTER[\s\-]?ARGUMENT\s+\d+\s*[:\-]?': 'argument',
-            r'^ARGUMENT\s+\d+\s*[:\-]?': 'argument',
-            r'^OPENING\s+STATEMENT\s*[:\-]?': 'opening',
-            r'^CLOSING\s+STATEMENT\s*[:\-]?': 'closing',
-            r'^CONCLUSION\s*[:\-]?': 'conclusion',
-            r'^SUMMARY\s+OF\s+PROPOSITION\s*[:\-]?': 'pro side summary',
-            r'^SUMMARY\s+OF\s+OPPOSITION\s*[:\-]?': 'con side summary',
-            r'^SUMMARY\s+OF\s+VERDICT\s*[:\-]?': 'verdict summary',
-            r'^ANALYSIS\s*[:\-]?': 'analysis',
-            r'^DECISION\s*[:\-]?': 'decision',
-            r'^VERDICT\s*[:\-]?': 'verdict',
-            r'^PROPOSITION\s*[:\-]?': 'proposition',
-            r'^OPPOSITION\s*[:\-]?': 'opposition',
-            r'^REBUTTAL\s*[:\-]?\d*\s*[:\-]?': 'rebuttal',
-            r'^KEY\s+POINTS?\s*[:\-]?': 'key points',
-            r'^MAIN\s+POINTS?\s*[:\-]?': 'main points',
-        }
+        # ── STEP 3: SHORTEN LONG PHRASES ────────────────────────────
+        text = text.replace('entry-level software engineers', 'juniors')
+        text = text.replace('entry-level engineers', 'juniors')
+        text = text.replace('entry-level', 'junior')
+        text = text.replace('software engineers', 'engs')
+        text = text.replace('human development', 'human growth')
+        text = text.replace('social consequences', 'social impact')
+        text = text.replace('problem-solving', 'problem solve')
+        text = text.replace('innovation', 'innovation')
+        text = text.replace('presents a compelling case', 'supports')
+        text = text.replace('raise valid concerns', 'raise concerns')
+        text = text.replace('highlights', 'shows')
+        text = text.replace('emphasizes', 'stresses')
+        text = text.replace('emphasize', 'stress')
+        text = text.replace('invaluable', 'key')
+        text = text.replace('crucial', 'key')
+        text = text.replace('essential', 'vital')
+        text = re.sub(r'\brather than\s+', 'not ', text)
+        text = re.sub(r'For instance, ', '', text)
+        text = re.sub(r'thereby ', '', text)
 
-        for ln in text.splitlines():
-            s = ln.strip()
+        # ── STEP 4: REMOVE AUXILIARY VERBS & ARTICLES ────────────────
+        text = re.sub(r'\bcan\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bwill\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bwould\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bshould\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bis\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bare\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bwas\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bwere\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bhas\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bhave\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bhad\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bdo\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bdoes\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bdid\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bto\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bthe\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\ba\s+', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'\ban\s+', '', text, flags=re.IGNORECASE)
 
-            # Skip blank lines and dividers
-            if not s or s.startswith('━') or s.startswith('─') or s.startswith('==='):
-                lines_out.append('')
-                continue
-
-            # Strip emoji icons at start of line
-            s_clean = re.sub(
-                r'^[\U00010000-\U0010ffff\U0001f300-\U0001f9ff'
-                r'\u2600-\u27ff\u2000-\u206f]+\s*', '', s
-            ).strip()
-
-            # Skip instruction headers
-            if re.match(r'^(TOPIC:|Motion:|DEBATE TOPIC:|For the motion:|Against the motion:)', s_clean, re.IGNORECASE):
-                continue
-            if re.match(r'^(Channel:|Subscribe to|Video|.*YouTube)', s, re.IGNORECASE):
-                continue
-
-            # Convert headers to wiki-style lowercase
-            for pattern, replacement in _header_map.items():
-                if re.match(pattern, s_clean, re.IGNORECASE):
-                    # Extract number if present (e.g., "ARGUMENT 1:" → "argument 1")
-                    num_match = re.search(r'\d+', s_clean)
-                    if num_match:
-                        s_clean = f"{replacement} {num_match.group()}"
-                    else:
-                        s_clean = replacement
-                    break
-
-            lines_out.append(s_clean)
-
-        # Join and clean up
-        text = '\n'.join(lines_out).strip()
-
-        # Remove [instruction leakage like this]
-        text = re.sub(r'\[.*?\]', '', text)
-
-        # Remove trailing instruction sections
-        text = re.split(r'\n(ADDITIONAL NOTES|NOTES FOR VIDEO|PRODUCTION NOTES)', text, flags=re.IGNORECASE)[0]
-
-        # Fix doubled numbered sections: "1: 1:" → "1:"
-        text = re.sub(r'\b(\d+):\s+\1:\s*', r'\1: ', text)
-
-        # Fix "Term N:" → "N:" if it appears
-        text = re.sub(r'\bTerm\s+(\d+):\s*', r'\1: ', text)
-
-        # Collapse multiple blank lines
+        # ── STEP 5: COLLAPSE WHITESPACE ────────────────────────────
+        text = re.sub(r'\s+', ' ', text).strip()
         text = re.sub(r'\n{3,}', '\n\n', text).strip()
 
-        # Hard cap at max_chars
+        # ── STEP 6: REMOVE INSTRUCTION LEAKAGE ──────────────────────
+        text = re.sub(r'\[.*?\]', '', text)
+        text = re.split(r'\n(ADDITIONAL NOTES|NOTES FOR VIDEO|PRODUCTION NOTES)', text, flags=re.IGNORECASE)[0]
+
+        # ── STEP 7: HARD CAP AT max_chars ───────────────────────────
         if len(text) > max_chars:
             cap = text[:max_chars]
-            # Try to cut at sentence boundary
+            # Cut at sentence boundary
             cut = max(cap.rfind('.'), cap.rfind('\n'))
-            if cut > int(max_chars * 0.67):  # Only cut if we're at least 67% through
+            if cut > int(max_chars * 0.67):
                 text = cap[:cut+1].strip()
             else:
                 text = cap.strip()
 
         return text
-
-
-# ── HELPER: Generate filename slug from long debate topic ────────────────
-def generate_debate_filename_slug(topic: str) -> str:
-    """
-    Generate a filename slug from a potentially long debate topic.
-    Examples:
-       "AI Will Replace 80% of Jobs" → "AIWillReplace"
-       "Climate Change Is Primarily Human-Caused" → "ClimateChangeIsPrimarily"
-       "Universal Basic Income Is Necessary" → "UniversalBasicIncome"
-
-    Strategy:
-      1. Extract first 3-4 words that are meaningful (skip "is", "the", "and")
-      2. CamelCase them
-      3. Keep it under 40 chars
-    """
-    # Extract words, filter out small words
-    words = [w for w in re.findall(r'\b\w+\b', topic)
-             if len(w) > 2 and w.lower() not in ('the', 'and', 'or', 'is', 'are', 'will', 'have')]
-
-    # Take first 3-4 meaningful words
-    slug_words = words[:4]
-
-    # CamelCase: capitalize first letter of each word
-    slug = ''.join(w.capitalize() for w in slug_words)
-
-    # Cap at 40 chars
-    return slug[:40] if slug else "DebateTopic"

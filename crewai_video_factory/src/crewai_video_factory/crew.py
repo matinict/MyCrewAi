@@ -15,6 +15,7 @@ from crewai_video_factory.tools.definition_video_tool import DefinitionVideoTool
 from crewai_video_factory.tools.yt_upload_tool import YTUploadTool
 from crewai_video_factory.tools.social_share_tool import SocialShareTool
 from crewai_video_factory.tools.debate_video_tool import DebateVideoTool
+from crewai_video_factory.tools.debate_merge_tool import DebateMergeTool
 
 @CrewBase
 class CrewaiVideoFactory:
@@ -156,6 +157,13 @@ class CrewaiVideoFactory:
         if self._llm('llm_debate'):
             kwargs['llm'] = self._llm('llm_debate')
         return Agent(**kwargs)
+    @agent
+    def debate_merge_specialist(self) -> Agent:
+        return Agent(
+            config=self.agents_config['debate_merge_specialist'],
+            tools=[DebateMergeTool()],
+            verbose=True
+    )
 
     @task
     def research_data(self) -> Task:
@@ -224,6 +232,10 @@ class CrewaiVideoFactory:
     @task
     def create_debate_video(self) -> Task:
         return Task(config=self.tasks_config['create_debate_video'])
+
+    @task
+    def debate_merge(self) -> Task:
+        return Task(config=self.tasks_config['debate_merge'])
 
     @crew
     def crew(self, inputs: dict = None) -> Crew:

@@ -10,6 +10,8 @@ gTTS audio + atempo sync (same as definition_video_tool)
 Input files: propose.md, oppose.md, decide.md in output/{filename}/
 Triggered by: "debate_video_enabled": true in data.json
 Output: debate_video_[format].mp4 + _audio.mp3 + _with_audio.mp4 in output/{filename}/
+NO MERGE HERE — debate_merge_tool.py handles final concatenation
+ALL CONFIG FROM data.json — NO HARDCODED VALUES
 """
 import os
 import re
@@ -23,50 +25,39 @@ from pydantic import BaseModel, Field
 FONT_BOLD    = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 FONT_REGULAR = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 
-# ── Piper voice configuration ─────────────────────────────────────────────────
-# Default model paths — override in data.json via piper_voices config
-PIPER_VOICES = {
+# ── DEFAULT VOICE CONFIG (only used if data.json provides nothing) ─────────
+DEFAULT_PIPER_VOICES = {
     "propose": {
-        "model":   "models/alba_medium.onnx",   # Female, confident
+        "model":   "models/alba_medium.onnx",
         "speed":  1.05,
     },
     "oppose": {
-        "model":   "models/en_GB-scott-medium.onnx",  # Male, firm
+        "model":   "models/en_GB-scott-medium.onnx",
         "speed":  1.0,
     },
     "decide": {
-        "model":   "models/joe_medium.onnx",    # Male, authoritative moderator
+        "model":   "models/joe_medium.onnx",
         "speed":  0.95,
     },
 }
 
-# ── Edge-TTS 3-voice configuration ────────────────────────────────────────────
-# 3 distinct neural voices for edge-tts mode — override in data.json via tts_voices
-EDGE_TTS_VOICES = {
-    "propose": "en-US-AriaNeural",    # Female, confident, expressive
-    "oppose":  "en-US-GuyNeural",     # Male, firm, authoritative
-    "decide":  "en-GB-RyanNeural",    # Male, neutral British — moderator feel
+DEFAULT_EDGE_TTS_VOICES = {
+    "propose": "en-US-AriaNeural",
+    "oppose":  "en-US-GuyNeural",
+    "decide":  "en-GB-RyanNeural",
 }
 
 
 def _clean_text(text: str) -> str:
     """
     Convert Mathematical Alphanumeric Symbols (e.g. italic 𝘔𝘪𝘥-𝘭𝘦𝘷𝘦𝘭) to plain ASCII
-    so LiberationSans can render them. Preserves common punctuation that NFKD would drop:
-    en-dash (–), em-dash (—), ellipsis (…), curly quotes, etc.
+    so LiberationSans can render them. Preserves common punctuation that NFKD would drop.
     """
     import unicodedata
-    # Replace common punctuation with ASCII equivalents BEFORE NFKD strips them
     replacements = {
-        '–': '-',   # en-dash  –  → -
-        '—': '--',  # em-dash  —  → --
-        '…': '...', # ellipsis …  → ...
-        '‘': "'",   # left single quote
-        '’': "'",   # right single quote
-        '"': '"',   # left double quote
-        '"': '"',   # right double quote
-        '·': '.',   # middle dot
-        '•': '-',   # bullet
+        '–': '-', '—': '--', '…': '...',
+        '‘': "'", '’': "'", '"': '"', '"': '"',
+        '·': '.', '•': '-',
     }
     for uni, ascii_equiv in replacements.items():
         text = text.replace(uni, ascii_equiv)
@@ -75,7 +66,7 @@ def _clean_text(text: str) -> str:
 
 
 class DebateVideoInput(BaseModel):
-    """Input schema for DebateVideoTool."""
+    """Input schema for DebateVideoTool — ALL from data.json."""
     topic:                str   = Field(..., description="Debate topic/motion")
     filename:             str   = Field(..., description="Base filename slug")
     output_dir:           str   = Field(..., description="Output subdirectory")
@@ -85,18 +76,26 @@ class DebateVideoInput(BaseModel):
     channel:              str   = Field(default="PlayOwnAi", description="Channel name")
     watermark_enabled:    bool  = Field(default=False, description="Show watermark")
     watermark_text:       str   = Field(default="@PlayOwnAi", description="Watermark text")
-    video_fps:            int   = Field(default=30, description="Output video frame rate (ignored — uses 24 internally)")
+    video_fps:            int   = Field(default=30, description="Output video frame rate")
     tts_engine:           str   = Field(default="gtts", description="TTS engine: 'gtts', 'edge-tts', or 'piper'")
-    tts_voices:           dict  = Field(default_factory=dict, description="Per-section voice overrides for piper engine")
+    tts_voices:           dict  = Field(default_factory=dict, description="Per-section voice overrides from data.json")
 
 
 class DebateVideoTool(BaseTool):
-    """Creates bottom-to-top streaming debate video — same engine as DefinitionVideoTool."""
+    """
+    Creates bottom-to-top streaming debate video.
+    ALL CONFIG FROM data.json — NO HARDCODED VALUES.
+    Reads propose.md (PRO), oppose.md (CON), decide.md (Moderator) from output_dir.
+    Output: debate_video_[format]_with_audio.mp4 (intermediate file for merge tool)
+    Triggered by debate_video_enabled=true.
+    NO MERGE HERE — debate_merge_tool.py handles intro + debate concatenation.
+    """
     name: str = "Debate Video Tool"
     description: str = (
         "Generates a debate video with bottom-to-top streaming text animation.  "
         "Reads propose.md (PRO), oppose.md (CON), decide.md (Moderator) from output_dir.  "
-        "Same rendering engine as Definition Video Tool.  "
+        "ALL CONFIG FROM data.json — tts_voices defines piper/edge-tts voices.  "
+        "Output: debate_video_[format]_with_audio.mp4 (intermediate for merge tool).  "
         "Triggered by debate_video_enabled=true. "
     )
     args_schema: Type[BaseModel] = DebateVideoInput
@@ -120,17 +119,22 @@ class DebateVideoTool(BaseTool):
         if not debate_video_enabled:
             return "⏭️ Debate video skipped (debate_video_enabled=false)"
 
-        # ── Merge per-run voice overrides into PIPER_VOICES ───────────────
-        # tts_voices from debate_config.piper_voices overrides module-level defaults
-        import copy
-        _voices = copy.deepcopy(PIPER_VOICES)
+        # ── ALL VOICE CONFIG FROM data.json (tts_voices) ───────────────────
+        _voices = {}
         if tts_voices and isinstance(tts_voices, dict):
-            for role, vcfg in tts_voices.items():
-                if role in _voices and isinstance(vcfg, dict):
-                    _voices[role].update(vcfg)
-                elif isinstance(vcfg, dict):
-                    _voices[role] = vcfg
-            print(f"[DebateVideo] 🎤 Voice overrides applied: {list(tts_voices.keys())}")
+            for role in ['propose', 'oppose', 'decide']:
+                if role in tts_voices:
+                    _voices[role] = tts_voices[role]
+            print(f"[DebateVideo] 🎤 Voice config from data.json: {list(_voices.keys())}")
+        else:
+            _voices = DEFAULT_PIPER_VOICES.copy()
+            print(f"[DebateVideo] 🎤 Using default voice config (data.json provided none)")
+
+        for role, vcfg in _voices.items():
+            if isinstance(vcfg, dict):
+                print(f"[DebateVideo]   {role}: {vcfg.get('model', vcfg.get('edge_voice', 'N/A'))}")
+            else:
+                print(f"[DebateVideo]   {role}: {vcfg}")
 
         try:
             from PIL import Image, ImageDraw, ImageFont
@@ -140,7 +144,7 @@ class DebateVideoTool(BaseTool):
         if not shutil.which('ffmpeg'):
             return "❌ ffmpeg not found. Run: sudo apt install ffmpeg"
 
-        # ── Resolve output directory ──────────────────────────────────────
+        # ── Resolve output directory ────────────────────────────────────────
         _tool_dir     = os.path.dirname(os.path.abspath(__file__))
         _project_root = os.path.dirname(os.path.dirname(os.path.dirname(_tool_dir)))
 
@@ -148,7 +152,7 @@ class DebateVideoTool(BaseTool):
             output_dir = os.path.join(_project_root, output_dir)
         os.makedirs(output_dir, exist_ok=True)
 
-        # ── Load debate content ───────────────────────────────────────────
+        # ── Load debate content ────────────────────────────────────────────
         propose_file = os.path.join(output_dir, "propose.md")
         oppose_file  = os.path.join(output_dir, "oppose.md")
         decide_file  = os.path.join(output_dir, "decide.md")
@@ -167,7 +171,6 @@ class DebateVideoTool(BaseTool):
             moderator_text = f.read().strip()
 
         # ── Combine into single narrative ─────────────────────────────────
-        # Pre-tag each section so _parse_lines always has correct context
         raw = "\n\n".join([
             f"PROPOSITION:\n{pro_text}",
             f"OPPOSITION:\n{con_text}",
@@ -178,23 +181,20 @@ class DebateVideoTool(BaseTool):
 
         for fmt in video_formats:
             try:
-                # ── Smart skip ────────────────────────────────────────────
+                # ── File paths (intermediate — merge tool handles final naming) ──
                 silent_video = os.path.join(output_dir, f"debate_video_{fmt}.mp4")
                 audio_file   = os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")
                 final_merged = os.path.join(output_dir, f"debate_video_{fmt}_with_audio.mp4")
+                cc_path      = os.path.join(output_dir, f"debate_video_{fmt}_cc_en.txt")
 
-                # Check intro upfront so skip gate can handle prepend
-                _intro_candidates = [
-                    os.path.join(output_dir, f"intro_{fmt}_with_audio.mp4"),
-                    os.path.join(output_dir, f"intro_{fmt}.mp4"),
-                ]
-                _intro_clip = next((p for p in _intro_candidates if os.path.exists(p)), None)
-                _flag_file  = os.path.join(output_dir, f"debate_video_{fmt}_intro_done.flag")
-                _intro_done = os.path.exists(_flag_file)
+                # ✅ SMART SKIP: Check if debate video with audio already exists
+                if os.path.exists(final_merged):
+                    results.append(f"⏭️ {fmt}: Skipped ({os.path.basename(final_merged)} exists)")
+                    print(f"[DebateVideo] ⏭️ {fmt}: Debate video exists — skipping")
+                    continue
 
-                # Always re-render — delete stale outputs first
-                for _stale in [final_merged, silent_video,
-                                os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")]:
+                # Always re-render intermediate files
+                for _stale in [final_merged, silent_video, audio_file]:
                     if os.path.exists(_stale):
                         os.remove(_stale)
                         print(f"[DebateVideo] 🗑️  Removed stale: {os.path.basename(_stale)}")
@@ -205,8 +205,7 @@ class DebateVideoTool(BaseTool):
 
                 print(f"[DebateVideo] [{fmt}] Parsed {len(raw_lines)} lines")
 
-                # ── Save narration text immediately ───────────────────────
-                cc_path = os.path.join(output_dir, f"debate_video_{fmt}_cc_en.txt")
+                # ── Save narration text ───────────────────────────────────
                 with open(cc_path, 'w', encoding='utf-8') as _f:
                     _f.write(spoken_text)
                 print(f"[DebateVideo] 📝 Narration saved: {cc_path} ({len(spoken_text)} chars)")
@@ -219,7 +218,7 @@ class DebateVideoTool(BaseTool):
 
                 self._render(raw_lines, out_path, w, h, secs_per_line,
                              channel, watermark_enabled, watermark_text,
-                             topic=topic)
+                             video_fps, topic=topic)
 
                 if not os.path.exists(out_path):
                     errors.append(f"❌ {fmt}: video missing after render")
@@ -227,9 +226,7 @@ class DebateVideoTool(BaseTool):
 
                 # ── TTS audio ─────────────────────────────────────────────
                 audio_path = os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")
-                final_path = os.path.join(output_dir, f"debate_video_{fmt}_with_audio.mp4")
                 video_dur  = self._get_duration(out_path)
-                # Pass raw section texts for piper 3-voice mode
                 self._generate_tts(
                     spoken_text, audio_path, video_dur, tts_engine,
                     pro_text=self._section_to_spoken(pro_text,   "propose", channel),
@@ -240,28 +237,14 @@ class DebateVideoTool(BaseTool):
 
                 # ── Merge audio + video ───────────────────────────────────
                 if os.path.exists(audio_path):
-                    self._merge_audio_video(out_path, audio_path, final_path, video_dur)
+                    self._merge_audio_video(out_path, audio_path, final_merged, video_dur)
 
-                    # ── Prepend intro if found ────────────────────────────
-                    if _intro_clip and os.path.exists(final_path) and not _intro_done:
-                        print(f"[DebateVideo] 🎬 Intro found: {os.path.basename(_intro_clip)} — prepending")
-                        intro_merged = os.path.join(output_dir, f"debate_video_{fmt}_with_intro.mp4")
-                        self._prepend_intro(_intro_clip, final_path, intro_merged)
-                        if os.path.exists(intro_merged):
-                            os.replace(intro_merged, final_path)
-                            open(os.path.join(output_dir, f"debate_video_{fmt}_intro_done.flag"), 'w').close()
-                            print(f"[DebateVideo] ✅ Intro prepended → {os.path.basename(final_path)}")
-                        else:
-                            print(f"[DebateVideo] ⚠️ Intro prepend failed — keeping debate-only video")
-                    elif _intro_clip is None:
-                        print(f"[DebateVideo]   ℹ️ No intro clip found for {fmt}")
-
-                    merged_kb = os.path.getsize(final_path) // 1024 if os.path.exists(final_path) else 0
-                    kb        = os.path.getsize(out_path) // 1024
+                    merged_kb = os.path.getsize(final_merged) // 1024
                     results.append(
-                        f"✅ {fmt}: {os.path.basename(final_path)} ({merged_kb} KB)   "
+                        f"✅ {fmt}: {os.path.basename(final_merged)} ({merged_kb} KB)   "
                         f"Duration: {video_dur:.1f}s"
                     )
+                    print(f"[DebateVideo] ✅ {fmt}: {os.path.basename(final_merged)} ({merged_kb} KB)")
                 else:
                     kb = os.path.getsize(out_path) // 1024
                     results.append(f"✅ {fmt}: {os.path.basename(silent_video)} ({kb} KB) [no audio]")
@@ -280,7 +263,7 @@ class DebateVideoTool(BaseTool):
         return out
 
 
-    # ── Helpers (identical to definition_video_tool.py) ───────────────────
+    # ── Helpers ───────────────────────────────────────────────────────────
 
     def _lines_to_spoken(self, lines: list, topic: str, channel: str) -> str:
         """Convert display (line, section) tuples to spoken narration."""
@@ -293,12 +276,8 @@ class DebateVideoTool(BaseTool):
         return text
 
     def _section_to_spoken(self, raw_md: str, role: str, channel: str) -> str:
-        """
-        Convert a single debate section (propose/oppose/decide) markdown
-        into clean spoken text suitable for piper TTS.
-        role: 'propose' | 'oppose' | 'decide'
-        """
-        items = self._parse_lines(raw_md)
+        """Convert a single debate section to clean spoken text (short-form filtered)."""
+        items = self._parse_lines(raw_md, default_section=role)
         parts = []
         for item in items:
             parts.append(item[0] if isinstance(item, tuple) else item)
@@ -325,20 +304,10 @@ class DebateVideoTool(BaseTool):
                       pro_text: str = "", con_text: str = "", mod_text: str = "",
                       voices: dict = None):
         """
-        Generate TTS audio then stretch to match video_dur exactly.
+        Generate TTS audio — ALL VOICE CONFIG FROM data.json.
 
-        tts_engine:
-          'gtts'     → single gTTS voice for full text
-          'edge-tts' → single edge-tts voice for full text (en-US-AriaNeural)
-          'piper'    → 3 separate local ONNX voices:
-                         propose → alba_medium   (female, confident)
-                         oppose  → scott_medium  (male, firm)
-                         decide  → joe_medium    (male, authoritative)
-                       Requires: pip install piper-tts
-                       Falls back to gtts if piper not available.
-
-        pro_text / con_text / mod_text: section texts for piper 3-voice mode.
-        If empty, full `text` is used for all sections.
+        tts_engine: 'gtts' | 'edge-tts' | 'piper'
+        voices: from data.json debate_config.piper_voices (flattened to tts_voices by main.py)
         """
         engine = tts_engine.strip().lower()
         print(f"[DebateVideo] 🔊 TTS engine: {engine}")
@@ -347,6 +316,7 @@ class DebateVideoTool(BaseTool):
         print(f"[DebateVideo]   MOD text: {len(mod_text)} chars")
         print(f"[DebateVideo]   Total text: {len(text)} chars  timeout=60s")
 
+        _voices = voices if voices else DEFAULT_PIPER_VOICES
         tmp = audio_path.replace('.mp3', '_raw.mp3')
 
         try:
@@ -356,12 +326,11 @@ class DebateVideoTool(BaseTool):
                     con_text or text,
                     mod_text or text,
                     tmp,
-                    voices=voices or PIPER_VOICES,
+                    voices=_voices,
                 )
             elif engine == "edge-tts":
-                # Use 3 distinct voices if section texts are available
                 if pro_text and con_text and mod_text:
-                    self._tts_edge_3voice(pro_text, con_text, mod_text, tmp, voices=voices)
+                    self._tts_edge_3voice(pro_text, con_text, mod_text, tmp, voices=_voices)
                 else:
                     self._tts_edge(text, tmp)
             else:
@@ -372,7 +341,7 @@ class DebateVideoTool(BaseTool):
                 return
 
             raw_dur = self._get_duration(tmp)
-            print(f"[DebateVideo] 🔊 TTS raw_dur={raw_dur:.1f}s  video_dur={video_dur:.1f}s — no stretch, sync in merge")
+            print(f"[DebateVideo] 🔊 TTS raw_dur={raw_dur:.1f}s  video_dur={video_dur:.1f}s")
             os.rename(tmp, audio_path)
 
         except Exception as e:
@@ -381,40 +350,31 @@ class DebateVideoTool(BaseTool):
                 os.rename(tmp, audio_path)
 
     def _tts_piper_3voice(self, pro_text: str, con_text: str, mod_text: str, out_path: str, voices: dict = None):
-        """
-        Generate 3-voice audio using local piper-tts ONNX models:
-          PRO  → alba_medium.onnx      (female, confident)
-          CON  → scott_medium.onnx     (male, firm)
-          MOD  → joe_medium.onnx       (male, authoritative)
-        Concatenates the 3 WAV clips → single MP3 via ffmpeg.
-        Falls back to gTTS on any error.
-        """
+        """Generate 3-voice audio using piper-tts ONNX models — ALL CONFIG FROM data.json."""
         import tempfile
 
-        # Resolve model paths relative to project root
         _tool_dir     = os.path.dirname(os.path.abspath(__file__))
         _project_root = os.path.dirname(os.path.dirname(os.path.dirname(_tool_dir)))
 
         def _abs_model(rel: str) -> str:
             if os.path.isabs(rel):
                 return rel
-            # Try next to this file first, then project root
             local = os.path.join(os.path.dirname(os.path.abspath(__file__)), rel)
             if os.path.exists(local):
                 return local
             return os.path.join(_project_root, rel)
 
-        _v = voices if voices else PIPER_VOICES
+        _v = voices if voices else DEFAULT_PIPER_VOICES
         sections  = [
-            ("PRO",  pro_text, _v.get("propose", PIPER_VOICES["propose"])),
-            ("CON",  con_text, _v.get("oppose",  PIPER_VOICES["oppose"])),
-            ("MOD",  mod_text, _v.get("decide",  PIPER_VOICES["decide"])),
+            ("PRO",  pro_text, _v.get("propose", DEFAULT_PIPER_VOICES["propose"])),
+            ("CON",  con_text, _v.get("oppose",  DEFAULT_PIPER_VOICES["oppose"])),
+            ("MOD",  mod_text, _v.get("decide",  DEFAULT_PIPER_VOICES["decide"])),
         ]
 
         try:
             import piper
         except ImportError:
-            print("[DebateVideo] ⚠️ piper-tts not installed. Run: pip install piper-tts --break-system-packages")
+            print("[DebateVideo] ⚠️ piper-tts not installed. Run: pip install piper-tts")
             print("[DebateVideo]    Falling back to gTTS...")
             full_text = f"{pro_text} {con_text} {mod_text}".strip()
             self._tts_gtts(full_text, out_path)
@@ -429,8 +389,8 @@ class DebateVideoTool(BaseTool):
                     print(f"[DebateVideo]   ⚠️ {label}: empty text — skipping")
                     continue
 
-                model_path = _abs_model(vcfg["model"])
-                if not os.path.exists(model_path):
+                model_path = _abs_model(vcfg.get("model", ""))
+                if not model_path or not os.path.exists(model_path):
                     print(f"[DebateVideo]   ⚠️ {label}: model not found: {model_path} — skipping")
                     continue
 
@@ -440,7 +400,6 @@ class DebateVideoTool(BaseTool):
                 print(f"[DebateVideo]   🎤 {label}: piper {os.path.basename(model_path)}  "
                       f"speed={speed}  ({len(text_chunk)} chars)")
 
-                # piper CLI: echo "text" | piper --model model.onnx --output_file out.wav
                 result = subprocess.run(
                     ["piper",
                      "--model",       model_path,
@@ -463,8 +422,6 @@ class DebateVideoTool(BaseTool):
                 self._tts_gtts(full_text, out_path)
                 return
 
-            # Concatenate WAV clips → single MP3
-            # Write ffmpeg concat list
             concat_list = os.path.join(tmp_dir, "concat.txt")
             with open(concat_list, "w") as _f:
                 for clip in wav_clips:
@@ -477,7 +434,6 @@ class DebateVideoTool(BaseTool):
                 capture_output=True, check=False
             )
 
-            # Convert combined WAV → MP3
             result = subprocess.run(
                 ["ffmpeg", "-y", "-i", concat_wav, "-q:a", "2", out_path],
                 capture_output=True, check=False
@@ -490,7 +446,6 @@ class DebateVideoTool(BaseTool):
                 self._tts_gtts(full_text, out_path)
 
         finally:
-            # Cleanup temp files
             import shutil as _sh
             _sh.rmtree(tmp_dir, ignore_errors=True)
 
@@ -499,23 +454,19 @@ class DebateVideoTool(BaseTool):
         try:
             from gtts import gTTS
         except ImportError:
-            print("[DebateVideo] ⚠️ gTTS not installed. Run: pip install gTTS --break-system-packages")
+            print("[DebateVideo] ⚠️ gTTS not installed. Run: pip install gTTS")
             return
         tts = gTTS(text=text, lang='en', slow=False)
         tts.save(out_path)
         print(f"[DebateVideo] ✅ gTTS saved: {out_path}")
 
     def _tts_edge(self, text: str, out_path: str, timeout: int = 60):
-        """
-        Generate audio using edge-tts (async) with a hard timeout.
-        Falls back to gTTS if edge-tts is not installed, times out, or errors.
-        timeout: seconds to wait before giving up (default 60s)
-        """
+        """Generate audio using edge-tts with timeout."""
         try:
             import edge_tts
             import asyncio
         except ImportError:
-            print("[DebateVideo] ⚠️ edge-tts not installed. Run: pip install edge-tts --break-system-packages")
+            print("[DebateVideo] ⚠️ edge-tts not installed. Run: pip install edge-tts")
             print("[DebateVideo]    Falling back to gTTS...")
             self._tts_gtts(text, out_path)
             return
@@ -528,7 +479,6 @@ class DebateVideoTool(BaseTool):
             await asyncio.wait_for(_generate(), timeout=timeout)
 
         try:
-            import asyncio
             asyncio.run(_with_timeout())
             if os.path.exists(out_path):
                 print(f"[DebateVideo] ✅ edge-tts saved: {out_path}")
@@ -547,26 +497,21 @@ class DebateVideoTool(BaseTool):
 
     def _tts_edge_3voice(self, pro_text: str, con_text: str, mod_text: str,
                          out_path: str, voices: dict = None, timeout: int = 60):
-        """
-        Generate 3-voice audio using edge-tts neural voices:
-          PRO  → en-US-AriaNeural   (female, confident)
-          CON  → en-US-GuyNeural    (male, firm)
-          MOD  → en-GB-RyanNeural   (male, neutral British moderator)
-        Override voices via data.json debate_config.piper_voices (reuses same config key).
-        Concatenates 3 MP3 clips → single MP3 via ffmpeg.
-        Falls back to single-voice edge-tts on any error.
-        """
+        """Generate 3-voice audio using edge-tts neural voices — ALL CONFIG FROM data.json."""
         import asyncio, tempfile
 
-        # Resolve voice names — tts_voices dict reused for edge-tts too
-        _v = voices or {}
+        _v = voices if voices else DEFAULT_EDGE_TTS_VOICES
+
+        def _get_voice(role: str) -> str:
+            vcfg = _v.get(role, {})
+            if isinstance(vcfg, dict):
+                return vcfg.get("edge_voice", DEFAULT_EDGE_TTS_VOICES.get(role, "en-US-AriaNeural"))
+            return str(vcfg) if vcfg else DEFAULT_EDGE_TTS_VOICES.get(role, "en-US-AriaNeural")
+
         voice_map = {
-            "propose": _v.get("propose", {}).get("edge_voice", EDGE_TTS_VOICES["propose"])
-                      if isinstance(_v.get("propose"), dict) else EDGE_TTS_VOICES["propose"],
-            "oppose":  _v.get("oppose",  {}).get("edge_voice", EDGE_TTS_VOICES["oppose"])
-                      if isinstance(_v.get("oppose"), dict) else EDGE_TTS_VOICES["oppose"],
-            "decide":  _v.get("decide",  {}).get("edge_voice", EDGE_TTS_VOICES["decide"])
-                      if isinstance(_v.get("decide"), dict) else EDGE_TTS_VOICES["decide"],
+            "propose": _get_voice("propose"),
+            "oppose":  _get_voice("oppose"),
+            "decide":  _get_voice("decide"),
         }
 
         try:
@@ -618,7 +563,6 @@ class DebateVideoTool(BaseTool):
                 self._tts_edge(full, out_path)
                 return
 
-            # Concatenate clips → single MP3 via ffmpeg concat demuxer
             concat_list = os.path.join(tmp_dir, "concat.txt")
             with open(concat_list, "w") as _f:
                 for clip in mp3_clips:
@@ -642,12 +586,7 @@ class DebateVideoTool(BaseTool):
 
     def _merge_audio_video(self, video_path: str, audio_path: str,
                             output_path: str, video_dur: float):
-        """
-        Merge audio into video.
-        - If audio is shorter than video: pad with silence so video plays fully.
-        - If audio is longer than video: let audio continue (no cut).
-        Neither stream is ever trimmed or speed-adjusted.
-        """
+        """Merge audio into video with silence padding if needed."""
         print(f"[DebateVideo] 🎬 Merging audio+video → {os.path.basename(output_path)}")
         result = subprocess.run([
             "ffmpeg", "-y",
@@ -664,64 +603,59 @@ class DebateVideoTool(BaseTool):
         if result.returncode != 0:
             print(f"[DebateVideo] ⚠️ merge failed: {result.stderr.decode()[:150]}")
 
-    def _prepend_intro(self, intro_path: str, main_path: str, out_path: str):
-        """Concatenate intro + debate via ffmpeg filter_complex concat."""
-        print(f"[DebateVideo]   intro : {os.path.basename(intro_path)}")
-        print(f"[DebateVideo]   debate: {os.path.basename(main_path)}")
-        result = subprocess.run(
-            ["ffmpeg", "-y",
-             "-i", intro_path, "-i", main_path,
-             "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[vout][aout]",
-             "-map", "[vout]", "-map", "[aout]",
-             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-             "-c:a", "aac", "-ar", "44100", "-ac", "2",
-             "-pix_fmt", "yuv420p", out_path],
-            capture_output=True, check=False
-        )
-        if result.returncode != 0:
-            print(f"[DebateVideo] ⚠️ prepend failed: {result.stderr.decode()[:200]}")
-     
-    def _parse_lines(self, raw: str) -> List[Tuple[str, str]]:
+    def _parse_lines(self, raw: str, default_section: str = 'propose') -> List[Tuple[str, str]]:
         """
         Parse debate markdown into (line_text, section) tuples.
-        section header lines switch context but are NOT rendered.
-        Structural sub-headers are skipped ONLY if they're standalone (no content on same line).
+
+        Short-form mode:
+          - propose : only ARGUMENT 1 content included
+                      (opening statement / conclusion / arg 2+ are skipped)
+          - oppose  : only COUNTER-ARGUMENT 1 content included  (same logic)
+          - decide  : only content after DECISION: included
+                      (summary of proposition/opposition and analysis are skipped)
         """
         result  = []
-        section = 'propose'
+        section = default_section
 
-        # ── Section headers: NO $ anchor, allow text after colon ─────────────
+        # Section-switch markers — DECISION handled separately so its content isn't lost
         _section_map = [
             (re.compile(r'^PROPOSITION\s*[:\-]?', re.I), 'propose'),
-            (re.compile(r'^OPPOSITION\s*[:\-]?',     re.I), 'oppose'),
-            (re.compile(r'^VERDICT\s*[:\-]?',        re.I), 'decide'),
-            (re.compile(r'^MODERATOR\s*[:\-]?',      re.I), 'decide'),
-            (re.compile(r'^JUDGE\s*[:\-]?',          re.I), 'decide'),
-            (re.compile(r'^DECISION\s*[:\-]?',       re.I), 'decide'),
+            (re.compile(r'^OPPOSITION\s*[:\-]?',  re.I), 'oppose'),
+            (re.compile(r'^VERDICT\s*[:\-]?',     re.I), 'decide'),
+            (re.compile(r'^MODERATOR\s*[:\-]?',   re.I), 'decide'),
+            (re.compile(r'^JUDGE\s*[:\-]?',       re.I), 'decide'),
         ]
 
-        # ── FIXED: Add $ anchor to skip ONLY standalone headers ──────────────
-        # Lines with content after colon (e.g., "SUMMARY: text...") are NOT skipped
+        # Numbered argument headers — we extract the digit
+        _arg_re         = re.compile(r'^ARGUMENT\s+(\d+)\s*[:\-]', re.I)
+        _counter_arg_re = re.compile(r'^COUNTER[\s\-]?ARGUMENT\s+(\d+)\s*[:\-]', re.I)
+        _decision_re    = re.compile(r'^DECISION\s*[:\-]?', re.I)
+
+        # Headers that close the currently-open includable block
+        _block_end_headers = [
+            re.compile(r'^OPENING\s+STATEMENT\s*[:\-]?',  re.I),
+            re.compile(r'^CLOSING\s+STATEMENT\s*[:\-]?',  re.I),
+            re.compile(r'^CONCLUSION\s*[:\-]?',            re.I),
+            re.compile(r'^SUMMARY\s+OF\s+\w+',            re.I),
+            re.compile(r'^SUMMARY\s*[:\-]?\s*$',          re.I),
+            re.compile(r'^ANALYSIS\s*[:\-]?',             re.I),
+            re.compile(r'^IN\s+CONCLUSION\s*[:\-]?\s*$',  re.I),
+            re.compile(r'^FINAL\s+(VERDICT|DECISION|THOUGHTS?)\s*[:\-]?\s*$', re.I),
+        ]
+
+        # Pure structural lines always dropped
         _skip = [
-            re.compile(r'^SUMMARY\s+OF\s+(PROPOSITION|OPPOSITION|VERDICT)\s*$', re.I),  # ← Added $
-            re.compile(r'^SUMMARY\s*[:\-]\s*$',                    re.I),  # ← Added $
-            re.compile(r'^(COUNTER[\s\-]?ARGUMENT|COUNTER[\s\-]?POINT)\s*\d*\s*[:\-]?\s*$', re.I),  # ← Added $
-            re.compile(r'^(ARGUMENT|POINT)\s+\d+\s*[:\-]\s*$',     re.I),  # ← Added $
-            re.compile(r'^(SUPPORTING\s+)?(ARGUMENT|POINT)\s+\d+\s*$', re.I),  # ← Added $
-            re.compile(r'^(PRO|CON)\s+ARGUMENT\s+\d+\s*$',         re.I),  # ← Added $
-            re.compile(r'^OPENING\s+STATEMENT\s*[:\-]?\s*$',       re.I),  # ← Added $
-            re.compile(r'^CLOSING\s+STATEMENT\s*[:\-]?\s*$',       re.I),  # ← Added $
-            re.compile(r'^CONCLUSION\s*[:\-]?\s*$',                re.I),  # ← Added $
-            re.compile(r'^ANALYSIS\s*[:\-]?\s*$',                  re.I),  # ← Added $
-            re.compile(r'^REBUTTAL\s*[:\-]?\d*\s*$',               re.I),  # ← Added $
-            re.compile(r'^KEY\s+(POINTS?|ARGUMENTS?)\s*$',         re.I),  # ← Added $
-            re.compile(r'^MAIN\s+(POINTS?|ARGUMENTS?)\s*$',        re.I),  # ← Added $
-            re.compile(r'^IN\s+CONCLUSION\s*[:\-]?\s*$',           re.I),  # ← Added $
-            re.compile(r'^FINAL\s+(VERDICT|DECISION|THOUGHTS?)\s*[:\-]?\s*$', re.I),  # ← Added $
             re.compile(r'^-{3,}$'),
             re.compile(r'^\*{3,}$'),
             re.compile(r'^#{1,6}\s+'),
+            re.compile(r'^KEY\s+(POINTS?|ARGUMENTS?)\s*$',  re.I),
+            re.compile(r'^MAIN\s+(POINTS?|ARGUMENTS?)\s*$', re.I),
+            re.compile(r'^REBUTTAL\s*[:\-]?\d*\s*$',        re.I),
         ]
+
+        # State
+        include_content         = False   # True only inside ARG 1 / COUNTER-ARG 1 / post-DECISION
+        decide_decision_reached = False
 
         for raw_line in raw.splitlines():
             line = raw_line.strip()
@@ -739,16 +673,67 @@ class DebateVideoTool(BaseTool):
             line = _clean_text(line)
             if not line: continue
 
-            # Check section header FIRST
-            matched = next((role for p, role in _section_map if p.match(line)), None)
-            if matched:
-                section = matched
-                print(f"[DebateVideo] 📑 Section switch: {section}")
+            # ── Section switch ──────────────────────────────────────────────
+            matched_section = next((role for p, role in _section_map if p.match(line)), None)
+            if matched_section:
+                if matched_section != section:
+                    section                 = matched_section
+                    include_content         = False
+                    decide_decision_reached = False
+                    print(f"[DebateVideo] 📑 Section switch: {section}")
+                continue  # never render a section-header line
+
+            # ── DECISION header (decide section) ───────────────────────────
+            if _decision_re.match(line):
+                if section == 'decide':
+                    decide_decision_reached = True
+                    include_content         = True
+                    print(f"[DebateVideo]   ✅ DECISION: reached — including content")
+                    # Capture any inline text that follows the header token
+                    rest = line[_decision_re.match(line).end():].strip()
+                    if rest:
+                        rest = rest[0].upper() + rest[1:]
+                        result.append((rest, section))
+                continue  # skip the header token itself
+
+            # ── propose / oppose: numbered argument headers ─────────────────
+            if section in ('propose', 'oppose'):
+                arg_m     = _arg_re.match(line)
+                counter_m = _counter_arg_re.match(line)
+                if arg_m or counter_m:
+                    m               = arg_m or counter_m
+                    num             = int(m.group(1))
+                    include_content = (num == 1)
+                    tag    = "ARG" if arg_m else "COUNTER-ARG"
+                    status = "✅ including" if include_content else "⏭️  skipping"
+                    print(f"[DebateVideo]   {status} {tag} {num}")
+                    # Capture inline content that follows on the same line
+                    if include_content:
+                        rest = line[m.end():].strip()
+                        if rest:
+                            rest = rest[0].upper() + rest[1:]
+                            result.append((rest, section))
+                    continue  # skip the header token itself
+
+                # Block-end headers close the includable window
+                if any(p.match(line) for p in _block_end_headers):
+                    include_content = False
+                    print(f"[DebateVideo]   ⏭️  Block closed: {line[:50]}")
+                    continue
+
+            # ── decide: skip everything before DECISION: ────────────────────
+            if section == 'decide' and not decide_decision_reached:
+                if any(p.match(line) for p in _block_end_headers):
+                    include_content = False
+                print(f"[DebateVideo]   ⏭️  Pre-DECISION skipped: {line[:50]}")
                 continue
 
-            # Then check skip patterns (only standalone headers now)
+            # ── Always-skip structural lines ────────────────────────────────
             if any(p.match(line) for p in _skip):
-                print(f"[DebateVideo]   ⏭️  Skipped header: {line[:50]}")
+                continue
+
+            # ── Gate: only emit when inside an includable block ─────────────
+            if not include_content:
                 continue
 
             line = line[0].upper() + line[1:]
@@ -799,27 +784,16 @@ class DebateVideoTool(BaseTool):
         draw.text((x-1, y-1), text, font=font, fill=bloom)
 
     def _draw_diamond_title(self, draw, x, y, text, font, frame: int):
-        """
-        Diamond light effect for the header title.
-        Very slow, smooth prismatic colour shift — no flicker, no blink.
-        Cycle: pure white → soft gold → ice blue → soft violet → back to white.
-        Full cycle takes ~600 frames (~25s at 24fps) — barely perceptible drift.
-        """
+        """Diamond light effect for header title."""
         import math
-
-        # Extremely slow cycle — 600 frames = ~25 seconds, barely noticeable
         t = (frame % 600) / 600.0
-
-        # Gentle colour stops — all high-brightness, no jarring saturated jumps
         stops = [
-            (0.00, (255, 255, 255)),   # pure white
-            (0.25, (255, 240, 180)),   # warm gold-white
-            (0.50, (200, 235, 255)),   # ice blue-white
-            (0.75, (235, 210, 255)),   # soft lavender-white
-            (1.00, (255, 255, 255)),   # back to pure white
+            (0.00, (255, 255, 255)),
+            (0.25, (255, 240, 180)),
+            (0.50, (200, 235, 255)),
+            (0.75, (235, 210, 255)),
+            (1.00, (255, 255, 255)),
         ]
-
-        # Find surrounding stops and interpolate
         c0, c1, f0, f1 = stops[0][1], stops[1][1], 0.0, 0.25
         for i in range(len(stops) - 1):
             if stops[i][0] <= t <= stops[i+1][0]:
@@ -828,26 +802,17 @@ class DebateVideoTool(BaseTool):
                 break
         seg     = (f1 - f0) if f1 != f0 else 1
         local_t = (t - f0) / seg
-        # Smooth ease in-out — no abrupt transitions
         local_t = local_t * local_t * (3 - 2 * local_t)
         face_col = tuple(int(c0[i] + (c1[i] - c0[i]) * local_t) for i in range(3))
-
-        # Layer 1 — soft deep shadow (grounded, no harsh edges)
         shadow = (int(face_col[0]*0.08), int(face_col[1]*0.08), int(face_col[2]*0.08))
         for dx, dy in [(-3,3),(3,3),(-3,-3),(3,-3)]:
             draw.text((x+dx, y+dy), text, font=font, fill=shadow)
-
-        # Layer 2 — gentle colour bloom (constant, no pulse)
         bloom = (int(face_col[0]*0.35), int(face_col[1]*0.35), int(face_col[2]*0.35))
         for dx, dy in [(-2,2),(2,2),(-2,-2),(2,-2),(2,0),(-2,0),(0,2),(0,-2)]:
             draw.text((x+dx, y+dy), text, font=font, fill=bloom)
-
-        # Layer 3 — inner soft glow (constant brightness)
         inner = (int(face_col[0]*0.65), int(face_col[1]*0.65), int(face_col[2]*0.65))
         for dx, dy in [(-1,1),(1,1),(-1,-1),(1,-1),(1,0),(-1,0),(0,1),(0,-1)]:
             draw.text((x+dx, y+dy), text, font=font, fill=inner)
-
-        # Layer 4 — crisp face at full colour (no flicker multiplier)
         draw.text((x, y), text, font=font, fill=face_col)
 
     def _justify(self, draw, x, y, text, font, max_w, fill):
@@ -872,10 +837,10 @@ class DebateVideoTool(BaseTool):
             cx += ww + gap
 
     def _render(self, raw_lines, out_path, w, h, secs_per_line,
-                channel, wm_enabled, wm_text, topic=""):
-        """Render debate video — identical layout engine to definition_video_tool._render."""
+                channel, wm_enabled, wm_text, video_fps, topic=""):
+        """Render debate video — identical layout engine to definition_video_tool."""
         from PIL import Image, ImageDraw, ImageFont
-        FPS             = 24                          # same as definition_video_tool
+        FPS             = video_fps
         frames_per_line = int(secs_per_line * FPS)
         fade_frames     = min(6, frames_per_line // 5)
         BASE_ACTIVE     = w // 28
@@ -897,7 +862,7 @@ class DebateVideoTool(BaseTool):
                 return ImageFont.load_default()
 
         pad_x         = int(w * 0.05)
-        header_h      = int(h * 0.17)  # title + section badge + separator
+        header_h      = int(h * 0.17)
         pad_top       = header_h + int(h * 0.02)
         wm_zone       = int(h * 0.88)
         body_h        = wm_zone - pad_top
@@ -906,7 +871,6 @@ class DebateVideoTool(BaseTool):
         max_px        = w - pad_x - int(w * 0.05)
 
         hdr_title  = _clean_text(topic) if topic else _clean_text(channel)
-        # Capitalize each word, but preserve known acronyms
         _acronyms  = {'ai', 'ml', 'api', 'ui', 'ux', 'llm', 'gpt', 'ceo', 'cto', 'it'}
         hdr_title  = ' '.join(
             _word.upper() if _word.lower() in _acronyms else _word.capitalize()
@@ -914,7 +878,6 @@ class DebateVideoTool(BaseTool):
         )
         hdr_max_px = w - pad_x * 2
 
-        # Auto-shrink header font until every word fits within hdr_max_px (no word clipping)
         hdr_topic_size = max(w // 30, 22)
         f_hdr_topic    = None
         for size in range(hdr_topic_size, 18, -2):
@@ -923,7 +886,6 @@ class DebateVideoTool(BaseTool):
             except Exception:
                 _f = ImageFont.load_default()
             hdr_lines = self._pixel_wrap(hdr_title, _f, hdr_max_px)
-            # Check no single wrapped line overflows
             from PIL import Image as _TmpImg, ImageDraw as _TmpDraw
             _tmp = _TmpImg.new("RGB", (1, 1))
             _d   = _TmpDraw.Draw(_tmp)
@@ -993,7 +955,6 @@ class DebateVideoTool(BaseTool):
                 img   = Image.new("RGB", (w, h), (0, 0, 0))
                 draw  = ImageDraw.Draw(img)
 
-                # Header — multi-line centered with diamond prismatic light effect
                 hdr_line_h = int(hdr_topic_size * 1.35)
                 hdr_y      = int(h * 0.018)
                 for hdr_ln in hdr_lines:
@@ -1003,8 +964,6 @@ class DebateVideoTool(BaseTool):
                     self._draw_diamond_title(draw, hdr_x, hdr_y, hdr_ln, f_hdr_topic, global_frame)
                     hdr_y   += hdr_line_h
 
-                # Separator — sits below however many header lines were drawn
-                # Section pill badge — centered, just below title
                 _sec_label = _section_labels.get(cur_section, cur_section.capitalize())
                 _sec_color = _section_colors.get(cur_section, (220, 220, 220))
                 _sec_size  = max(w // 44, 22)
@@ -1035,7 +994,6 @@ class DebateVideoTool(BaseTool):
                 sep_y = max(header_h - 2, _ul_y + int(h * 0.008))
                 draw.line([(pad_x, sep_y), (w - pad_x, sep_y)], fill=(50, 60, 80), width=1)
 
-                # Past lines (scroll up, shrinking)
                 past_indices = list(range(max(0, line_idx - 30), line_idx))
                 past_indices.reverse()
                 y_cursor = active_y
@@ -1051,11 +1009,9 @@ class DebateVideoTool(BaseTool):
                     self._justify(draw, pad_x, y_pos, lines_data[pi][0], fnt, max_px, c)
                     y_cursor = y_pos
 
-                # Active line — neon white glow
                 neon_c = self._neon_white(alpha, global_frame)
                 self._justify(draw, pad_x, active_y, ltext, f_active, max_px, neon_c)
 
-                # Future lines (dim, below active)
                 future_start = active_y + active_font_h + int(h * 0.025)
                 y_cursor     = future_start
                 for ahead, fi2 in enumerate(range(line_idx + 1, min(line_idx + 20, len(lines_data))), start=1):
@@ -1069,7 +1025,6 @@ class DebateVideoTool(BaseTool):
                     self._justify(draw, pad_x, y_cursor, lines_data[fi2][0], fnt, max_px, c)
                     y_cursor += line_h
 
-                # Progress bar
                 prog   = (line_idx * frames_per_line + fi) / total_frames
                 bar_y  = h - 2
                 filled = int(w * prog)
@@ -1077,7 +1032,6 @@ class DebateVideoTool(BaseTool):
                 if filled > 0:
                     draw.line([(0, bar_y), (filled, bar_y)], fill=(200, 200, 200), width=1)
 
-                # Watermark
                 tag     = wm_text if wm_enabled else f"@{channel}"
                 tw_bbox = draw.textbbox((0, 0), tag, font=f_wm)
                 tw      = tw_bbox[2] - tw_bbox[0]

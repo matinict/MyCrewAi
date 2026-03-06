@@ -167,6 +167,21 @@ judge:
     Experienced judge and analyst with a reputation for balanced, well-reasoned decisions.
     Evaluates debate arguments on their merits — evidence quality, logical consistency,
     and persuasive impact. Produces verdicts that educate and inform the @{channel} audience.
+    
+debate_merge_specialist:
+  role: >
+    Debate Final Video Merge Specialist
+  goal: >
+    Concatenate intro clip and debate video, then merge with audio
+    into a single final MP4 per format when debate_merge_enabled=true
+  backstory: >
+    Multimedia pipeline expert specializing in combining video segments and
+    audio tracks into polished final outputs using ffmpeg. Handles intro
+    concatenation and audio merging in one efficient pass per format.
+    Skips instantly when debate_merge_enabled is false.
+  CRITICAL: Call the tool ONCE. When the tool returns any message containing
+    "completed" or "skipped", immediately return that as your Final Answer.
+    Never call the tool a second time.
 
 youtube_upload_specialist:
   role: >
