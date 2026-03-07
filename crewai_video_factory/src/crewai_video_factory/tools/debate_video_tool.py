@@ -80,6 +80,7 @@ class DebateVideoInput(BaseModel):
     tts_engine:           str   = Field(default="gtts", description="TTS engine: 'gtts', 'edge-tts', or 'piper'")
     tts_voices:           dict  = Field(default_factory=dict, description="Per-section voice overrides from data.json")
     lang_suffix:          str   = Field(default="En", description="Language suffix for output filenames. e.g. 'En', 'Bn', 'Fr'")
+    bg_opacity:           int   = Field(default=255, description="Background opacity: 0=fully transparent, 255=pure black. e.g. 180=semi-transparent dark")
 
 
 class DebateVideoTool(BaseTool):
@@ -116,6 +117,7 @@ class DebateVideoTool(BaseTool):
         tts_engine: str = "gtts",
         tts_voices: dict = None,
         lang_suffix: str = "En",
+        bg_opacity: int = 255,
     ) -> str:
 
         if not debate_video_enabled:
@@ -218,9 +220,11 @@ class DebateVideoTool(BaseTool):
                 _is_short_form = fmt in ("Shorts", "ShortsHD", "Shorts4K")
                 raw_lines = self._parse_lines(raw, short_form=_is_short_form)
 
-                # Append subscribe line to video lines so audio & video end together
-                _subscribe_text = _clean_text(f'Subscribe to {channel} for more insights.')
-                raw_lines.append((_subscribe_text, 'decide'))
+                # Append disclaimer + subscribe line to video lines so audio & video end together
+                _disclaimer_text = _clean_text('This video is created for educational and research purposes, shared to spread knowledge and awareness.')
+                _subscribe_text  = _clean_text(f'Subscribe to {channel} for more insights.')
+                raw_lines.append((_disclaimer_text, 'decide'))
+                raw_lines.append((_subscribe_text,  'decide'))
 
                 spoken_text = self._lines_to_spoken(raw_lines, topic, channel)
 
@@ -239,9 +243,10 @@ class DebateVideoTool(BaseTool):
                 w, h        = (1080, 1920) if is_portrait else (1920, 1080)
                 print(f"\n[DebateVideo] [{fmt}] {w}x{h}  secs_per_line={secs_per_line}")
 
+                _bg_color = tuple(int(x) for x in str(bg_opacity).split(","))[:3] if "," in str(bg_opacity) else (0, 0, 0)
                 self._render(raw_lines, out_path, w, h, secs_per_line,
                              channel, watermark_enabled, watermark_text,
-                             video_fps, topic=topic)
+                             video_fps, topic=topic, bg_opacity=bg_opacity, bg_color=_bg_color)
 
                 if not os.path.exists(out_path):
                     errors.append(f"❌ {fmt}: video missing after render")
@@ -255,17 +260,18 @@ class DebateVideoTool(BaseTool):
                 _pro_spoken = self._section_to_spoken(pro_text,      "propose", channel, short_form=_is_short_form)
                 _con_spoken = self._section_to_spoken(con_text,      "oppose",  channel, short_form=_is_short_form)
                 _mod_spoken = self._section_to_spoken(moderator_text,"decide",  channel, short_form=_is_short_form)
+                _disclaimer_spoken = _clean_text('This video is created for educational and research purposes, shared to spread knowledge and awareness.')
                 _sub_spoken = _clean_text(f'Subscribe to {channel} for more insights.')
 
                 # spoken_text_no_sub = pro + con + mod only (subscribe appended as separate clip)
-                _spoken_no_sub = f"{_pro_spoken} {_con_spoken} {_mod_spoken}".strip()
+                _spoken_no_sub = f"{_pro_spoken} {_con_spoken} {_mod_spoken} {_disclaimer_spoken}".strip()
 
                 _pre_sub_audio = audio_path.replace('.mp3', '_presub.mp3')
                 _sub_audio     = audio_path.replace('.mp3', '_sub.mp3')
 
                 self._generate_tts(
                     _spoken_no_sub, _pre_sub_audio,
-                    max(1.0, video_dur - secs_per_line),   # exclude subscribe frame slot
+                    max(1.0, video_dur - secs_per_line * 2),   # exclude disclaimer + subscribe frame slots
                     tts_engine,
                     pro_text=_pro_spoken,
                     con_text=_con_spoken,
@@ -1030,7 +1036,7 @@ class DebateVideoTool(BaseTool):
             cx += ww + gap
 
     def _render(self, raw_lines, out_path, w, h, secs_per_line,
-                channel, wm_enabled, wm_text, video_fps, topic=""):
+                channel, wm_enabled, wm_text, video_fps, topic="", bg_opacity=255, bg_color=(0,0,0)):
         """Render debate video — identical layout engine to definition_video_tool."""
         from PIL import Image, ImageDraw, ImageFont
         FPS             = video_fps
@@ -1141,12 +1147,17 @@ class DebateVideoTool(BaseTool):
         _section_colors = {'propose': (130, 210, 255), 'oppose': (255, 100, 100), 'decide': (140, 255, 140)}
         _prev_section   = None
 
+        # Base background — constant, created once outside loop for performance
+        _bg_v  = max(0, min(255, bg_opacity))
+        _base  = Image.new("RGBA", (w, h), (bg_color[0], bg_color[1], bg_color[2], 255))
+
         global_frame = 0
         for line_idx, (ltext, cur_section) in enumerate(lines_data):
             for fi in range(frames_per_line):
                 alpha = min(1.0, fi / max(fade_frames, 1))
-                img   = Image.new("RGB", (w, h), (0, 0, 0))
-                draw  = ImageDraw.Draw(img)
+                # RGBA overlay composited onto _base (avoids black-fill on RGB convert)
+                img    = Image.new("RGBA", (w, h), (0, 0, 0, _bg_v))
+                draw   = ImageDraw.Draw(img)
 
                 hdr_line_h = int(hdr_topic_size * 1.35)
                 hdr_y      = int(h * 0.018)
@@ -1232,7 +1243,8 @@ class DebateVideoTool(BaseTool):
                 wm_y    = wm_zone + int(h * 0.02)
                 draw.text((wm_x, wm_y), tag, font=f_wm, fill=(30, 30, 38))
 
-                proc.stdin.write(img.tobytes())
+                _composited = Image.alpha_composite(_base, img)
+                proc.stdin.write(_composited.convert("RGB").tobytes())
                 global_frame += 1
                 if pbar is not None:
                     pbar.update(1)

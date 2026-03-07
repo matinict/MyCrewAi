@@ -173,6 +173,7 @@ def load_config():
             'debate_secs_per_line':       3.5,
             'debate_max_chars':           10000,
             'debate_merge_enabled':       False,      # ✅ ADDED
+            'debate_bg_opacity':          255,
             'tts_voices':                 {},
             'intro_context':              'bar_race',  # bar_race | debate | definition
             'intro_slug':                 '',          # custom narration line 2

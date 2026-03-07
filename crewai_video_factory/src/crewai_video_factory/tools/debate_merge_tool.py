@@ -287,44 +287,52 @@ class DebateMergeTool(BaseTool):
 
     def _cleanup_intermediate_files(self, output_dir: str, fmt: str, lang: str = "En") -> int:
         """
-        Delete ALL intro/debate files for format (intermediates + originals).
+        Delete ALL intro/debate intermediate files using wildcards.
         Returns count of deleted files.
 
-        DELETES:
-          - intro_{fmt}.mp4 (original video)
-          - intro_{fmt}_with_audio.mp4 (with audio)
-          - intro_{fmt}_audio.mp3 (audio file)
-          - intro_{fmt}_cc.txt (CC file)
-          - debate_video_{fmt}.mp4 (original video)
-          - debate_video_{fmt}_with_audio.mp4 (with audio)
-          - debate_video_{fmt}_audio.mp3 (audio file)
-          - debate_video_{fmt}_cc.txt (CC file)
+        DELETES (via glob wildcards — catches all lang variants, legacy names, etc.):
+          - intro_{fmt}*.mp4  (silent + with_audio, all lang suffixes)
+          - intro_{fmt}*.mp3  (audio, all variants)
+          - intro_{fmt}*.txt  (CC files)
+          - debate_video_{fmt}*.mp4  (silent + with_audio, all variants)
+          - debate_video_{fmt}*.mp3  (presub_raw, sub, legacy, any)
+          - debate_video_{fmt}*.txt  (CC files)
+          - debate_*.mp3             (stray pro/con/mod clips)
+          - debate_video_*.mp3       (any legacy audio without fmt suffix)
 
-        PRESERVES:
-          - *.md files (propose.md, oppose.md, decide.md)
+        PRESERVES (safety guard — never deleted):
+          - Files starting with channel name (final merged outputs)
+          - *.md files (propose, oppose, decide)
         """
+        import glob as _glob
         deleted = 0
-        patterns = [
-            # debate intermediates — safe to delete after final merge
-            f"debate_video_{fmt}_{lang}.mp4",
-            f"debate_video_{fmt}_{lang}_with_audio.mp4",
-            f"debate_video_{fmt}_{lang}_audio.mp3",
-            f"debate_video_{fmt}_{lang}_cc.txt",
-            # intro CC only — keep _with_audio.mp4 so intro skips on next run
-            f"intro_{fmt}_{lang}_cc.txt",
-            f"debate_video_*.mp*", 
-            f"intro_*.txt",
-            f"intro_*.mp*",
+
+        wildcards = [
+            f"intro_{fmt}*.mp4",       # intro silent + with_audio (all lang variants)
+            f"intro_{fmt}*.mp3",       # intro audio (all variants)
+            f"intro_{fmt}*.txt",       # intro CC
+            f"debate_video_{fmt}*.mp4", # debate silent + with_audio (all variants)
+            f"debate_video_{fmt}*.mp3", # debate audio (presub_raw, sub, legacy, any)
+            f"debate_video_{fmt}*.txt", # debate CC
+            f"debate_video_*.mp3",     # legacy audio without fmt (e.g. debate_video_Shorts_audio.mp3)
+            f"debate_*.mp3",           # stray pro/con/mod clips (debate_pro.mp3 etc.)
         ]
 
-        for pattern in patterns:
-            filepath = os.path.join(output_dir, pattern)
-            if os.path.exists(filepath):
+        for wc in wildcards:
+            for filepath in sorted(_glob.glob(os.path.join(output_dir, wc))):
+                fname = os.path.basename(filepath)
+                # Safety: never delete final merged outputs or source .md files
+                if fname.endswith(".md"):
+                    continue
+                # Never delete if it looks like a final output (contains channel name pattern)
+                # Final outputs are named like: PlayOwnAi_Debate_...mp4
+                if "_Debate_" in fname or "_debate_concat_" in fname:
+                    continue
                 try:
                     os.remove(filepath)
-                    print(f"[DebateMerge]   🗑️ {os.path.basename(filepath)}")
+                    print(f"[DebateMerge]   🗑️ {fname}")
                     deleted += 1
                 except Exception as e:
-                    print(f"[DebateMerge]   ⚠️ Failed to delete {os.path.basename(filepath)}")
+                    print(f"[DebateMerge]   ⚠️ Failed to delete {fname}: {e}")
 
         return deleted

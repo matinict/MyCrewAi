@@ -460,6 +460,7 @@ create_debate_video:
       tts_engine: "{tts_engine}"
       tts_voices: {tts_voices}
       lang_suffix: "{lang_suffix}"
+    bg_opacity: {debate_bg_opacity}
 
     Output files per format in {output_dir}/:
       debate_video_[format].mp4              (silent video)
