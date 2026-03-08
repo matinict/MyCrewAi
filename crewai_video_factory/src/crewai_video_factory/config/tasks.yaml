@@ -314,9 +314,11 @@ generate_youtube_metadata:
     Generate YouTube metadata AND thumbnail images for {topic}.
     This includes:
     - Narration text file: output/{filename}/{filename}_cc.txt
-    - YouTube title, description, tags, chapters
-    - Thumbnail images: output/{filename}/{filename}.[png|jpg]
+    - YouTube title, description, tags, chapters (sourced from propose/oppose/decide .md for debate format)
+    - Thumbnail images: output/{filename}/YT/debate/{fmt}/Th/{filename}.[png|jpg] (debate)
+                        output/{filename}/YT/{fmt}/Th/{filename}.[png|jpg] (animation/direct)
     - Metadata saved to output/{filename}/YT/format/MD/
+    - CC subtitle files saved to output/{filename}/YT/debate/{fmt}/CC/ (debate) or YT/{fmt}/CC/
 
     CRITICAL — call the YouTube Metadata Tool with EXACTLY these values:
       topic: "{topic}"
@@ -327,28 +329,38 @@ generate_youtube_metadata:
       channel: "{channel}"
       channel_lower: "{channel_lower}"
       website: "{website}"
-      video_formats: {video_formats}
+      video_formats: {_metadata_video_formats}
       fps: {fps}
       fps_hd_offset: {fps_hd_offset}
       generate_youtube_metadata: {generate_youtube_metadata}
-      generate_thumbnail: true          # ← ADDED
-      csv_path: "output/{filename}.csv" # ← ADDED
+      generate_thumbnail: {generate_yt_thumbnail}
+      csv_path: "output/{filename}.csv"
+      yt_metadata_lang: {yt_metadata_lang}
+      yt_cc_lang: {yt_cc_lang}
+      animation_video_formats: {video_formats}
+
+    video_formats controls what gets generated:
+      "debate"    → reads propose_En.md / oppose_En.md / decide_En.md for metadata;
+                    finds {channel}_*_{fmt}_*_cc.txt for CC (optional)
+      "animation" → auto-generates from CSV / year range (standard bar race flow)
+      "HD"/"Shorts"/etc → standard bar race flow
+
+    yt_metadata_lang controls how many languages (top N from LANGUAGES list) to translate
+    title/description/tags into. Default 35 = all viewer languages.
+    yt_cc_lang controls how many languages for CC subtitle files. Max 20 (YouTube limit).
 
     The tool will:
-      1. Generate narration text (cc_en.txt)
-      2. Generate YouTube metadata per format (YT/format/MD/*.txt)
+      1. For each format in video_formats — generate metadata (MD) files
+      2. Find and translate CC narration files (CC) — debate CC is optional
       3. Generate 1920x1080 thumbnails (PNG + JPG)
-      4. Translate CC to 31 languages
-      5. Cleanup and rename final videos
+      4. Cleanup and rename final videos
   expected_output: >
-    Confirmation of all files created:
-    - cc_en.txt (Narration)
-    - YT/format/MD/en.json + translations
-    - {filename}.png (thumbnail)
-    - {filename}.jpg (thumbnail)
+    Confirmation of all files created per format:
+    - YT/debate/MD/en.json + N language translations
+    - YT/debate/CC/en.txt + up to 20 language translations (if CC file found)
+    - YT/animation/MD/en.json + N language translations (if animation format present)
+    - {filename}.png + {filename}.jpg (thumbnails)
   agent: youtube_metadata_specialist
-  context:
-    - generate_csv
 
 
 upload_to_youtube:

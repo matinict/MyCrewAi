@@ -104,6 +104,10 @@ def load_config():
             _nested = config.pop(_block, None)
             if config.get(_switch, False):
                 if isinstance(_nested, dict):
+                    # metadata_prep: rename video_formats → metadata_video_formats to avoid
+                    # overwriting the main pipeline video_formats
+                    if _switch == 'metadata_prep' and 'video_formats' in _nested:
+                        _nested['metadata_video_formats'] = _nested.pop('video_formats')
                     config.update(_nested)
             else:
                 config[_flag] = False  # guarantee gate flag is off
@@ -142,6 +146,12 @@ def load_config():
             'bar_race_audio_enabled':     False,
             # metadata_prep_config
             'generate_youtube_metadata':  False,
+            'generate_yt_thumbnail':      False,  # generate_yt_thumbnail from metadata_prep_config
+            'yt_metadata_lang':           35,
+            'yt_cc_lang':                 20,
+            'metadata_video_formats':     [],   # video_formats from metadata_prep_config
+            '_metadata_video_formats':    [],   # resolved at run() — passed to task
+            'animation_video_formats':    [],   # = main video_formats, used by metadata tool for animation branch
             # publisher_config
             'upload_youtube_video':       False,
             'upload_privacy':             'private',
@@ -406,8 +416,8 @@ def run():
         # [6] create_intro_clip       [7] bar_merge                [8] add_audio
         # [9] merge_audio_video       [10] generate_youtube_metadata [11] upload_to_youtube
         # [12] share_to_social
-        # [13] debate_propose  [14] debate_oppose  [15] debate_decide  [16] create_debate_video
-        # [17] debate_merge  ← ✅ ADDED
+        # [13] debate_propose  [14] debate_oppose  [15] debate_decide
+        # [16] create_debate_video    [17] debate_merge
 
         if inputs.get('bar_race_video_enabled', False):
             final_tasks.append(full_crew.tasks[5])  # create_bar_race_video
@@ -435,17 +445,12 @@ def run():
         if inputs.get('bar_merge_enabled', False):
             final_tasks.append(full_crew.tasks[7])  # bar_merge
 
-        # merge_audio_video and generate_youtube_metadata run LAST
+        # merge_audio_video runs before debate pipeline
         if inputs.get('merge_audio_video', False):
             final_tasks.append(full_crew.tasks[9])  # merge_audio_video
-        if inputs.get('generate_youtube_metadata', False):
-            final_tasks.append(full_crew.tasks[10])  # generate_youtube_metadata
-        if inputs.get('upload_youtube_video', False):
-            final_tasks.append(full_crew.tasks[11])  # upload_to_youtube
-        if inputs.get('social_share_enabled', False):
-            final_tasks.append(full_crew.tasks[12])  # share_to_social
 
-        # Debate pipeline: text generation first, then video, then merge
+        # ── Debate pipeline ───────────────────────────────────────────────
+        # Must run BEFORE generate_youtube_metadata so merged CC files exist
         if inputs.get('debate_definition_enabled', False):
             # Check for existing lang-suffixed debate files
             _debate_dir = output_dir
@@ -468,9 +473,24 @@ def run():
         if inputs.get('debate_video_enabled', False):
             final_tasks.append(full_crew.tasks[16])  # create_debate_video
 
-        # ✅ NEW: Debate merge AFTER debate video (needs debate_video_with_audio ready)
+        # ✅ Debate merge AFTER debate video (needs debate_video_with_audio ready)
         if inputs.get('debate_merge_enabled', False):
-            final_tasks.append(full_crew.tasks[17])  # debate_merge  ← ✅ ADDED
+            final_tasks.append(full_crew.tasks[17])  # debate_merge
+
+        # ── generate_youtube_metadata runs LAST (after all video/merge tasks) ──
+        if inputs.get('generate_youtube_metadata', False):
+            # Resolve which video_formats the metadata tool should use.
+            # metadata_video_formats (from metadata_prep_config.video_formats) takes
+            # precedence — "debate" / "animation" tokens drive branching inside the tool.
+            # Falls back to main video_formats if not set.
+            _meta_fmts = inputs.get('metadata_video_formats') or inputs.get('video_formats', ['HD'])
+            inputs['_metadata_video_formats'] = _meta_fmts
+            final_tasks.append(full_crew.tasks[10])  # generate_youtube_metadata
+
+        if inputs.get('upload_youtube_video', False):
+            final_tasks.append(full_crew.tasks[11])  # upload_to_youtube
+        if inputs.get('social_share_enabled', False):
+            final_tasks.append(full_crew.tasks[12])  # share_to_social
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
