@@ -271,7 +271,7 @@ class DebateVideoTool(BaseTool):
 
                 self._generate_tts(
                     _spoken_no_sub, _pre_sub_audio,
-                    max(1.0, video_dur - secs_per_line * 2),   # exclude disclaimer + subscribe frame slots
+                    max(1.0, video_dur - secs_per_line * 2 - 1.0),   # -1s advance: text leads voice by ~1s
                     tts_engine,
                     pro_text=_pro_spoken,
                     con_text=_con_spoken,
@@ -1063,7 +1063,7 @@ class DebateVideoTool(BaseTool):
         pad_x         = int(w * 0.05)
         header_h      = int(h * 0.17)
         pad_top       = header_h + int(h * 0.02)
-        wm_zone       = int(h * 0.88)
+        wm_zone       = int(h * 0.80)           # raised: more space for avatar section
         body_h        = wm_zone - pad_top
         active_font_h = int(BASE_ACTIVE * 1.9)
         active_y      = pad_top + body_h // 2 - active_font_h // 2
@@ -1147,18 +1147,337 @@ class DebateVideoTool(BaseTool):
         _section_colors = {'propose': (130, 210, 255), 'oppose': (255, 100, 100), 'decide': (140, 255, 140)}
         _prev_section   = None
 
-        # Base background — constant, created once outside loop for performance
+        import math as _math
+        import random as _random
+
+        # ── Base background ───────────────────────────────────────────────
         _bg_v  = max(0, min(255, bg_opacity))
         _base  = Image.new("RGBA", (w, h), (bg_color[0], bg_color[1], bg_color[2], 255))
 
+        # ── Section color map ─────────────────────────────────────────────
+        _sec_rgb = {
+            'propose': (130, 210, 255),
+            'oppose':  (255, 100, 100),
+            'decide':  (140, 255, 140),
+        }
+
+        # ── Particle system (seeded for reproducibility) ──────────────────
+        _rng = _random.Random(42)
+        _N_PARTICLES = 22
+        _particles = [
+            {
+                'x':   _rng.uniform(0, w),
+                'y':   _rng.uniform(0, h),
+                'vx':  _rng.uniform(-0.18, 0.18),
+                'vy':  _rng.uniform(-0.22, -0.06),
+                'r':   _rng.uniform(1.2, 3.0),
+                'phase': _rng.uniform(0, _math.tau),
+            }
+            for _ in range(_N_PARTICLES)
+        ]
+
+        # ── Avatar layout constants (+30% section height) ────────────────
+        # Left: PRO  |  Center: Verdict  |  Right: OPPO
+        _av_y      = int(h * 0.875)         # lower — bigger avatar zone below text
+        _av_r      = int(w * 0.080)         # +45% larger base radius
+        _av_left   = int(w * 0.14)          # PRO x-centre
+        _av_right  = int(w * 0.86)          # OPPO x-centre
+        _av_mid    = w // 2                 # Verdict x-centre
+
+        # Each avatar always uses its own fixed color — never the active section color
+        _av_colors = {
+            'propose': (100, 180, 255),   # blue  — PRO
+            'oppose':  (255, 90,  90),    # red   — OPPO
+            'decide':  (120, 240, 140),   # green — Verdict
+        }
+        # Display labels under each avatar
+        _av_labels = {
+            'propose': 'PRO',
+            'oppose':  'OPPO',
+            'decide':  'Verdict',
+        }
+
+        # ── Waveform bar constants ────────────────────────────────────────
+        _WV_BARS   = 32
+        _WV_W      = int(w * 0.38)
+        _WV_H      = int(h * 0.048)
+        _WV_Y      = _av_y + _av_r + int(h * 0.012)  # below avatars
+        _WV_X      = (w - _WV_W) // 2
+        _BAR_GAP   = _WV_W // _WV_BARS
+
+        # ── Section transition flash + avatar pop-in state ──────────────
+        _flash_frames    = int(FPS * 0.35)   # 0.35s flash on section change
+        _flash_counter   = 0
+        _section_frame   = 0                 # frames elapsed in current section
+        _prev_sec_for_fr = None              # tracks section changes for _section_frame
+
+        def _draw_avatar(draw, cx, cy, r, role, speaking, frame):
+            """
+            Animated speaker avatar.
+            Speaking  → 45% visual area (r * 1.34×) — wings, smile, confidence
+            Silent    → 55% base (r * 0.74×) — dim, closed, waiting
+            """
+            import math as _m
+            ac  = _av_colors.get(role, (200, 200, 200))
+            dim = tuple(int(c * 0.28) for c in ac)   # dim version of color
+
+            # ── WINGS (speaking only) ────────────────────────────────────
+            # Two curved arcs fanning out left/right, flapping sinusoidally
+            if speaking:
+                wing_flap  = _m.sin(frame * 0.22)          # -1..1 flap cycle
+                wing_raise = int(r * 0.55 * abs(wing_flap)) # how high wings lift
+                wing_span  = int(r * 1.10)                  # lateral reach
+                wing_thick = max(2, int(r * 0.10))
+
+                # Left wing — 3 arcs getting lighter toward tip
+                for wi, (wspan, wthick, walpha) in enumerate([
+                    (wing_span,         wing_thick,     140),
+                    (wing_span + r//3,  wing_thick - 1, 80),
+                    (wing_span + r//2,  max(1, wing_thick - 2), 40),
+                ]):
+                    w_tip_y = cy - wing_raise - wi * int(r * 0.08)
+                    draw.line(
+                        [cx - r + int(r*0.2), cy,
+                         cx - r - wspan + int(r*0.2), w_tip_y],
+                        fill=(*ac, walpha), width=wthick
+                    )
+                    # Feather curl at tip
+                    curl_r = max(3, int(r * 0.18))
+                    draw.arc(
+                        [cx - r - wspan - curl_r + int(r*0.2),
+                         w_tip_y - curl_r,
+                         cx - r - wspan + curl_r + int(r*0.2),
+                         w_tip_y + curl_r],
+                        start=0, end=180 + int(40 * wing_flap),
+                        fill=(*ac, walpha), width=max(1, wthick - 1)
+                    )
+
+                # Right wing (mirror)
+                for wi, (wspan, wthick, walpha) in enumerate([
+                    (wing_span,         wing_thick,     140),
+                    (wing_span + r//3,  wing_thick - 1, 80),
+                    (wing_span + r//2,  max(1, wing_thick - 2), 40),
+                ]):
+                    w_tip_y = cy - wing_raise - wi * int(r * 0.08)
+                    draw.line(
+                        [cx + r - int(r*0.2), cy,
+                         cx + r + wspan - int(r*0.2), w_tip_y],
+                        fill=(*ac, walpha), width=wthick
+                    )
+                    curl_r = max(3, int(r * 0.18))
+                    draw.arc(
+                        [cx + r + wspan - curl_r - int(r*0.2),
+                         w_tip_y - curl_r,
+                         cx + r + wspan + curl_r - int(r*0.2),
+                         w_tip_y + curl_r],
+                        start=0, end=180 - int(40 * wing_flap),
+                        fill=(*ac, walpha), width=max(1, wthick - 1)
+                    )
+
+            # ── HEAD CIRCLE ──────────────────────────────────────────────
+            if speaking:
+                # Multi-layer pulsing glow halo
+                pulse = 0.55 + 0.45 * _m.sin(frame * 0.14)
+                for dr in range(8, 0, -2):
+                    ga = int(65 * (9 - dr) / 8 * pulse)
+                    draw.ellipse([cx-r-dr*2, cy-r-dr*2, cx+r+dr*2, cy+r+dr*2],
+                                 outline=(*ac, ga), width=1)
+                # Confident posture: slight upward bob
+                bob = int(r * 0.04 * _m.sin(frame * 0.08))
+                head_fill = tuple(int(c * 0.38) for c in ac)
+                draw.ellipse([cx-r, cy-r+bob, cx+r, cy+r+bob],
+                             fill=(*head_fill, 250), outline=(*ac, 255), width=3)
+                _face_cy = cy + bob   # shift face features with bob
+            else:
+                # Dim ring only
+                draw.ellipse([cx-r-1, cy-r-1, cx+r+1, cy+r+1],
+                             outline=(*ac, 30), width=1)
+                head_fill = tuple(int(c * 0.07) for c in ac)
+                draw.ellipse([cx-r, cy-r, cx+r, cy+r],
+                             fill=(*head_fill, 160), outline=(*ac, 50), width=1)
+                _face_cy = cy
+
+            # ── EYES ────────────────────────────────────────────────────
+            eye_y  = _face_cy - int(r * 0.20)
+            eye_dx = int(r * 0.28)
+            eye_r  = max(2, int(r * 0.12))
+
+            if speaking:
+                # Confident wide eyes with shine dot
+                blink = _m.sin(frame * 0.041 + 1.2) > 0.93
+                eye_col = (*ac, 255)
+                for ex_off in [-eye_dx, eye_dx]:
+                    if not blink:
+                        # Main iris
+                        draw.ellipse([cx+ex_off-eye_r, eye_y-eye_r,
+                                      cx+ex_off+eye_r, eye_y+eye_r],
+                                     fill=eye_col)
+                        # White shine dot (top-right of each eye)
+                        sh = max(1, eye_r // 3)
+                        draw.ellipse([cx+ex_off+eye_r//3, eye_y-eye_r+1,
+                                      cx+ex_off+eye_r//3+sh, eye_y-eye_r+1+sh],
+                                     fill=(255, 255, 255, 200))
+                    else:
+                        draw.line([cx+ex_off-eye_r, eye_y,
+                                   cx+ex_off+eye_r, eye_y],
+                                  fill=eye_col, width=max(2, eye_r//2))
+                # Raised eyebrows (confidence)
+                brow_y = eye_y - eye_r - int(r * 0.09)
+                brow_w = int(eye_r * 1.5)
+                brow_raise = int(r * 0.03 * _m.sin(frame * 0.06))
+                for ex_off in [-eye_dx, eye_dx]:
+                    draw.line([cx+ex_off-brow_w, brow_y - brow_raise,
+                               cx+ex_off+brow_w, brow_y - brow_raise - int(r*0.04)],
+                              fill=(*ac, 200), width=max(2, int(r * 0.06)))
+            else:
+                # Dim half-closed eyes
+                for ex_off in [-eye_dx, eye_dx]:
+                    draw.ellipse([cx+ex_off-eye_r, eye_y-eye_r//2,
+                                  cx+ex_off+eye_r, eye_y+eye_r//2],
+                                 fill=(*ac, 45))
+
+            # ── SMILE / MOUTH ────────────────────────────────────────────
+            mouth_cy = _face_cy + int(r * 0.26)
+            mouth_w  = int(r * 0.44)
+            mouth_h  = int(r * 0.18)
+
+            if speaking:
+                # Animated talking mouth — cycles open/closed
+                talk_open = abs(_m.sin(frame * 0.52)) * int(r * 0.20) + int(r * 0.06)
+                # Smile: arc bottom lip curves up at corners
+                smile_lift = int(r * 0.08)
+                # Draw smile arc (upper lip)
+                draw.arc([cx - mouth_w, mouth_cy - smile_lift,
+                          cx + mouth_w, mouth_cy + mouth_h + smile_lift],
+                         start=200, end=340,
+                         fill=(*ac, 255), width=max(2, int(r * 0.07)))
+                # Inner mouth (dark gap, opens/closes)
+                inner_h = max(2, int(talk_open * 0.6))
+                inner_w = int(mouth_w * 0.72)
+                draw.ellipse([cx - inner_w, mouth_cy - inner_h//2,
+                              cx + inner_w, mouth_cy + inner_h],
+                             fill=(*tuple(int(c*0.12) for c in ac), 220))
+                # Teeth flash (bright strip)
+                if talk_open > int(r * 0.08):
+                    teeth_h = max(1, int(inner_h * 0.45))
+                    draw.rectangle([cx - inner_w + 2, mouth_cy - teeth_h//2,
+                                    cx + inner_w - 2, mouth_cy - teeth_h//2 + teeth_h],
+                                   fill=(240, 240, 245, 200))
+            else:
+                # Neutral slight frown — not speaking
+                draw.arc([cx - int(mouth_w*0.55), mouth_cy - int(r*0.04),
+                          cx + int(mouth_w*0.55), mouth_cy + int(r*0.10)],
+                         start=15, end=165,
+                         fill=(*ac, 38), width=max(1, int(r * 0.05)))
+
+            # ── CONFIDENCE SPARKLES (speaking only) ─────────────────────
+            if speaking:
+                import math as _ms
+                n_sparks = 5
+                spark_ring = r + int(r * 0.55)
+                for si in range(n_sparks):
+                    ang   = _ms.tau * si / n_sparks + frame * 0.06
+                    sx    = cx + int(spark_ring * _ms.cos(ang))
+                    sy    = _face_cy + int(spark_ring * _ms.sin(ang))
+                    spulse = 0.4 + 0.6 * abs(_ms.sin(frame * 0.15 + si * 1.2))
+                    sr    = max(1, int(r * 0.07 * spulse))
+                    sa    = int(180 * spulse)
+                    draw.ellipse([sx-sr, sy-sr, sx+sr, sy+sr], fill=(*ac, sa))
+                    # Star cross
+                    cl = max(1, int(sr * 1.6))
+                    draw.line([sx-cl, sy, sx+cl, sy], fill=(*ac, int(sa*0.6)), width=1)
+                    draw.line([sx, sy-cl, sx, sy+cl], fill=(*ac, int(sa*0.6)), width=1)
+
+            # ── LABEL ────────────────────────────────────────────────────
+            role_label = _av_labels.get(role, role.upper())
+            lbl_size   = max(16, int(r * 0.50)) if speaking else max(10, int(r * 0.36))
+            try:    _fl = ImageFont.truetype(FONT_BOLD, lbl_size)
+            except: _fl = ImageFont.load_default()
+            lb    = draw.textbbox((0, 0), role_label, font=_fl)
+            lw    = lb[2] - lb[0]
+            lbl_y = cy + r + int(r * 0.22)
+            if speaking:
+                for ddx, ddy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1)]:
+                    draw.text((cx - lw//2 + ddx, lbl_y + ddy), role_label,
+                              font=_fl, fill=(*ac, 90))
+                draw.text((cx - lw//2, lbl_y), role_label, font=_fl, fill=(*ac, 255))
+            else:
+                draw.text((cx - lw//2, lbl_y), role_label, font=_fl, fill=(*ac, 55))
+
+        def _draw_waveform(draw, cx, cy_top, bar_w_total, bar_h_max, n_bars, frame, sec_col, speaking):
+            """Draw animated equalizer waveform bars."""
+            import math as _m
+            bar_w   = (bar_w_total // n_bars) - 2
+            bar_gap = bar_w + 2
+            start_x = cx - bar_w_total // 2
+            for i in range(n_bars):
+                # Each bar oscillates at a slightly different phase/frequency
+                phase  = i * 0.38 + frame * 0.18
+                amp    = 0.3 + 0.7 * abs(_m.sin(phase))
+                if not speaking:
+                    amp = 0.08 + 0.06 * abs(_m.sin(phase * 0.3))
+                bh = max(3, int(bar_h_max * amp))
+                bx = start_x + i * bar_gap
+                by = cy_top + bar_h_max - bh
+                # Color gradient: section color, brighter in center
+                center_dist = abs(i - n_bars / 2) / (n_bars / 2)
+                brightness  = int(255 * (0.5 + 0.5 * (1 - center_dist)) * (0.9 if speaking else 0.3))
+                bar_col = tuple(min(255, int(c * brightness / 180)) for c in sec_col)
+                draw.rectangle([bx, by, bx+bar_w, cy_top+bar_h_max],
+                               fill=(*bar_col, 200 if speaking else 80))
+
+        def _draw_particles(draw, particles, sec_col, frame):
+            """Draw floating ambient particles."""
+            import math as _m
+            for p in particles:
+                # Drift upward, wrap around
+                p['x'] = (p['x'] + p['vx']) % w
+                p['y'] = p['y'] + p['vy']
+                if p['y'] < -5:
+                    p['y'] = h + 5
+                pulse  = 0.4 + 0.6 * abs(_m.sin(frame * 0.04 + p['phase']))
+                alpha  = int(40 * pulse)
+                r_now  = max(1, int(p['r'] * pulse))
+                pcol   = tuple(int(c * 0.6) for c in sec_col)
+                x, y   = int(p['x']), int(p['y'])
+                draw.ellipse([x-r_now, y-r_now, x+r_now, y+r_now],
+                             fill=(*pcol, alpha))
+
+        def _draw_flash(draw, w, h, sec_col, intensity):
+            """Draw section-change color flash overlay."""
+            if intensity <= 0:
+                return
+            alpha = int(60 * intensity)
+            draw.rectangle([0, 0, w, h], fill=(*sec_col, alpha))
+
         global_frame = 0
         for line_idx, (ltext, cur_section) in enumerate(lines_data):
-            for fi in range(frames_per_line):
-                alpha = min(1.0, fi / max(fade_frames, 1))
-                # RGBA overlay composited onto _base (avoids black-fill on RGB convert)
-                img    = Image.new("RGBA", (w, h), (0, 0, 0, _bg_v))
-                draw   = ImageDraw.Draw(img)
 
+            # Detect section change for flash + avatar pop-in
+            if line_idx > 0 and lines_data[line_idx-1][1] != cur_section:
+                _flash_counter = _flash_frames
+                _section_frame = 0
+                _prev_sec_for_fr = cur_section
+
+            for fi in range(frames_per_line):
+                alpha    = min(1.0, fi / max(fade_frames, 1))
+                sec_col  = _sec_rgb.get(cur_section, (200, 200, 200))
+                _section_frame += 1
+
+                # ── Base frame (dark bg with opacity) ───────────────────
+                img  = Image.new("RGBA", (w, h), (0, 0, 0, _bg_v))
+                draw = ImageDraw.Draw(img)
+
+                # ── Particles (behind everything) ────────────────────────
+                _draw_particles(draw, _particles, sec_col, global_frame)
+
+                # ── Section transition flash ──────────────────────────────
+                if _flash_counter > 0:
+                    _flash_intensity = _flash_counter / _flash_frames
+                    _draw_flash(draw, w, h, sec_col, _flash_intensity)
+                    _flash_counter -= 1
+
+                # ── Header title ─────────────────────────────────────────
                 hdr_line_h = int(hdr_topic_size * 1.35)
                 hdr_y      = int(h * 0.018)
                 for hdr_ln in hdr_lines:
@@ -1168,8 +1487,8 @@ class DebateVideoTool(BaseTool):
                     self._draw_diamond_title(draw, hdr_x, hdr_y, hdr_ln, f_hdr_topic, global_frame)
                     hdr_y   += hdr_line_h
 
+                # ── Section badge ─────────────────────────────────────────
                 _sec_label = _section_labels.get(cur_section, cur_section.capitalize())
-                _sec_color = _section_colors.get(cur_section, (220, 220, 220))
                 _sec_size  = max(w // 44, 22)
                 try:    _f_sec = ImageFont.truetype(FONT_BOLD, _sec_size)
                 except: _f_sec = ImageFont.load_default()
@@ -1181,16 +1500,16 @@ class DebateVideoTool(BaseTool):
                 _sec_x    = (w - _sec_w) // 2
                 _sec_alpha = min(1.0, fi / max(fade_frames, 1)) if cur_section != _prev_section else 1.0
                 _pad_x2, _pad_y2 = int(w * 0.018), int(h * 0.004)
-                _bg      = tuple(int(ch * 0.28 * _sec_alpha) for ch in _sec_color)
-                _border  = tuple(int(ch * _sec_alpha) for ch in _sec_color)
+                _bg_badge = tuple(int(ch * 0.28 * _sec_alpha) for ch in sec_col)
+                _border   = tuple(int(ch * _sec_alpha) for ch in sec_col)
                 draw.rectangle(
                     [_sec_x - _pad_x2, _sec_y - _pad_y2, _sec_x + _sec_w + _pad_x2, _sec_y + _sec_h + _pad_y2],
-                    fill=_bg, outline=_border, width=2
+                    fill=_bg_badge, outline=_border, width=2
                 )
                 _ca = (int(255 * _sec_alpha),) * 3
                 for _dx, _dy in [(-1,0),(1,0),(0,-1),(0,1)]:
                     draw.text((_sec_x+_dx, _sec_y+_dy), _sec_label, font=_f_sec,
-                              fill=tuple(int(ch * 0.5 * _sec_alpha) for ch in _sec_color))
+                              fill=tuple(int(ch * 0.5 * _sec_alpha) for ch in sec_col))
                 draw.text((_sec_x, _sec_y), _sec_label, font=_f_sec, fill=_ca)
                 _prev_section = cur_section
                 _ul_y = _sec_y + _sec_h + _pad_y2 + 2
@@ -1198,6 +1517,15 @@ class DebateVideoTool(BaseTool):
                 sep_y = max(header_h - 2, _ul_y + int(h * 0.008))
                 draw.line([(pad_x, sep_y), (w - pad_x, sep_y)], fill=(50, 60, 80), width=1)
 
+                # ── Active line glow highlight bar ───────────────────────
+                glow_h  = active_font_h + int(h * 0.012)
+                glow_y  = active_y - int(h * 0.006)
+                glow_a  = int(35 * alpha)
+                glow_c  = tuple(int(c * 0.5) for c in sec_col)
+                draw.rectangle([0, glow_y, w, glow_y + glow_h],
+                               fill=(*glow_c, glow_a))
+
+                # ── Past lines (scroll up, fade/shrink) ──────────────────
                 past_indices = list(range(max(0, line_idx - 30), line_idx))
                 past_indices.reverse()
                 y_cursor = active_y
@@ -1213,9 +1541,11 @@ class DebateVideoTool(BaseTool):
                     self._justify(draw, pad_x, y_pos, lines_data[pi][0], fnt, max_px, c)
                     y_cursor = y_pos
 
+                # ── Active line (neon glow) ───────────────────────────────
                 neon_c = self._neon_white(alpha, global_frame)
                 self._justify(draw, pad_x, active_y, ltext, f_active, max_px, neon_c)
 
+                # ── Future lines (fade in below) ──────────────────────────
                 future_start = active_y + active_font_h + int(h * 0.025)
                 y_cursor     = future_start
                 for ahead, fi2 in enumerate(range(line_idx + 1, min(line_idx + 20, len(lines_data))), start=1):
@@ -1229,20 +1559,49 @@ class DebateVideoTool(BaseTool):
                     self._justify(draw, pad_x, y_cursor, lines_data[fi2][0], fnt, max_px, c)
                     y_cursor += line_h
 
-                prog   = (line_idx * frames_per_line + fi) / total_frames
-                bar_y  = h - 2
-                filled = int(w * prog)
-                draw.line([(0, bar_y), (w - 1, bar_y)], fill=(40, 40, 40), width=1)
-                if filled > 0:
-                    draw.line([(0, bar_y), (filled, bar_y)], fill=(200, 200, 200), width=1)
+                # ── Avatars ──────────────────────────────────────────────────
+                # Active  → 1.34× base radius  → ~45% visual area
+                # Inactive→ 0.74× base radius  → ~55% relative area (smaller, dim)
+                # Pop-in bounce: overshoots 25% then settles over 18 frames
+                import math as _mav
+                _pop_frames = 18
+                _pop_t      = min(1.0, _section_frame / _pop_frames)
+                _bounce     = 1.0 + 0.25 * _mav.sin(_pop_t * _mav.pi) * (1.0 - _pop_t)
+                _SPK = 1.34 * _bounce   # active radius multiplier
+                _SIL = 0.74             # inactive radius multiplier
+                _pro_r = int(_av_r * (_SPK if cur_section == 'propose' else _SIL))
+                _con_r = int(_av_r * (_SPK if cur_section == 'oppose'  else _SIL))
+                _mod_r = int(_av_r * (_SPK * 0.78 if cur_section == 'decide' else _SIL * 0.72))
+                _draw_avatar(draw, _av_left,  _av_y, _pro_r, 'propose',
+                             cur_section == 'propose', global_frame)
+                _draw_avatar(draw, _av_right, _av_y, _con_r, 'oppose',
+                             cur_section == 'oppose',  global_frame)
+                _draw_avatar(draw, _av_mid,   _av_y, _mod_r, 'decide',
+                             cur_section == 'decide',  global_frame)
 
+                # ── Waveform equalizer bars ───────────────────────────────
+                _draw_waveform(draw, w//2, _WV_Y, _WV_W, _WV_H, _WV_BARS,
+                               global_frame, sec_col, speaking=True)
+
+                # ── Progress bar (section-colored) ───────────────────────
+                prog   = (line_idx * frames_per_line + fi) / total_frames
+                bar_y  = h - int(h * 0.008)
+                bar_h  = max(3, int(h * 0.007))
+                filled = int(w * prog)
+                draw.rectangle([0, bar_y, w, bar_y + bar_h], fill=(25, 25, 35, 200))
+                if filled > 0:
+                    draw.rectangle([0, bar_y, filled, bar_y + bar_h],
+                                   fill=(*sec_col, 220))
+
+                # ── Watermark ─────────────────────────────────────────────
                 tag     = wm_text if wm_enabled else f"@{channel}"
                 tw_bbox = draw.textbbox((0, 0), tag, font=f_wm)
                 tw      = tw_bbox[2] - tw_bbox[0]
                 wm_x    = (w - tw) // 2
-                wm_y    = wm_zone + int(h * 0.02)
+                wm_y    = wm_zone + int(h * 0.005)
                 draw.text((wm_x, wm_y), tag, font=f_wm, fill=(30, 30, 38))
 
+                # ── Composite and pipe ────────────────────────────────────
                 _composited = Image.alpha_composite(_base, img)
                 proc.stdin.write(_composited.convert("RGB").tobytes())
                 global_frame += 1
