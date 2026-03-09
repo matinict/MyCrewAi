@@ -253,7 +253,8 @@ class DebateVideoTool(BaseTool):
                     continue
 
                 # ── TTS audio ─────────────────────────────────────────────
-                audio_path = os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")
+                #audio_path = os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")
+                audio_path = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_audio.mp3")
                 video_dur  = self._get_duration(out_path)
 
                 # Build per-section spoken text (no subscribe — appended separately below)
@@ -306,6 +307,12 @@ class DebateVideoTool(BaseTool):
                             os.remove(_tmp)
                 elif os.path.exists(_pre_sub_audio):
                     os.replace(_pre_sub_audio, audio_path)
+                 
+                 # Safety fallback: if audio_path still missing but presub exists, use it
+                if not os.path.exists(audio_path) and os.path.exists(_pre_sub_audio):
+                    os.replace(_pre_sub_audio, audio_path)
+                    print(f"[DebateVideo] ⚠️ Subscribe audio failed — using pre-subscribe audio only")
+
 
                 # ── Merge audio + video ───────────────────────────────────
                 if os.path.exists(audio_path):

@@ -495,18 +495,18 @@ debate_propose:
 
     Format your response exactly like this:
 
-    PROPOSITION: {topic} ({start}–{end})
+    PROPOSITION: {topic}  
 
     OPENING STATEMENT
     [2-3 sentences establishing your position clearly]
 
-    ARGUMENT 1: [Title]
+    Arg-1: [Title]
     [3-4 sentences with evidence and reasoning]
 
-    ARGUMENT 2: [Title]
+    Arg-2: [Title]
     [3-4 sentences with evidence and reasoning]
 
-    ARGUMENT 3: [Title]
+    Arg-3: [Title]
     [3-4 sentences with evidence and reasoning]
 
     CONCLUSION
@@ -533,13 +533,13 @@ debate_oppose:
     OPENING STATEMENT
     [2-3 sentences establishing your counter-position clearly]
 
-    COUNTER-ARGUMENT 1: [Title]
+    Arg-1 (Con): [Title]
     [3-4 sentences with evidence and reasoning]
 
-    COUNTER-ARGUMENT 2: [Title]
+    Arg-2 (Con): [Title]
     [3-4 sentences with evidence and reasoning]
 
-    COUNTER-ARGUMENT 3: [Title]
+    Arg-3 (Con): [Title]
     [3-4 sentences with evidence and reasoning]
 
     CONCLUSION
@@ -563,7 +563,7 @@ debate_decide:
 
     Format your response exactly like this:
 
-    VERDICT: {topic} ({start}–{end})
+    VERDICT: {topic}  
 
     SUMMARY OF PROPOSITION
     [2-3 sentences summarizing the PRO arguments]
@@ -580,7 +580,7 @@ debate_decide:
     Keep total response under {debate_max_chars} characters.
     Write ONLY the verdict text — no tool calls, no JSON, no code.
   expected_output: >
-    Full moderator verdict as plain text, starting with "VERDICT: {topic} ({start}–{end})".
+    Full moderator verdict as plain text, starting with "VERDICT: {topic} .
     Must be under {debate_max_chars} characters. No tool calls or JSON.
   agent: judge
   context:
