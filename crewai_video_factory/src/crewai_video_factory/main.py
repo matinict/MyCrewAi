@@ -121,6 +121,8 @@ def load_config():
             config.setdefault('upload_cc_limit', int(config['upload_cc_lang']))
         if 'upload_md_lang' in config:
             config.setdefault('upload_md_limit', int(config['upload_md_lang']))
+        if 'upload_dry_run' in config:
+            config.setdefault('upload_dry_run', bool(config['upload_dry_run']))
 
         # Map engine-specific voices → tts_voices so debate_video_tool receives them.
         _engine = config.get('tts_engine', 'gtts').strip().lower()
@@ -169,6 +171,7 @@ def load_config():
             'upload_cc':                  False,
             'upload_cc_limit':            0,
             'upload_md_limit':            0,
+            'upload_dry_run':             False,
             'upload_notify_subscribers':  False,
             'upload_client_secrets_file': 'client_secrets.json',
             'upload_token_file':          'token.json',

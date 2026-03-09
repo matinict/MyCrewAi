@@ -56,7 +56,7 @@ def _clean_text(text: str) -> str:
     import unicodedata
     replacements = {
         '–': '-', '—': '--', '…': '...',
-        '‘': "'", '’': "'", '"': '"', '"': '"',
+        '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"',
         '·': '.', '•': '-',
     }
     for uni, ascii_equiv in replacements.items():
@@ -231,7 +231,6 @@ class DebateVideoTool(BaseTool):
                 print(f"[DebateVideo] [{fmt}] Parsed {len(raw_lines)} lines  "
                       f"({'short-form: opening+ARG1/COUNTER-ARG1, DECISION-only verdict' if _is_short_form else 'full content'})")
 
-
                 # ── Save narration text ───────────────────────────────────
                 with open(cc_path, 'w', encoding='utf-8') as _f:
                     _f.write(spoken_text)
@@ -253,19 +252,23 @@ class DebateVideoTool(BaseTool):
                     continue
 
                 # ── TTS audio ─────────────────────────────────────────────
-                #audio_path = os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")
                 audio_path = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_audio.mp3")
                 video_dur  = self._get_duration(out_path)
 
-                # Build per-section spoken text (no subscribe — appended separately below)
+                # Build per-section spoken text
                 _pro_spoken = self._section_to_spoken(pro_text,      "propose", channel, short_form=_is_short_form)
                 _con_spoken = self._section_to_spoken(con_text,      "oppose",  channel, short_form=_is_short_form)
                 _mod_spoken = self._section_to_spoken(moderator_text,"decide",  channel, short_form=_is_short_form)
-                _disclaimer_spoken = _clean_text('This video is created for educational and research purposes, shared to spread knowledge and awareness.')
-                _sub_spoken = _clean_text(f'Subscribe to {channel} for more insights.')
 
-                # spoken_text_no_sub = pro + con + mod only (subscribe appended as separate clip)
-                _spoken_no_sub = f"{_pro_spoken} {_con_spoken} {_mod_spoken} {_disclaimer_spoken}".strip()
+                # Disclaimer + subscribe combined as ONE gTTS clip (same speaker, one breath)
+                _sub_spoken = _clean_text(
+                    f'This video is created for educational and research purposes, '
+                    f'shared to spread knowledge and awareness. '
+                    f'Subscribe to {channel} for more insights.'
+                )
+
+                # spoken_text_no_sub = pro + con + mod only (disclaimer+subscribe appended as separate clip)
+                _spoken_no_sub = f"{_pro_spoken} {_con_spoken} {_mod_spoken}".strip()
 
                 _pre_sub_audio = audio_path.replace('.mp3', '_presub.mp3')
                 _sub_audio     = audio_path.replace('.mp3', '_sub.mp3')
@@ -280,7 +283,7 @@ class DebateVideoTool(BaseTool):
                     voices=_voices,
                 )
 
-                # Generate subscribe clip in gTTS (always), then concatenate.
+                # Generate disclaimer+subscribe clip in gTTS (always same speaker), then concatenate.
                 # Use filter_complex with re-encode — handles sample rate mismatch
                 # (edge-tts=24000Hz vs gTTS=22050Hz). -c copy would fail silently.
                 self._tts_gtts(_sub_spoken, _sub_audio)
@@ -298,7 +301,7 @@ class DebateVideoTool(BaseTool):
                         capture_output=True, check=False
                     )
                     if _r.returncode == 0 and os.path.exists(audio_path):
-                        print(f"[DebateVideo] 🎤 Subscribe appended in gTTS voice ✅")
+                        print(f"[DebateVideo] 🎤 Disclaimer+Subscribe appended in gTTS voice ✅")
                     else:
                         print(f"[DebateVideo] ⚠️ Subscribe concat failed: {_r.stderr.decode()[:120]}")
                         os.replace(_pre_sub_audio, audio_path)
@@ -307,12 +310,11 @@ class DebateVideoTool(BaseTool):
                             os.remove(_tmp)
                 elif os.path.exists(_pre_sub_audio):
                     os.replace(_pre_sub_audio, audio_path)
-                 
-                 # Safety fallback: if audio_path still missing but presub exists, use it
+
+                # Safety fallback: if audio_path still missing but presub exists, use it
                 if not os.path.exists(audio_path) and os.path.exists(_pre_sub_audio):
                     os.replace(_pre_sub_audio, audio_path)
                     print(f"[DebateVideo] ⚠️ Subscribe audio failed — using pre-subscribe audio only")
-
 
                 # ── Merge audio + video ───────────────────────────────────
                 if os.path.exists(audio_path):
@@ -871,7 +873,7 @@ class DebateVideoTool(BaseTool):
                     # Re-open gate for new propose/oppose section; close for decide
                     include_content         = (section in ('propose', 'oppose'))
                     decide_decision_reached = False
-                    print(f"[DebateVideo] \U0001f4c4 Section switch: {section}")
+                    print(f"[DebateVideo] 📄 Section switch: {section}")
                 continue  # never render a section-header line
 
             # ── DECISION header (decide section) ───────────────────────────
@@ -879,7 +881,7 @@ class DebateVideoTool(BaseTool):
                 if section == 'decide':
                     decide_decision_reached = True
                     include_content         = True
-                    print(f"[DebateVideo]   \u2705 DECISION: reached \u2014 including content")
+                    print(f"[DebateVideo]   ✅ DECISION: reached — including content")
                     rest = line[_decision_re.match(line).end():].strip()
                     if rest:
                         rest = rest[0].upper() + rest[1:]
@@ -897,7 +899,7 @@ class DebateVideoTool(BaseTool):
                     if num == 1:
                         # ARGUMENT 1 / COUNTER-ARGUMENT 1 — keep gate open
                         include_content = True
-                        print(f"[DebateVideo]   \u2705 {tag} 1 \u2014 continuing to include")
+                        print(f"[DebateVideo]   ✅ {tag} 1 — continuing to include")
                         # Capture any inline content on the header line itself
                         rest = line[m.end():].strip()
                         if rest:
@@ -906,12 +908,12 @@ class DebateVideoTool(BaseTool):
                     else:
                         # ARGUMENT 2+ / COUNTER-ARGUMENT 2+ — stop permanently
                         include_content = False
-                        print(f"[DebateVideo]   \u23ed\ufe0f  {tag} {num} \u2014 short-form limit reached, stopping")
+                        print(f"[DebateVideo]   ⏭️  {tag} {num} — short-form limit reached, stopping")
                     continue  # skip the header token itself
 
                 # OPENING STATEMENT — skip the token, capture any inline text
                 if _opening_re.match(line):
-                    print(f"[DebateVideo]   \U0001f4e2 OPENING STATEMENT header \u2014 content included")
+                    print(f"[DebateVideo]   📢 OPENING STATEMENT header — content included")
                     rest = line[_opening_re.match(line).end():].strip()
                     if rest and include_content:
                         rest = rest[0].upper() + rest[1:]
@@ -921,17 +923,17 @@ class DebateVideoTool(BaseTool):
                 # Closing / conclusion headers — close the gate
                 if _closing_re.match(line):
                     include_content = False
-                    print(f"[DebateVideo]   \u23ed\ufe0f  Closing block: {line[:50]}")
+                    print(f"[DebateVideo]   ⏭️  Closing block: {line[:50]}")
                     continue
 
                 # SUMMARY / ANALYSIS — always skip the header line
                 if any(p.match(line) for p in _block_end_headers):
-                    print(f"[DebateVideo]   \u23ed\ufe0f  Header skipped: {line[:50]}")
+                    print(f"[DebateVideo]   ⏭️  Header skipped: {line[:50]}")
                     continue
 
             # ── decide: skip everything before DECISION: ────────────────────
             if section == 'decide' and not decide_decision_reached:
-                print(f"[DebateVideo]   \u23ed\ufe0f  Pre-DECISION skipped: {line[:50]}")
+                print(f"[DebateVideo]   ⏭️  Pre-DECISION skipped: {line[:50]}")
                 continue
 
             # ── Always-skip structural lines ────────────────────────────────
@@ -945,7 +947,7 @@ class DebateVideoTool(BaseTool):
             line = line[0].upper() + line[1:]
             result.append((line, section))
 
-        print(f"[DebateVideo] \U0001f4ca Parsed {len(result)} content lines (short-form)")
+        print(f"[DebateVideo] 📊 Parsed {len(result)} content lines (short-form)")
         return result
 
     def _pixel_wrap(self, text: str, font, max_px: int) -> List[str]:

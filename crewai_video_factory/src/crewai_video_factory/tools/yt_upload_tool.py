@@ -9,6 +9,8 @@ Improvements:
 - Log saved IMMEDIATELY after video upload (before CC) — timeout won't lose video_id
 - CC quota-exceeded → stops immediately, logs failed langs for retry
 - Smart skip: already-uploaded formats skipped via upload_log.json
+- upload_cc_languages: allowlist filter e.g. ["en"] uploads only those langs
+- upload_cc_lang / upload_md_lang: string-based limits e.g. "5" / "35"
 """
 
 import os
@@ -37,10 +39,14 @@ class YTUploadToolInput(BaseModel):
     privacy_status:       str   = Field(default="private",           description="private | unlisted | public")
     category_id:          str   = Field(default="28",                description="YouTube category ID. 28=Science & Tech, 27=Education")
     upload_cc:            bool  = Field(default=True,                description="Upload CC subtitle files after video upload")
+    upload_cc_languages:  list  = Field(default_factory=list,        description="Allowlist of CC language codes to upload e.g. ['en','fr']. Empty = all.")
+    upload_cc_lang:       str   = Field(default="0",                 description="Max CC languages to upload as string (0 = all). e.g. '5'")
+    upload_md_lang:       str   = Field(default="0",                 description="Max MD localizations to upload as string (0 = all). e.g. '35'")
     notify_subscribers:   bool  = Field(default=False,               description="Notify subscribers on upload")
     client_secrets_file:  str   = Field(default="client_secrets.json", description="Path to OAuth2 client secrets JSON")
     token_file:           str   = Field(default="token.json",        description="Path to saved OAuth2 token (auto-created on first run)")
     thumbnail_path:       str   = Field(default="",                  description="Path to thumbnail image (JPG/PNG). Auto-detected if empty.")
+    dry_run:              bool  = Field(default=False,               description="Dry run — validate files and metadata but skip actual upload")
     upload_cc_limit:      int   = Field(default=0,                   description="Max CC languages to upload (0 = all)")
     upload_md_limit:      int   = Field(default=0,                   description="Max MD localizations to upload (0 = all)")
 
@@ -58,17 +64,71 @@ class YTUploadTool(BaseTool):
     def _run(self, topic: str, output_dir: str, video_formats: list,
              upload_youtube_video: bool = False, channel: str = "PlayOwnAi",
              privacy_status: str = "private", category_id: str = "28",
-             upload_cc: bool = True, notify_subscribers: bool = False,
+             upload_cc: bool = True, upload_cc_languages: list = None,
+             upload_cc_lang: str = "0", upload_md_lang: str = "0",
+             notify_subscribers: bool = False,
              client_secrets_file: str = "client_secrets.json",
              token_file: str = "token.json",
              thumbnail_path: str = "",
              upload_cc_limit: int = 0,
-             upload_md_limit: int = 0) -> str:
+             upload_md_limit: int = 0,
+             dry_run: bool = False) -> str:
 
         import re as _re
 
+        # Resolve string-based lang limits (e.g. "5", "35") → int, merging with int fields
+        try:
+            _cc_lang_int = int(upload_cc_lang) if upload_cc_lang else 0
+        except (ValueError, TypeError):
+            _cc_lang_int = 0
+        try:
+            _md_lang_int = int(upload_md_lang) if upload_md_lang else 0
+        except (ValueError, TypeError):
+            _md_lang_int = 0
+        # String fields take priority over legacy int fields when non-zero
+        if _cc_lang_int > 0:
+            upload_cc_limit = _cc_lang_int
+        if _md_lang_int > 0:
+            upload_md_limit = _md_lang_int
+
+        # Normalize upload_cc_languages allowlist
+        _cc_langs = [l.strip().lower() for l in (upload_cc_languages or []) if l.strip()]
+
         if not upload_youtube_video:
             return "🔇 YouTube upload skipped (upload_youtube_video=false)."
+
+        if dry_run:
+            # Validate files exist without touching YouTube API
+            import glob as _dglob
+            import re as _dre
+            results = []
+            for fmt in (video_formats if not isinstance(video_formats, str) else [video_formats]):
+                fmt = fmt.strip()
+                topic_slug = "_".join(_dre.findall(r"\w+", topic)[:4]) if topic else "Video"
+                seg_pfx = ("intro_", "bar_race_", "definition_video_", "_norm_")
+                candidates = []
+                for pat in [f"*_{fmt}.mp4", f"*_{fmt}_*.mp4"]:
+                    candidates += [p for p in _dglob.glob(os.path.join(output_dir, pat))
+                                   if not any(os.path.basename(p).startswith(px) for px in seg_pfx)]
+                # Metadata
+                debate_md = os.path.join(output_dir, "YT", "debate", fmt, "MD", "en.json")
+                std_md    = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
+                md_path   = debate_md if os.path.exists(debate_md) else std_md
+                # CC
+                debate_cc = os.path.join(output_dir, "YT", "debate", fmt, "CC")
+                std_cc    = os.path.join(output_dir, "YT", fmt, "CC")
+                cc_dir    = debate_cc if os.path.exists(debate_cc) else std_cc
+                cc_count  = len([f for f in os.listdir(cc_dir) if f.endswith(".txt")]) if os.path.exists(cc_dir) else 0
+                if candidates:
+                    size_mb = os.path.getsize(candidates[0]) / (1024*1024)
+                    md_ok   = "✅" if os.path.exists(md_path) else "⚠️  missing"
+                    results.append(
+                        f"🧪 {fmt}: ✅ {os.path.basename(candidates[0])} ({size_mb:.1f}MB) | "
+                        f"MD:{md_ok} | CC:{cc_count} files"
+                    )
+                else:
+                    results.append(f"🧪 {fmt}: ❌ Video not found (expected: {channel}_{topic_slug}_{fmt}.mp4)")
+            return "🧪 DRY RUN — no upload performed\n" + "\n".join(results)
 
         try:
             from googleapiclient.discovery import build
@@ -87,6 +147,12 @@ class YTUploadTool(BaseTool):
         video_formats = [f for f in video_formats if f in _valid] or ["HD"]
 
         print(f"[YTUpload] 🚀 Starting — formats: {video_formats} | privacy: {privacy_status}")
+        if dry_run:
+            print(f"[YTUpload] 🧪 DRY RUN MODE — no files will be uploaded to YouTube")
+        if _cc_langs:
+            print(f"[YTUpload] 🔍 CC language filter: {_cc_langs}")
+        if upload_cc_limit > 0:
+            print(f"[YTUpload] 🔢 CC limit: {upload_cc_limit} | MD limit: {upload_md_limit}")
 
         try:
             creds = self._get_credentials(client_secrets_file, token_file)
@@ -129,7 +195,10 @@ class YTUploadTool(BaseTool):
                         if cc_needs_upload:
                             reason = f"{cc_on_yt}/{cc_total_on_disk} on YouTube"
                             print(f"[YTUpload] ♻️  {fmt}: Video already uploaded ({vid_id}), uploading CC ({reason})")
-                            cc_stats = self._upload_cc_files(youtube, vid_id, output_dir, fmt, limit=upload_cc_limit)
+                            cc_stats = self._upload_cc_files(
+                                youtube, vid_id, output_dir, fmt,
+                                limit=upload_cc_limit, languages=_cc_langs
+                            )
                             _log["cc_uploaded"] = _log.get("cc_uploaded", 0) + cc_stats["uploaded"]
                             _log["cc_failed"]   = cc_stats["failed"]
                             _log["cc_skipped"]  = _log.get("cc_skipped", 0) + cc_stats["skipped"]
@@ -137,7 +206,7 @@ class YTUploadTool(BaseTool):
                                 json.dump(_log, _lf, indent=2)
                             notes.append(f"CC: +{cc_stats['uploaded']} uploaded, {cc_stats['failed']} failed")
                         else:
-                            print(f"[YTUpload] ⏭️  {fmt}: CC complete ({cc_uploaded}/{cc_total_on_disk})")
+                            print(f"[YTUpload] ⏭️  {fmt}: CC complete ({cc_on_yt}/{cc_total_on_disk})")
 
                         # ── Localizations: always re-upload to keep in sync ────
                         _loc = self._upload_localizations(youtube, vid_id, output_dir, fmt, limit=upload_md_limit)
@@ -153,15 +222,27 @@ class YTUploadTool(BaseTool):
                     pass  # Corrupt log — proceed with upload
 
             # ── Find video file ────────────────────────────────────────────
+            import glob as _glob
             topic_slug = "_".join(_re.findall(r"\w+", topic)[:4]) if topic else "Video"
             video_name = f"{channel}_{topic_slug}_{fmt}.mp4"
             video_path = os.path.join(output_dir, video_name)
 
             if not os.path.exists(video_path):
-                import glob as _glob
+                # Exclude segment/temp files
                 seg_pfx = ("intro_", "bar_race_", "definition_video_", "_norm_")
-                matches = [p for p in _glob.glob(os.path.join(output_dir, f"*_{fmt}.mp4"))
-                           if not any(os.path.basename(p).startswith(px) for px in seg_pfx)]
+                # Try: exact fmt match (e.g. *_HD.mp4, *_Shorts.mp4)
+                # Also try: fmt with language suffix (e.g. *_HD_En.mp4) for debate videos
+                candidates = []
+                for pattern in [f"*_{fmt}.mp4", f"*_{fmt}_*.mp4"]:
+                    candidates += [p for p in _glob.glob(os.path.join(output_dir, pattern))
+                                   if not any(os.path.basename(p).startswith(px) for px in seg_pfx)]
+                # Prefer exact match over language-suffixed; dedupe preserving order
+                seen = set()
+                matches = []
+                for p in candidates:
+                    if p not in seen:
+                        seen.add(p)
+                        matches.append(p)
                 if matches:
                     video_path = matches[0]
                     print(f"[YTUpload] ⚠️  Fallback: {os.path.basename(video_path)}")
@@ -170,8 +251,11 @@ class YTUploadTool(BaseTool):
                     print(f"[YTUpload] ❌ {fmt}: No video file — skipping")
                     continue
 
-            # ── Load metadata ──────────────────────────────────────────────
-            metadata_path = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
+            # ── Load metadata — check debate subfolder first ───────────────
+            # Debate videos store metadata under YT/debate/{fmt}/MD/en.json
+            debate_md = os.path.join(output_dir, "YT", "debate", fmt, "MD", "en.json")
+            standard_md = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
+            metadata_path = debate_md if os.path.exists(debate_md) else standard_md
             metadata = self._load_metadata(metadata_path, topic)
             size_mb = os.path.getsize(video_path) / (1024 * 1024)
             print(f"[YTUpload]   📤 {os.path.basename(video_path)} ({size_mb:.1f} MB) → {privacy_status}")
@@ -203,7 +287,10 @@ class YTUploadTool(BaseTool):
                 # ── Upload CC files ────────────────────────────────────────
                 cc_stats = {"uploaded": 0, "skipped": 0, "failed": 0}
                 if upload_cc:
-                    cc_stats = self._upload_cc_files(youtube, video_id, output_dir, fmt, limit=upload_cc_limit)
+                    cc_stats = self._upload_cc_files(
+                        youtube, video_id, output_dir, fmt,
+                        limit=upload_cc_limit, languages=_cc_langs
+                    )
                     # Update log with CC results
                     log_entry.update({
                         "cc_uploaded": cc_stats["uploaded"],
@@ -223,14 +310,23 @@ class YTUploadTool(BaseTool):
                 thumb_note = ""
                 _thumb_path = thumbnail_path
                 if not _thumb_path:
-                    # Auto-detect: look for filename.jpg or filename.png in output_dir
+                    # Auto-detect thumbnail — check multiple locations
                     import glob as _tglob
-                    _candidates = (
-                        [p for p in _tglob.glob(os.path.join(output_dir, "*.jpg"))
-                         if not os.path.basename(p).startswith("PlayOwnAi")] +
-                        [p for p in _tglob.glob(os.path.join(output_dir, "*.png"))
-                         if not os.path.basename(p).startswith("PlayOwnAi")]
-                    )
+                    _excl = ("PlayOwnAi", "flux-", "seedream-", "epsilon_")
+                    def _find_thumbs(directory):
+                        return [p for p in
+                                _tglob.glob(os.path.join(directory, "*.jpg")) +
+                                _tglob.glob(os.path.join(directory, "*.png"))
+                                if not any(os.path.basename(p).startswith(x) for x in _excl)]
+                    # Search: root, YT/debate/{fmt}/Th/, YT/{fmt}/Th/
+                    _thumb_dirs = [
+                        output_dir,
+                        os.path.join(output_dir, "YT", "debate", fmt, "Th"),
+                        os.path.join(output_dir, "YT", fmt, "Th"),
+                    ]
+                    _candidates = []
+                    for _td in _thumb_dirs:
+                        _candidates += _find_thumbs(_td)
                     _thumb_path = _candidates[0] if _candidates else ""
                 if _thumb_path and os.path.exists(_thumb_path):
                     try:
@@ -315,7 +411,6 @@ class YTUploadTool(BaseTool):
             # Keep only safe printable chars
             t = _re.sub(r'[^\x20-\x7E\u00C0-\u024F]', '', t)
             return t[:30].strip()
-
 
         # Strip emoji from free-text fields (title, description)
         def _clean_text(t):
@@ -464,7 +559,7 @@ class YTUploadTool(BaseTool):
         import re as _re2
 
         def _clean(t, limit):
-            t = _re2.sub(u"[ -􏿿]", "", str(t))
+            t = _re2.sub(u"[ -\U0010FFFF]", "", str(t))
             t = _re2.sub(r"[<>&]", "", t)
             return t.strip()[:limit]
 
@@ -480,7 +575,9 @@ class YTUploadTool(BaseTool):
             except Exception:
                 return "", ""
 
-        md_dir = os.path.join(output_dir, "YT", fmt, "MD")
+        # Check debate subfolder first (debate videos use YT/debate/{fmt}/MD/)
+        debate_md = os.path.join(output_dir, "YT", "debate", fmt, "MD")
+        md_dir = debate_md if os.path.exists(debate_md) else os.path.join(output_dir, "YT", fmt, "MD")
         if not os.path.exists(md_dir):
             print(f"[YTUpload]   ⚠️  No MD dir: {md_dir}")
             return {"uploaded": 0, "failed": 0}
@@ -527,13 +624,19 @@ class YTUploadTool(BaseTool):
             print(f"[YTUpload]   ❌ Localizations upload failed: {e}")
             return {"uploaded": 0, "failed": added}
 
-    def _upload_cc_files(self, youtube, video_id, output_dir, fmt, limit: int = 0):
-        """Upload CC files from YT/{fmt}/CC/. Stops immediately on quota exceeded."""
+    def _upload_cc_files(self, youtube, video_id, output_dir, fmt,
+                         limit: int = 0, languages: list = None):
+        """Upload CC files from YT/{fmt}/CC/. Stops immediately on quota exceeded.
+        languages: optional allowlist of lang codes e.g. ['en', 'fr']. Empty = all.
+        """
         from googleapiclient.http import MediaInMemoryUpload
         from googleapiclient.errors import HttpError
 
-        cc_dir = os.path.join(output_dir, "YT", fmt, "CC")
+        # Check debate subfolder first (debate videos use YT/debate/{fmt}/CC/)
+        debate_cc = os.path.join(output_dir, "YT", "debate", fmt, "CC")
+        cc_dir = debate_cc if os.path.exists(debate_cc) else os.path.join(output_dir, "YT", fmt, "CC")
         stats  = {"uploaded": 0, "skipped": 0, "failed": 0, "quota_hit": False}
+        _lang_filter = [l.strip().lower() for l in (languages or []) if l.strip()]
 
         if not os.path.exists(cc_dir):
             print(f"[YTUpload]   ⚠️  No CC dir: {cc_dir}")
@@ -553,12 +656,17 @@ class YTUploadTool(BaseTool):
             existing_langs = set()
 
         cc_files = sorted(f for f in os.listdir(cc_dir) if f.endswith(".txt"))
+
+        # Apply language allowlist filter if provided
+        if _lang_filter:
+            cc_files = [f for f in cc_files if f.replace(".txt", "").lower() in _lang_filter]
+            print(f"[YTUpload]   🔍 CC language filter active: {_lang_filter} → {len(cc_files)} file(s)")
+
         pending  = [f for f in cc_files
                     if f.replace(".txt", "") not in existing_langs]
         # Apply upload limit (0 = no limit)
         if limit > 0:
             pending = pending[:max(0, limit - len(existing_langs))]
-        already  = len(cc_files) - len(pending) - max(0, len(cc_files) - (limit if limit > 0 else len(cc_files)))
         already  = len([f for f in cc_files if f.replace(".txt", "") in existing_langs])
 
         print(f"[YTUpload]   📝 CC: {len(cc_files)} total | {already} already uploaded | {len(pending)} to upload")

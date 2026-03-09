@@ -379,6 +379,7 @@ upload_to_youtube:
       upload_cc: {upload_cc}
       upload_cc_limit: {upload_cc_limit}
       upload_md_limit: {upload_md_limit}
+      dry_run: {upload_dry_run}
       notify_subscribers: {upload_notify_subscribers}
       client_secrets_file: "{upload_client_secrets_file}"
       token_file: "{upload_token_file}"
@@ -495,7 +496,7 @@ debate_propose:
 
     Format your response exactly like this:
 
-    PROPOSITION: {topic}  
+    PROPOSITION: {topic}
 
     OPENING STATEMENT
     [2-3 sentences establishing your position clearly]
@@ -563,7 +564,7 @@ debate_decide:
 
     Format your response exactly like this:
 
-    VERDICT: {topic}  
+    VERDICT: {topic}
 
     SUMMARY OF PROPOSITION
     [2-3 sentences summarizing the PRO arguments]

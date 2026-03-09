@@ -305,6 +305,11 @@
         ],
         "description": "LLM for audio_engineer agent. null=project default.",
         "example": "ollama/deepseek-r1:1.5b"
+      },
+      "intro_slug": {
+        "type": "string",
+        "description": "Custom subtitle line shown in the animation intro clip. Replaces the default second line of the intro.",
+        "example": "Watch Race how the leaders change over time"
       }
     }
   },
@@ -479,6 +484,14 @@
             }
           }
         }
+      },
+      "debate_bg_opacity": {
+        "type": "integer",
+        "description": "Background image opacity for debate video overlay. 0=transparent, 255=opaque.",
+        "minimum": 0,
+        "maximum": 255,
+        "default": 150,
+        "example": 150
       }
     }
   },
@@ -593,6 +606,31 @@
         "type": "boolean",
         "description": "Generate YouTube metadata (title, description, tags, chapters) and translate to 31 languages. Output: YT/{fmt}/MD/ and YT/{fmt}/CC/.",
         "example": true
+      },
+      "generate_yt_thumbnail": {
+        "type": "boolean",
+        "description": "Generate AI thumbnail image for YouTube. Output: {topic_slug}.jpg and {topic_slug}.png in output/{slug}/YT/{fmt}/Th/.",
+        "example": true
+      },
+      "yt_metadata_lang": {
+        "type": "string",
+        "description": "Number of languages to generate YouTube metadata translations (title, description) for. String-encoded integer.",
+        "default": "35",
+        "example": "50"
+      },
+      "yt_cc_lang": {
+        "type": "string",
+        "description": "Number of languages to generate CC subtitle translations for. String-encoded integer.",
+        "default": "20",
+        "example": "50"
+      },
+      "video_formats": {
+        "type": "array",
+        "description": "Video format subdirectory names to generate metadata for. Use 'debate' for debate pipeline output.",
+        "example": [
+          "debate"
+        ],
+        "note": "Use ['HD','Shorts'] for animation pipeline, ['debate'] for debate pipeline."
       }
     }
   },
@@ -611,6 +649,12 @@
         "description": "Upload final merged videos to YouTube via Data API v3. Smart skip: if upload_log.json already contains video_id, re-upload is skipped.",
         "example": true,
         "note": "Requires client_secrets.json from Google Cloud Console. First run opens browser for OAuth2 login."
+      },
+      "upload_dry_run": {
+        "type": "boolean",
+        "description": "Dry run mode — validates that video files, metadata, and CC files exist without uploading anything to YouTube. No API calls made. Useful for testing before real upload.",
+        "default": false,
+        "example": true
       },
       "upload_privacy": {
         "type": "string",
@@ -643,6 +687,18 @@
         "default": true,
         "example": true
       },
+      "upload_cc_lang": {
+        "type": "string",
+        "description": "Max number of CC subtitle languages to upload to YouTube (0 or omit = upload all). String-encoded integer. Independent from yt_cc_lang (generation count).",
+        "default": "0",
+        "example": "5"
+      },
+      "upload_md_lang": {
+        "type": "string",
+        "description": "Max number of MD localization languages to upload to YouTube (0 or omit = upload all). String-encoded integer. Independent from yt_metadata_lang (generation count).",
+        "default": "0",
+        "example": "35"
+      },
       "upload_notify_subscribers": {
         "type": "boolean",
         "description": "Notify channel subscribers when video is uploaded. Recommended false for private/unlisted.",
@@ -661,6 +717,12 @@
         "description": "Path to saved OAuth2 token. Auto-created after first browser login. Reused on subsequent runs.",
         "default": "token.json",
         "example": "token.json"
+      },
+      "yt_pin_commnet_gen": {
+        "type": "boolean",
+        "description": "Generate a pinned comment for the uploaded video using LLM. Typo preserved for backward compatibility (was 'comment').",
+        "default": false,
+        "example": true
       },
       "llm_youtube": {
         "type": [
@@ -750,5 +812,24 @@
       "ollama/qwen2.5:latest": "Local Ollama — Qwen 2.5",
       "ollama/deepseek-r1:1.5b": "Local Ollama — DeepSeek R1 1.5B (very fast)"
     }
+  },
+  "intro_enabled": {
+    "type": "boolean",
+    "description": "Generate branded intro clip per format at top level. When true, intro_clip_tool runs for each video_format.",
+    "example": false
+  },
+  "intro_duration": {
+    "type": "integer",
+    "description": "Intro clip duration in seconds for Shorts/portrait formats (top-level, applies outside animation pipeline).",
+    "minimum": 0,
+    "maximum": 60,
+    "example": 7
+  },
+  "intro_duration_hd": {
+    "type": "integer",
+    "description": "Intro clip duration in seconds for HD/landscape formats. Set 0 to use intro_duration for all.",
+    "minimum": 0,
+    "maximum": 60,
+    "example": 10
   }
 }
