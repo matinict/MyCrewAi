@@ -112,6 +112,16 @@ def load_config():
             else:
                 config[_flag] = False  # guarantee gate flag is off
 
+        # ── Alias publisher_config lang keys → internal names ─────────────
+        # upload_cc_lang  → upload_cc_limit  (caps CC files uploaded to YouTube)
+        # upload_md_lang  → upload_md_limit  (caps MD localizations uploaded to YouTube)
+        # NOTE: yt_cc_lang / yt_metadata_lang are set by metadata_prep_config separately
+        #       and control how many files are GENERATED — independent of upload limits
+        if 'upload_cc_lang' in config:
+            config.setdefault('upload_cc_limit', int(config['upload_cc_lang']))
+        if 'upload_md_lang' in config:
+            config.setdefault('upload_md_limit', int(config['upload_md_lang']))
+
         # Map engine-specific voices → tts_voices so debate_video_tool receives them.
         _engine = config.get('tts_engine', 'gtts').strip().lower()
         _is_debate = config.get('debate', False)
@@ -158,6 +168,7 @@ def load_config():
             'upload_category_id':         '28',
             'upload_cc':                  False,
             'upload_cc_limit':            0,
+            'upload_md_limit':            0,
             'upload_notify_subscribers':  False,
             'upload_client_secrets_file': 'client_secrets.json',
             'upload_token_file':          'token.json',

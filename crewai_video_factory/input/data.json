@@ -1,10 +1,10 @@
 {
-  "topic": "AI Replace Entry Level Software Engineers",
+  "topic": "Open Vs Closed Source Ai— Which Is More Dangerous?",
   "start": 2026,
   "end": 2027,
   "granularity": "yearly",
   "video_formats": [
-      "HD","Shorts"
+     "Shorts"
   ],
   "use_label_mappings": false,
   "fps": 4.9,
@@ -48,16 +48,16 @@
     "llm_video": "ollama/llama3.1:8b",
     "llm_audio": "ollama/deepseek-r1:1.5b"
   },
-  "debate": false,
+  "debate": true,
   "debate_config": {
     "debate_bg_opacity": 150,
     "intro_slug": "One of the biggest debates in tech right now",
     "debate_definition_enabled": true,
     "debate_max_chars": 1000,
     "llm_debate": "dashscope/qwen-plus",
-    "debate_video_enabled": true,
+    "debate_video_enabled": false,
     "debate_secs_per_line": 3.5,
-    "debate_merge_enabled": true,
+    "debate_merge_enabled": false,
     "piper_voices": {
       "propose": {
         "model": "models/joe_medium.onnx",
@@ -87,26 +87,31 @@
       }
     }
   },
-  "metadata_prep": true,
+  "metadata_prep": false,
   "metadata_prep_config": {
     "video_formats": ["debate"],
     "generate_youtube_metadata": true,
     "generate_yt_thumbnail": true,
     "yt_metadata_lang": "50",
-    "yt_cc_lang": "20"
+    "yt_cc_lang": "50"
   },
   "publisher": false,
   "publisher_config": {
     "upload_youtube_video": true,
     "upload_privacy": "private",
     "upload_category_id": "28",
-    "upload_cc": true,
+    "upload_cc": false,
+    "upload_cc_lang": "5",
+    "upload_md_lang": "35",
+    "upload_cc_languages": ["en"],
+    "upload_md_limit": 5,
     "upload_notify_subscribers": false,
     "upload_client_secrets_file": "client_secrets.json",
     "upload_token_file": "token.json",
     "llm_youtube": "ollama/qwen2.5:latest",
     "llm_upload": "ollama/qwen2.5-coder:3b",
-    "llm_embed": "ollama/nomic-embed-text:latest"
+    "llm_embed": "ollama/nomic-embed-text:latest",
+    "yt_pin_commnet_gen": true
   },
   "social": false,
   "social_config": {

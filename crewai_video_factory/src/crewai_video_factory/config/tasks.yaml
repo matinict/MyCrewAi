@@ -378,6 +378,7 @@ upload_to_youtube:
       category_id: "{upload_category_id}"
       upload_cc: {upload_cc}
       upload_cc_limit: {upload_cc_limit}
+      upload_md_limit: {upload_md_limit}
       notify_subscribers: {upload_notify_subscribers}
       client_secrets_file: "{upload_client_secrets_file}"
       token_file: "{upload_token_file}"
