@@ -157,6 +157,7 @@ def load_config():
             'upload_privacy':             'private',
             'upload_category_id':         '28',
             'upload_cc':                  False,
+            'upload_cc_limit':            0,
             'upload_notify_subscribers':  False,
             'upload_client_secrets_file': 'client_secrets.json',
             'upload_token_file':          'token.json',
@@ -339,6 +340,10 @@ def run():
     print(f"📺 Metadata Prep:    {meta_on}")
     if meta_on:
         print(f"   📋 YouTube Metadata:{inputs.get('generate_youtube_metadata', False)}")
+        print(f"   🖼️  Thumbnail:       {inputs.get('generate_yt_thumbnail', False)}")
+        _meta_fmts = inputs.get('metadata_video_formats') or inputs.get('video_formats', [])
+        print(f"   🎬 Meta Formats:    {_meta_fmts}")
+        print(f"   🌍 MD langs:        {inputs.get('yt_metadata_lang', 35)} | CC langs: {inputs.get('yt_cc_lang', 20)}")
 
     # ── Publisher block ──────────────────────────────────────
     pub_on = inputs.get('publisher', False)

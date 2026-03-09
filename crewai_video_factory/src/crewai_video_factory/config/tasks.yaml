@@ -347,7 +347,7 @@ generate_youtube_metadata:
 
     yt_metadata_lang controls how many languages (top N from LANGUAGES list) to translate
     title/description/tags into. Default 35 = all viewer languages.
-    yt_cc_lang controls how many languages for CC subtitle files. Max 20 (YouTube limit).
+    yt_cc_lang controls how many languages for CC subtitle files (top N from LANGUAGES list).
 
     The tool will:
       1. For each format in video_formats — generate metadata (MD) files
@@ -377,6 +377,7 @@ upload_to_youtube:
       privacy_status: "{upload_privacy}"
       category_id: "{upload_category_id}"
       upload_cc: {upload_cc}
+      upload_cc_limit: {upload_cc_limit}
       notify_subscribers: {upload_notify_subscribers}
       client_secrets_file: "{upload_client_secrets_file}"
       token_file: "{upload_token_file}"

@@ -12,31 +12,55 @@ from datetime import datetime
 # ── Language lists ────────────────────────────────────────────────────────────
 # Priority-ordered by viewer analytics (35 non-English languages).
 # Slice with LANGUAGES[:n] for both MD and CC.
-LANGUAGES = [
-    'es', 'ar', 'pt', 'id', 'tr', 'vi', 'fr', 'ru',       # top 8
-    'hi', 'ko', 'bn', 'it', 'zh', 'th', 'fa', 'ja',       # 9-16
-    'de', 'pl', 'zh-hans', 'cs',                            # 17-20  ← CC cutoff
-    'zh-hant', 'uk', 'ta', 'bs', 'pt-pt', 'ro', 'bg',     # 21-27
-    'el', 'my', 'hu', 'iw', 'te', 'sr', 'ur', 'et',       # 28-35
-]
+# ── Language config — loaded from data/lang.json ─────────────────────────────
+# Edit data/lang.json to change language priority, add/remove languages, or
+# adjust which languages get CC subtitles vs metadata-only.
 
-LANG_NAMES = {
-    'es': 'Spanish',    'ar': 'Arabic',      'pt': 'Portuguese',
-    'id': 'Indonesian', 'tr': 'Turkish',     'vi': 'Vietnamese',
-    'fr': 'French',     'ru': 'Russian',     'hi': 'Hindi',
-    'ko': 'Korean',     'bn': 'Bengali',     'it': 'Italian',
-    'zh': 'Chinese',    'th': 'Thai',        'fa': 'Persian',
-    'ja': 'Japanese',   'de': 'German',      'pl': 'Polish',
-    'zh-hans': 'Chinese (Simplified)', 'cs': 'Czech',
-    'zh-hant': 'Chinese (Traditional)', 'uk': 'Ukrainian',
-    'ta': 'Tamil',      'bs': 'Bosnian',     'pt-pt': 'Portuguese (Portugal)',
-    'ro': 'Romanian',   'bg': 'Bulgarian',   'el': 'Greek',
-    'my': 'Burmese',    'hu': 'Hungarian',   'iw': 'Hebrew',
-    'te': 'Telugu',     'sr': 'Serbian',     'ur': 'Urdu',
-    'et': 'Estonian',
-    # Legacy aliases
-    'zh-cn': 'Chinese (Simplified)', 'en-in': 'English (India)',
-}
+def _load_lang_config():
+    """Load language list from data/lang.json, sorted by rank.
+    Falls back to a minimal hardcoded list if the file is missing.
+    """
+    import pathlib
+    # Resolve relative to this file so it works from any CWD
+    _here    = pathlib.Path(__file__).parent
+    _candidates = [
+        _here / "data" / "lang.json",
+        pathlib.Path("data/lang.json"),
+    ]
+    for _p in _candidates:
+        if _p.exists():
+            try:
+                with open(_p, encoding="utf-8") as _f:
+                    _cfg = json.load(_f)
+                _langs = sorted(_cfg["languages"], key=lambda x: x["rank"])
+                _codes     = [l["code"] for l in _langs]
+                _names     = {l["code"]: l["name"] for l in _langs}
+                _yt_map    = {l["code"]: l["yt_code"] for l in _langs}
+                # aliases: zh → zh-hans, etc.
+                for alias, target in _cfg.get("aliases", {}).items():
+                    if alias not in _names:
+                        _names[alias]  = _names.get(target, target)
+                    if alias not in _yt_map:
+                        _yt_map[alias] = _yt_map.get(target, target)
+                print(f"[LangConfig] ✅ Loaded {len(_codes)} languages from {_p}")
+                return _codes, _names, _yt_map
+            except Exception as _e:
+                print(f"[LangConfig] ⚠️  Failed to load {_p}: {_e} — using fallback")
+                break
+
+    # ── Minimal fallback (top 10 only) ───────────────────────────────────────
+    print("[LangConfig] ⚠️  data/lang.json not found — using built-in fallback (top 10)")
+    _codes = ['es', 'ar', 'pt', 'id', 'tr', 'vi', 'fr', 'ru', 'hi', 'ko']
+    _names = {
+        'es': 'Spanish', 'ar': 'Arabic',    'pt': 'Portuguese', 'id': 'Indonesian',
+        'tr': 'Turkish', 'vi': 'Vietnamese', 'fr': 'French',     'ru': 'Russian',
+        'hi': 'Hindi',   'ko': 'Korean',
+    }
+    _yt_map = {c: c for c in _codes}
+    return _codes, _names, _yt_map
+
+
+LANGUAGES, LANG_NAMES, _LANG_YT_MAP = _load_lang_config()
 
 # ── Translation helper ────────────────────────────────────────────────────────
 
@@ -161,7 +185,7 @@ class YouTubeMetadataTool(BaseTool):
             animation_video_formats = [f for f in animation_video_formats if f in _real] or ["HD"]
 
         active_md_langs = LANGUAGES[:min(int(yt_metadata_lang), len(LANGUAGES))]
-        active_cc_langs = LANGUAGES[:min(int(yt_cc_lang), 20)]
+        active_cc_langs = LANGUAGES[:min(int(yt_cc_lang), len(LANGUAGES))]
 
         clean = filename.strip().replace("/", "").replace("\\", "")
 
@@ -593,16 +617,16 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
             if fmt == "debate":
                 for rf in animation_video_formats:
                     debate_targets.append(
-                        (os.path.join(output_dir, "YT", "debate", rf, "TH"), rf)
+                        (os.path.join(output_dir, "YT", "debate", rf, "Th"), rf)
                     )
             elif fmt == "animation":
                 for rf in animation_video_formats:
-                    bar_targets.append(os.path.join(output_dir, "YT", rf, "TH"))
+                    bar_targets.append(os.path.join(output_dir, "YT", rf, "Th"))
             else:
-                bar_targets.append(os.path.join(output_dir, "YT", fmt, "TH"))
+                bar_targets.append(os.path.join(output_dir, "YT", fmt, "Th"))
 
         if not debate_targets and not bar_targets:
-            bar_targets = [os.path.join(output_dir, "YT", "Video", "TH")]
+            bar_targets = [os.path.join(output_dir, "YT", "Video", "Th")]
 
         saved = []
 
@@ -1113,7 +1137,40 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
 
         if moved: print(f"[YTMetadata] ✅ Migration: {moved} files moved")
 
-        # ── Migrate old flat YT/debate/MD/ → YT/debate/{fmt}/MD/ ─────────────
+        # ── Rename stale YT/Debate/ → YT/debate/ (Linux case-sensitive fix) ──────
+        import shutil as _sh
+        old_cap = os.path.join(yt_dir, "Debate")
+        new_low = os.path.join(yt_dir, "debate")
+        if os.path.exists(old_cap):
+            if not os.path.exists(new_low):
+                _sh.copytree(old_cap, new_low)
+                _sh.rmtree(old_cap)
+                print(f"[YTMetadata] 🔄 Renamed: YT/Debate/ → YT/debate/")
+            else:
+                # Both exist — merge missing files then remove old
+                for root, dirs, files in os.walk(old_cap):
+                    rel      = os.path.relpath(root, old_cap)
+                    dst_root = os.path.join(new_low, rel)
+                    os.makedirs(dst_root, exist_ok=True)
+                    for fname in files:
+                        dst_f = os.path.join(dst_root, fname)
+                        if not os.path.exists(dst_f):
+                            _sh.copy2(os.path.join(root, fname), dst_f)
+                            moved += 1
+                _sh.rmtree(old_cap)
+                print(f"[YTMetadata] 🔄 Merged YT/Debate/ into YT/debate/")
+
+        # ── Rename stale TH/ → Th/ under YT/debate/{fmt}/ ───────────────────────
+        if os.path.exists(new_low):
+            for fmt_entry in os.scandir(new_low):
+                if not fmt_entry.is_dir(): continue
+                old_th = os.path.join(fmt_entry.path, "TH")
+                new_th = os.path.join(fmt_entry.path, "Th")
+                if os.path.exists(old_th) and not os.path.exists(new_th):
+                    _sh.move(old_th, new_th)
+                    print(f"[YTMetadata] 🔄 Renamed: YT/debate/{fmt_entry.name}/TH → Th")
+
+        # ── Migrate old flat YT/debate/MD/ → YT/debate/{fmt}/MD/ ────────────────
         old_debate_md = os.path.join(yt_dir, "debate", "MD")
         if os.path.exists(old_debate_md):
             real_fmts = [f for f in video_formats if f in {"HD","2K","4K","8K","Shorts","ShortsHD","Shorts4K"}] or ["HD"]
@@ -1125,16 +1182,13 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                     os.makedirs(dst_dir, exist_ok=True)
                     dst = os.path.join(dst_dir, fname)
                     if not os.path.exists(dst):
-                        import shutil as _sh
                         _sh.copy2(src, dst)
                         moved += 1
                         print(f"[YTMetadata] ✅ Debate MD migrated: debate/MD/{fname} → debate/{rf}/MD/{fname}")
-            # Remove old dir only if all files were migrated
             try:
                 remaining = [f for f in os.listdir(old_debate_md)
                              if os.path.isfile(os.path.join(old_debate_md, f))]
                 if not remaining:
-                    import shutil as _sh
                     _sh.rmtree(old_debate_md)
                     print(f"[YTMetadata] 🗑️  Removed old: YT/debate/MD/")
             except Exception: pass

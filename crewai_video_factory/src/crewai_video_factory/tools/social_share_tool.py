@@ -2,11 +2,11 @@
 Social Share Tool - FULLY DYNAMIC VERSION
 Reads upload_log.json and posts the video URL + thumbnail image to configured social platforms.
 Supported platforms:
-  Facebook   (Graph API — Page post with image)
-  LinkedIn   (LinkedIn API v2 — Organization/Person post with image upload)
-  X          (Twitter API v2 — tweet with media upload)
-  YouTube    (YouTube Data API — Community post)
-  Instagram  (Graph API — Reel/Post with image)
+Facebook   (Graph API — Page post with image)
+LinkedIn   (LinkedIn API v2 — Organization/Person post with image upload)
+X          (Twitter API v2 — tweet with media upload)
+YouTube    (YouTube Data API — Community post)
+Instagram  (Graph API — Reel/Post with image)
 Triggered by: "social_share_enabled": true in data.json
 Credentials go in input/social_credentials.json (never committed to git).
 """
@@ -21,7 +21,6 @@ from pydantic import BaseModel, Field
 
 # ── Credentials file ────────────────────────────────────────────────────────
 CREDS_PATH = "input/social_credentials.json"
-
 CREDS_TEMPLATE = {
     "Facebook": {
         "page_id": "YOUR_PAGE_ID",
@@ -44,10 +43,10 @@ CREDS_TEMPLATE = {
     },
     "Instagram": {
         "ig_user_id": "YOUR_IG_USER_ID",
-        "access_token": "YOUR_PAGE_ACCESS_TOKEN"
+        "access_token": "YOUR_PAGE_ACCESS_TOKEN",
+        "imgur_client_id": "YOUR_IMGUR_CLIENT_ID"
     }
 }
-
 
 class SocialShareInput(BaseModel):
     topic: str = Field(..., description="Topic name")
@@ -65,18 +64,16 @@ class SocialShareInput(BaseModel):
     video_url: str = Field(default="", description="Manual video URL override")
     dry_run: bool = Field(default=False, description="If true: generate & log post texts without posting live. Use for testing.")
 
-
 # Platform character limits for definition section
 # (total post budget minus ~400 chars for header/footer boilerplate)
 PLATFORM_DEF_LIMITS = {
-    "Facebook":  5000,   # ~63k total limit — effectively unlimited, use full text
-    "LinkedIn":  2500,   # 3k total; ~2500 left after boilerplate
-    "Instagram": 1600,   # 2200 total; ~1600 left after boilerplate
-    "X":            0,   # no room — definition omitted entirely
-    "Twitter":      0,
-    "YouTube":   2500,   # community post, generous limit
+    "Facebook": 5000,   # ~63k total limit — effectively unlimited, use full text
+    "LinkedIn": 2500,   # 3k total; ~2500 left after boilerplate
+    "Instagram": 1600,  # 2200 total; ~1600 left after boilerplate
+    "X": 0,             # no room — definition omitted entirely
+    "Twitter": 0,
+    "YouTube": 2500,    # community post, generous limit
 }
-
 
 class SocialShareTool(BaseTool):
     name: str = "Social Share Tool"
@@ -128,7 +125,7 @@ class SocialShareTool(BaseTool):
 
         # ── SMART SKIP — per-platform, per-format (skipped in dry_run) ───────────
         _smart_fmt = (video_formats[0] if video_formats else "HD")
-        share_log_path = os.path.join(output_dir, "YT", _smart_fmt, "share_log.json")
+        share_log_path = os.path.join(self._yt_dir(output_dir, _smart_fmt), "share_log.json")
         already_shared = set()
 
         if not dry_run and os.path.exists(share_log_path):
@@ -150,21 +147,39 @@ class SocialShareTool(BaseTool):
             except Exception as _e:
                 print(f"[SocialShare] ⚠️  Could not read {share_log_path}: {_e}")
 
-        # Auto-detect image path if not provided
-        if not image_path:
-            png_path = os.path.join(output_dir, f"{filename}.png")
-            jpg_path = os.path.join(output_dir, f"{filename}.jpg")
-            if os.path.exists(png_path):
-                image_path = png_path
-            elif os.path.exists(jpg_path):
-                image_path = jpg_path
-            else:
-                image_path = ""
+        # ── Resolve thumbnail path — DYNAMIC AUTO-DISCOVERY ────────────────────
+        # Priority:
+        #   1. image_path arg (if it actually exists on disk)
+        #   2. YT/debate/{fmt}/Th/  or  YT/{fmt}/Th/  (auto-detect, prefer JPG)
+        #   3. output_dir/{filename}.jpg / .png  (legacy animation pipeline)
+        import glob as _iglob
 
-        # Check if image exists and is valid
+        def _find_thumbnail(output_dir, fmt, filename):
+            _th_dir = os.path.join(self._yt_dir(output_dir, fmt), "Th")
+            print(f"[SocialShare] 🔍 Looking for thumbnail in: {_th_dir}")
+            for _ext in (".jpg", ".jpeg", ".png"):
+                _matches = sorted(_iglob.glob(os.path.join(_th_dir, f"*{_ext}")))
+                if _matches:
+                    return _matches[0]
+            # Fallback: root output_dir (old animation pipeline)
+            for _name in (f"{filename}.jpg", f"{filename}.jpeg", f"{filename}.png"):
+                _p = os.path.join(output_dir, _name)
+                if os.path.exists(_p):
+                    return _p
+            return ""
+
+        if image_path and os.path.exists(image_path):
+            # Caller-provided path is valid — use it directly
+            pass
+        else:
+            if image_path:
+                print(f"[SocialShare] ⚠️  image_path not found on disk: {image_path} — auto-detecting")
+            image_path = _find_thumbnail(output_dir, _smart_fmt, filename)
+
         image_file = None
         if image_path and os.path.exists(image_path):
-            if image_path.endswith('.png') or image_path.endswith('.jpg') or image_path.endswith('.jpeg'):
+            _ext_lower = os.path.splitext(image_path)[1].lower()
+            if _ext_lower in (".jpg", ".jpeg", ".png"):
                 image_file = image_path
                 print(f"[SocialShare] 🖼️  Using thumbnail: {image_file} ({os.path.getsize(image_file)//1024} KB)")
             else:
@@ -177,7 +192,7 @@ class SocialShareTool(BaseTool):
         fmt = video_formats[0] if video_formats else "HD"
 
         for fmt_check in video_formats:
-            log_path = os.path.join(output_dir, "YT", fmt_check, "upload_log.json")
+            log_path = os.path.join(self._yt_dir(output_dir, fmt_check), "upload_log.json")
             if os.path.exists(log_path):
                 with open(log_path) as f:
                     log = json.load(f)
@@ -194,7 +209,7 @@ class SocialShareTool(BaseTool):
                 # ── Fallback: recover URL from any existing share_log.json ─────
                 for fmt_check in video_formats:
                     for log_name in ("share_log.json", "share_log_dryrun.json"):
-                        slog_path = os.path.join(output_dir, "YT", fmt_check, log_name)
+                        slog_path = os.path.join(self._yt_dir(output_dir, fmt_check), log_name)
                         if os.path.exists(slog_path):
                             try:
                                 with open(slog_path) as _sf:
@@ -225,7 +240,7 @@ class SocialShareTool(BaseTool):
         # ── Load credentials ─────────────────────────────────────────────
         creds = self._load_credentials()
 
-        # ── Build post text WITH DYNAMIC VALUES ─────────────────────────────
+        # ── Build post text WITH DYNAMIC VALUES ────────────────────────────
         is_shorts_fmt = fmt in ("Shorts", "ShortsHD", "Shorts4K")
 
         # Load output/{filename}.txt — the topic definition file (HD: full, Shorts: What is section)
@@ -250,7 +265,7 @@ class SocialShareTool(BaseTool):
                 fmt=fmt, definition=definition_txt, platform=p
             )
             post_texts[p] = post_text   # save for log
-            print(f"[SocialShare] 📝 Post text ({len(post_text)} chars):\n{post_text[:200]}{'...' if len(post_text)>200 else ''}")
+            print(f"[SocialShare] 📝 Post text ({len(post_text)} chars):\n{post_text[:200]}{'...' if len(post_text) > 200 else ''}")
 
             if dry_run:
                 # ── DRY RUN: skip API call, record as dry_run result ──────────
@@ -280,7 +295,7 @@ class SocialShareTool(BaseTool):
 
         self._save_share_log(output_dir, topic_text, video_url, fmt, social_platforms,
                             results, errors, channel, start_year, end_year, post_texts,
-                            dry_run=dry_run)
+                             dry_run=dry_run)
 
         mode = "🧪 DRY RUN" if dry_run else "📢 Social Share"
         out = f"{mode} — {len(results)} {'previewed' if dry_run else 'posted'}, {len(errors)} failed\n"
@@ -297,6 +312,17 @@ class SocialShareTool(BaseTool):
         if errors:
             out += "\n\n⚠️ Errors:\n" + "\n".join(f"   {e}" for e in errors)
         return out
+
+    @staticmethod
+    def _yt_dir(output_dir: str, fmt: str) -> str:
+        """Return the YT sub-directory for this format.
+        Checks YT/debate/{fmt}/ first (debate pipeline), falls back to YT/{fmt}/.
+        Mirrors the same logic in yt_upload_tool so all tools stay in sync.
+        """
+        debate_path = os.path.join(output_dir, "YT", "debate", fmt)
+        if os.path.isdir(debate_path):
+            return debate_path
+        return os.path.join(output_dir, "YT", fmt)
 
     def _load_definition_txt(self, output_dir: str, filename: str) -> str:
         """
@@ -360,8 +386,8 @@ class SocialShareTool(BaseTool):
 
         if is_shorts:
             # Extract WHAT IS section — handles both formats:
-            #   A) Same line:  "WHAT IS X? Content here..."
-            #   B) Next lines: "WHAT IS X?" + newline + "Content here..."
+            #   A) Same line:   "WHAT IS X? Content here..."
+            #   B) Next lines:  "WHAT IS X?" + newline + "Content here..."
             section = ""
             all_lines = raw.splitlines()
             for i, line in enumerate(all_lines):
@@ -372,7 +398,7 @@ class SocialShareTool(BaseTool):
                 q_pos = stripped.find("?")
                 inline = stripped[q_pos + 1:].strip() if q_pos != -1 else stripped
                 # Collect continuation lines until next section header or separator
-                extra = []
+                extra  = []
                 for next_line in all_lines[i + 1:]:
                     ns = next_line.strip()
                     # Stop at next ALLCAPS header like "WHY DOES IT MATTER?"
@@ -404,84 +430,92 @@ class SocialShareTool(BaseTool):
         """Wrapper — converts raw cc_en.txt narration to viral post copy via _narration_to_viral."""
         return self._narration_to_viral(full_text, topic, fmt, platform)
 
+     
     def _build_post_text(self, topic, url, channel, website, short=False,
-                         start_year=2015, end_year=2026, fmt="HD", definition="",
-                         platform="LinkedIn"):
+                     start_year=2015, end_year=2026, fmt="HD", definition="",
+                     platform="LinkedIn"):
         """
-        Build clean social post. No emojis.
-
-        Shorts:
-            [Short] {topic} -- Bar Race {year_range}
-            Watch now: {url}
-
-            What is {topic}?
-            {WHAT IS section from txt}
-
-            #{hashtags}
-
-        HD:
-            {topic} -- Bar Race {year_range}
-            Watch now: {url}
-
-            {full txt content, platform-trimmed}
-
-            Subscribe to @{channel}
-            #{hashtags}
+        Build clean social post WITH CHANNEL HASHTAG.
         """
-        year_range = f"{start_year}-{end_year}"
-        is_shorts  = fmt in ("Shorts", "ShortsHD", "Shorts4K")
-        txt_body   = self._smart_trim_definition(definition, platform, fmt, topic)
+        year_range  = f"{start_year}-{end_year}"
+        is_shorts   = fmt in ("Shorts", "ShortsHD", "Shorts4K")
+        is_debate   = fmt == "debate"
+        txt_body    = self._smart_trim_definition(definition, platform, fmt, topic)
+        
+        # Channel hashtag - lowercase, no @ symbol
+        channel_hashtag = f"#{channel.lower().replace('@', '')}"
 
         # X / Twitter — compact only
         if short:
-            if is_shorts:
+            if is_debate:
+                text = (
+                    f"{topic} — AI Debate. "
+                    f"Propose. Oppose. Decide. Watch: {url} "
+                    f"#AIDebate #AI #Tech {channel_hashtag}"
+                )
+            elif is_shorts:
                 text = (
                     f"[Short] {topic} {year_range} in 60 seconds. "
                     f"Who dominated? Find out: {url} "
-                    f"#Shorts #AI #BarRace #DataViz"
+                    f"#Shorts #AI #BarRace #DataViz {channel_hashtag}"
                 )
             else:
                 text = (
                     f"{topic} {year_range} -- "
                     f"Who led the race? Full breakdown: {url} "
-                    f"#AI #DataVisualization #BarRace #MachineLearning"
+                    f"#AI #DataVisualization #BarRace #MachineLearning {channel_hashtag}"
                 )
             return text[:280]
 
-        if is_shorts:
+        if is_debate:
+            lines = [
+                f"{topic} — AI Debate",
+                " ",
+                f"Watch now: {url}",
+            ]
+            if txt_body:
+                lines += [" ", txt_body]
+            lines += [
+                " ",
+                f"Subscribe to @{channel} for more AI debates and data-driven content.",
+            ]
+            if website:
+                lines.append(f"More: {website}")
+            lines += [" ", f"#AIDebate #AI #MachineLearning #Tech #FutureOfWork #TechDebate {channel_hashtag}"]
+
+        elif is_shorts:
             lines = [
                 f"[Short] {topic} -- Bar Race {year_range}",
-                "",
+                " ",
                 f"Watch now: {url}",
             ]
             if txt_body:
                 lines += [
-                    "",
-                    f"What is {topic}?",
+                    " ",
+                    f"What is {topic}? ",
                     txt_body,
                 ]
             if website:
                 lines.append(f"More: {website}")
-            lines += ["", "#Shorts #AI #DataVisualization #BarRace #MachineLearning #TechTrends"]
+            lines += [" ", f"#Shorts #AI #DataVisualization #BarRace #MachineLearning #TechTrends {channel_hashtag}"]
 
         else:
             lines = [
                 f"{topic} -- Bar Race {year_range}",
-                "",
+                " ",
                 f"Watch now: {url}",
             ]
             if txt_body:
-                lines += ["", txt_body]
+                lines += [" ", txt_body]
             lines += [
-                "",
+                " ",
                 f"Subscribe to @{channel} for more data-driven tech animations.",
             ]
             if website:
                 lines.append(f"More: {website}")
-            lines += ["", "#AI #MachineLearning #LLM #DataVisualization #BarRace #TechTrends"]
+            lines += [" ", f"#AI #MachineLearning #LLM #DataVisualization #BarRace #TechTrends {channel_hashtag}"]
 
-        return chr(10).join(lines)
-
+        return "\n".join(lines)
     def _post_facebook(self, creds: dict, text: str, url: str, image_path: Optional[str] = None) -> str:
         """Post to Facebook Page via Graph API with optional image attachment."""
         try:
@@ -656,49 +690,13 @@ class SocialShareTool(BaseTool):
         tweet_id = data.get("data", {}).get("id", "unknown")
         return f"Tweeted — tweet_id: {tweet_id}" + (" 🖼️ +image" if media_ids else "")
 
-    # def _post_youtube_community(self, creds: dict, text: str, url: str) -> str:
-    #     """Post YouTube Community post via YouTube Data API v3."""
     def _post_youtube_community(self, creds: dict, text: str, url: str) -> str:
         """
         Handles YouTube 'sharing'.
         NOTE: YouTube Data API v3 does NOT support Community Posts.
         """
-        # Option 1: Inform the user of the limitation
         print("[SocialShare] ℹ️  YouTube Community Posts are not supported via API.")
         return "Skipped — Feature not supported by YouTube Data API v3."
-
-        try:
-            from google.oauth2.credentials import Credentials
-            from google_auth_oauthlib.flow import InstalledAppFlow
-            from googleapiclient.discovery import build
-            import google.auth.transport.requests as google_requests
-        except ImportError:
-            raise RuntimeError("Install: pip install google-auth-oauthlib google-api-python-client")
-
-        SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
-        token_file = creds.get("token_file", "token.json")
-        client_secrets_file = creds.get("client_secrets_file", "client_secrets.json")
-
-        cred_obj = None
-        if os.path.exists(token_file):
-            cred_obj = Credentials.from_authorized_user_file(token_file, SCOPES)
-
-        if not cred_obj or not cred_obj.valid:
-            if cred_obj and cred_obj.expired and cred_obj.refresh_token:
-                cred_obj.refresh(google_requests.Request())
-            else:
-                if not os.path.exists(client_secrets_file):
-                    raise RuntimeError(f"client_secrets.json not found: {client_secrets_file}")
-                flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, SCOPES)
-                cred_obj = flow.run_local_server(port=0)
-            with open(token_file, "w") as f:
-                f.write(cred_obj.to_json())
-
-        youtube = build("youtube", "v3", credentials=cred_obj)
-        body = {"snippet": {"type": "textPost", "textOriginalPost": f"{text}\n\n🎬 {url}"}}
-        resp = youtube.communityPosts().insert(part="snippet", body=body).execute()
-        post_id = resp.get("id", "unknown")
-        return f"Community post — post_id: {post_id}"
 
     def _post_instagram(self, creds: dict, text: str, url: str, image_path: Optional[str] = None) -> str:
         """Post to Instagram via Graph API."""
@@ -714,43 +712,103 @@ class SocialShareTool(BaseTool):
 
         caption = f"{text}\n\n🎬 {url}"[:2200]
 
-        # Instagram cannot fetch YouTube URLs — post thumbnail as image instead
-        if image_path and os.path.exists(image_path):
-            # Upload image via imgbb or use a publicly accessible image URL
-            # Strategy: encode image to base64 and use imgbb free API for temp hosting
-            import base64, os as _os
-            imgbb_key = creds.get("imgbb_api_key", "")
-            img_url = ""
-            if imgbb_key:
+        if not (image_path and os.path.exists(image_path)):
+            raise RuntimeError(
+                "Instagram requires an image. No thumbnail found — ensure thumbnail is generated first."
+            )
+
+        # ── Get a public image URL ────────────────────────────────────────────
+        # Instagram Graph API fetches the image from its own servers — the host
+        # MUST allow hotlinking. imgbb blocks external crawlers (including Meta).
+        # Priority:
+        #   1. imgur_client_id  — Imgur anonymous upload (hotlinking allowed ✅)
+        #   2. imgbb_api_key     — imgbb upload (may be blocked by Meta crawler ⚠️)
+        #   3. image_url        — static public URL in creds (e.g. S3, CDN)
+        img_url = ""
+
+        imgur_client_id = creds.get("imgur_client_id", "")
+        imgbb_key       = creds.get("imgbb_api_key", "")
+
+        # ── Option 1: Imgur (preferred — hotlinking allowed) ─────────────────
+        if imgur_client_id and not img_url:
+            print(f"[SocialShare] 📤 Uploading thumbnail to Imgur: {os.path.basename(image_path)}")
+            try:
+                with open(image_path, "rb") as _f:
+                    b64 = base64.b64encode(_f.read()).decode()
+                _ir = requests.post(
+                    "https://api.imgur.com/3/image",
+                    headers={"Authorization": f"Client-ID {imgur_client_id}"},
+                    data={"image": b64, "type": "base64"},
+                    timeout=30
+                ).json()
+                # Imgur returns data.link — direct image URL (e.g. https://i.imgur.com/abc.jpg)
+                img_url = _ir.get("data", {}).get("link", "")
+                if img_url:
+                    print(f"[SocialShare] ✅ Imgur upload OK: {img_url}")
+                else:
+                    print(f"[SocialShare] ⚠️  Imgur upload failed: {_ir}")
+            except Exception as _e:
+                print(f"[SocialShare] ⚠️  Imgur error: {_e}")
+
+        # ── Option 2: imgbb (fallback — may be blocked by Meta) ──────────────
+        if imgbb_key and not img_url:
+            print(f"[SocialShare] 📤 Uploading thumbnail to imgbb: {os.path.basename(image_path)}")
+            try:
                 with open(image_path, "rb") as _f:
                     b64 = base64.b64encode(_f.read()).decode()
                 _ir = requests.post(
                     "https://api.imgbb.com/1/upload",
-                    data={"key": imgbb_key, "image": b64, "expiration": 604800},  # 7 days
+                    data={"key": imgbb_key, "image": b64, "expiration": 604800},
                     timeout=30
                 ).json()
-                img_url = _ir.get("data", {}).get("url", "")
-
-            if not img_url:
-                # Fallback: check if creds has a static image_url to use
-                img_url = creds.get("image_url", "")
-
-            if not img_url:
-                raise RuntimeError(
-                    "Instagram requires a public image URL. "
-                    "Add 'imgbb_api_key' (free at imgbb.com) or 'image_url' to Instagram creds."
+                _data = _ir.get("data", {})
+                img_url = (
+                    _data.get("display_url") or
+                    _data.get("image", {}).get("url") or
+                    _data.get("url") or ""
                 )
+                if img_url:
+                    print(f"[SocialShare] ✅ imgbb upload OK: {img_url}")
+                    print(f"[SocialShare] ⚠️  Note: imgbb may be blocked by Meta's image crawler. Add imgur_client_id for reliability.")
+                else:
+                    print(f"[SocialShare] ⚠️  imgbb upload failed: {_ir}")
+            except Exception as _e:
+                print(f"[SocialShare] ⚠️  imgbb error: {_e}")
 
-            # Create image container
-            container_resp = requests.post(
-                f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
-                data={"image_url": img_url, "caption": caption, "access_token": access_token},
-                timeout=60
-            ).json()
-        else:
+        # ── Option 3: static URL ──────────────────────────────────────────────
+        if not img_url:
+            img_url = creds.get("image_url", "")
+            if img_url:
+                print(f"[SocialShare] ℹ️  Using static image_url from creds: {img_url}")
+
+        if not img_url:
             raise RuntimeError(
-                "Instagram requires an image. No thumbnail found — ensure thumbnail is generated first."
+                "Instagram requires a public image URL. Add one of these to Instagram creds:\n"
+                "  'imgur_client_id': get free at https://api.imgur.com/oauth2/addclient (select 'Anonymous usage')\n"
+                "  'imgbb_api_key':   get free at https://api.imgbb.com\n"
+                "  'image_url':       direct HTTPS link to your image (must allow hotlinking)"
             )
+
+        # Validate: must be a direct image URL (jpg/png), not a page URL
+        _img_url_lower = img_url.lower().split("?")[0]
+        if not any(_img_url_lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".webp")):
+            print(f"[SocialShare] ⚠️  img_url may not be a direct image link: {img_url}")
+
+        print(f"[SocialShare] 📸 Submitting to Instagram container: {img_url}")
+
+        # Create image container — media_type=IMAGE is required by Instagram Graph API
+        container_resp = requests.post(
+            f"https://graph.facebook.com/v19.0/{ig_user_id}/media",
+            data={
+                "image_url":  img_url,
+                "media_type": "IMAGE",
+                "caption":    caption,
+                "access_token": access_token,
+            },
+            timeout=60
+        ).json()
+
+        print(f"[SocialShare] 📋 Container response: {container_resp}")
 
         if "error" in container_resp:
             raise RuntimeError(f"Instagram container error: {container_resp['error'].get('message', container_resp)}")
@@ -760,7 +818,23 @@ class SocialShareTool(BaseTool):
             raise RuntimeError(f"Instagram container ID missing: {container_resp}")
 
         # Wait for container to be ready then publish
-        time.sleep(8)
+        # Poll status — can take 5-30s depending on image size
+        print(f"[SocialShare] ⏳ Waiting for Instagram container ({container_id}) to be ready...")
+        for _attempt in range(10):
+            time.sleep(5)
+            _status_resp = requests.get(
+                f"https://graph.facebook.com/v19.0/{container_id}",
+                params={"fields": "status_code,status", "access_token": access_token},
+                timeout=15
+            ).json()
+            _status_code = _status_resp.get("status_code", "")
+            print(f"[SocialShare]   Container status ({_attempt+1}/10): {_status_code} — {_status_resp.get('status', '')}")
+            if _status_code == "FINISHED":
+                break
+            if _status_code == "ERROR":
+                raise RuntimeError(f"Instagram container processing error: {_status_resp}")
+        else:
+            print(f"[SocialShare] ⚠️  Container not FINISHED after 50s — attempting publish anyway")
         publish_resp = requests.post(
             f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish",
             data={"creation_id": container_id, "access_token": access_token},
@@ -782,23 +856,25 @@ class SocialShareTool(BaseTool):
             json.dump(CREDS_TEMPLATE, f, indent=2)
         print(f"[SocialShare] ⚠️  Created credentials template: {CREDS_PATH}")
         return {}
-
     def _save_share_log(self, output_dir, topic, video_url, fmt, platforms,
-                       results, errors, channel, start_year, end_year, post_texts=None,
-                       dry_run=False):
+                    results, errors, channel, start_year, end_year, post_texts=None,
+                        dry_run=False):
         """
         Save share results to:
-          YT/{fmt}/share_log.json        — live run  (machine-readable)
-          YT/{fmt}/share_log_dryrun.json — dry run   (machine-readable)
-          YT/{fmt}/share_log.txt         — live run  (human-readable with full post bodies)
-          YT/{fmt}/share_log_dryrun.txt  — dry run   (human-readable with full post bodies)
+        YT/{fmt}/share_log.json        — live run  (machine-readable)
+        YT/{fmt}/share_log_dryrun.json — dry run   (machine-readable)
+        YT/{fmt}/share_log.txt         — live run  (human-readable with full post bodies)
+        YT/{fmt}/share_log_dryrun.txt  — dry run   (human-readable with full post bodies)
+        
+        MERGES with existing log to preserve ALL platforms (not just current run).
         """
         import datetime
         post_texts = post_texts or {}
-        log_dir = os.path.join(output_dir, "YT", fmt)
+        log_dir = self._yt_dir(output_dir, fmt)
         os.makedirs(log_dir, exist_ok=True)
         suffix = "_dryrun" if dry_run else ""
 
+        # ── Parse current run results ─────────────────────────────
         parsed_results = []
         for r in results:
             platform = r.replace("✅ ", "").split(": ")[0].strip()
@@ -819,6 +895,38 @@ class SocialShareTool(BaseTool):
                 "post_text": post_texts.get(platform, ""),
             })
 
+        # ── Load existing log (if any) to preserve ALL platforms ───
+        existing_shares = []
+        existing_log_path = os.path.join(log_dir, "share_log.json")
+        if os.path.exists(existing_log_path) and not dry_run:
+            try:
+                with open(existing_log_path, "r", encoding="utf-8") as _f:
+                    _existing = json.load(_f)
+                existing_shares = _existing.get("shares", [])
+                print(f"[SocialShare] 📖 Loaded existing share log: {len(existing_shares)} platforms")
+            except Exception as _e:
+                print(f"[SocialShare] ⚠️  Could not load existing log: {_e}")
+
+        # ── Merge: new results override existing for same platform ─
+        merged_shares = []
+        processed_platforms = set()
+        
+        # Add existing shares first
+        for _share in existing_shares:
+            _plat = _share.get("platform", "")
+            # Skip if this platform was re-processed in current run
+            if any(_plat == p.get("platform") for p in parsed_results):
+                continue
+            merged_shares.append(_share)
+        
+        # Add new/updated shares
+        merged_shares.extend(parsed_results)
+        
+        # Count success/failed
+        _success = sum(1 for s in merged_shares if s.get("status") == "success")
+        _failed = sum(1 for s in merged_shares if s.get("status") == "failed")
+
+        # ── Build complete log data ────────────────────────────────
         data = {
             "topic":      topic,
             "channel":    channel,
@@ -827,12 +935,13 @@ class SocialShareTool(BaseTool):
             "video_url":  video_url,
             "format":     fmt,
             "dry_run":    dry_run,
-            "platforms":  platforms,
-            "success":    len(results),
-            "failed":     len(errors),
-            "shares":     parsed_results,
+            "platforms":  [s.get("platform") for s in merged_shares],  # ALL platforms
+            "success":    _success,
+            "failed":     _failed,
+            "shares":     merged_shares,  # MERGED results
         }
 
+        # ── Save JSON ──────────────────────────────────────────────
         json_path = os.path.join(log_dir, f"share_log{suffix}.json")
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
@@ -844,7 +953,7 @@ class SocialShareTool(BaseTool):
                 json.dump(data, f, indent=2, ensure_ascii=False)
             print(f"[SocialShare] 🧪 Dry run guard written → {real_log_path}")
 
-        # ── Human-readable .txt log with full post bodies ─────────────────────
+        # ── Human-readable .txt log with full post bodies ──────────
         sep     = "━" * 60
         sep_mid = "─" * 60
         now_str = data["shared_at"]
@@ -859,12 +968,13 @@ class SocialShareTool(BaseTool):
             f"Year Range : {start_year}–{end_year}",
             f"Shared at  : {now_str}",
             f"Video URL  : {video_url}",
-            f"Result     : {len(results)} posted  |  {len(errors)} failed",
+            f"Result     : {_success} posted  |  {_failed} failed",
+            f"Platforms  : {', '.join(data['platforms'])}",
             sep,
-            "",
+            " ",
         ]
 
-        for s in parsed_results:
+        for s in merged_shares:
             icon   = "✅" if s["status"] == "success" else "❌"
             detail = s.get("detail") or s.get("error", "")
             p_text = s.get("post_text", "").strip()
@@ -874,10 +984,10 @@ class SocialShareTool(BaseTool):
                 sep_mid,
                 "POST CONTENT:",
                 p_text if p_text else "(no post text recorded)",
-                "",
+                " ",
             ]
 
-        txt_lines += [sep, ""]
+        txt_lines += [sep, " "]
 
         txt_path = os.path.join(log_dir, f"share_log{suffix}.txt")
         with open(txt_path, "w", encoding="utf-8") as f:
@@ -885,3 +995,7 @@ class SocialShareTool(BaseTool):
 
         print(f"[SocialShare] 💾 Share log → {json_path}")
         print(f"[SocialShare] 💾 Share log → {txt_path}")
+        print(f"[SocialShare] 📊 Total platforms logged: {len(merged_shares)}")
+    
+    
+    
