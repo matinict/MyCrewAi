@@ -12,8 +12,8 @@ matplotlib.rcParams['figure.max_open_warning'] = 0
 class IntroClipToolInput(BaseModel):
     """Input schema for IntroClipTool."""
     topic: str = Field(..., description="Topic name (e.g. 'LLM Popularity')")
-    start_year: int = Field(..., description="First year in the dataset")
-    end_year: int = Field(..., description="Last year in the dataset")
+    start_year: Optional[int] = Field(default=None, description="First year. Omit or null for debate/timeless topics.")
+    end_year: Optional[int] = Field(default=None, description="Last year. Omit or null for debate/timeless topics.")
     output_dir: str = Field(..., description="Directory to save the intro clip(s)")
 
     # Format control
@@ -111,9 +111,9 @@ class IntroClipTool(BaseTool):
     def _run(
         self,
         topic: str,
-        start_year: int,
-        end_year: int,
-        output_dir: str,
+        start_year: Optional[int] = None,
+        end_year: Optional[int] = None,
+        output_dir: str = "output",
         video_formats: list = None,
         intro_enabled: bool = True,
         intro_duration: int = 0,
@@ -203,10 +203,25 @@ class IntroClipTool(BaseTool):
                     _slug = _ctx_labels.get(_ctx, intro_context.replace("_", " ").title())
 
                 narration_parts = [
-                    f"Welcome to {channel}.",
-                    f"Exploring {topic}. {_slug}",
+                    f"Welcome to {channel}. ",
+                    f"Exploring {topic}. ",
                 ]
-                narration = "   ".join(narration_parts)
+
+                # Add slug to narration if provided
+                _slug = intro_slug.strip() if intro_slug else ""
+                if not _slug:
+                    _ctx = intro_context.strip().lower() if intro_context else "bar_race"
+                    _ctx_labels = {
+                        "bar_race":     "Watch the race — see how the leaders change over time. ",
+                        "debate":       "One of the biggest debates in tech right now. ",  # ✅ ADDED
+                        "definition":   "Let's explore what this really means. ",
+                    }
+                    _slug = _ctx_labels.get(_ctx, intro_context.replace("_", "  ").title())
+
+                if _slug:
+                    narration_parts.append(f"{_slug} ")  # ✅ ADD SLUG TO AUDIO
+
+                narration = "  ".join(narration_parts)
 
                 # Save narration as cc_en.txt alongside video
                 cc_path = os.path.join(output_dir, f"intro_{fmt}_{_lang}_cc.txt")
@@ -254,6 +269,7 @@ class IntroClipTool(BaseTool):
                         start_year=start_year,
                         end_year=end_year,
                         channel=channel,
+                        slug=_slug,
                         bg_color=bg_color,
                         watermark_enabled=watermark_enabled,
                         watermark_text=watermark_text,
@@ -312,90 +328,260 @@ class IntroClipTool(BaseTool):
     def _create_intro_clip(
         self,
         fmt: str,
-        duration: float,  # ✅ Now float for auto-duration
+        duration: float,
         output_path: str,
         topic: str,
-        start_year: int,
-        end_year: int,
+        start_year,
+        end_year,
         channel: str,
-        bg_color: tuple,
         watermark_enabled: bool,
         watermark_text: str,
         watermark_opacity: int,
+        slug: str = "",
+        bg_color: tuple = (20, 20, 40),
         video_fps: int = 30,
     ):
-        import subprocess
-        from PIL import Image, ImageDraw, ImageFont
+        import subprocess, math, random, tempfile
+        from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
         width, height = RESOLUTIONS[fmt]
         title_size, subtitle_size = FONT_SCALE[fmt]
         is_portrait = height > width
-        fps = video_fps
+        fps         = video_fps
+        total_frames = max(1, int(duration * fps))
 
-        # --- BACKGROUND ---
-        img = Image.new('RGB', (width, height), color=tuple(bg_color))
-        draw = ImageDraw.Draw(img)
+        # ── Text elements ──────────────────────────────────────────────────
+        topic_clean  = _clean_text(topic)
+        channel_clean = _clean_text(channel)
 
-        # --- FONTS ---
+        # Wrap topic into lines
+        max_words = 2 if is_portrait else 4
+        words, current, lines = topic_clean.split(), [], []
+        for w in words:
+            current.append(w)
+            if len(current) >= max_words or len(' '.join(current)) > 20:
+                lines.append(' '.join(current)); current = []
+        if current: lines.append(' '.join(current))
+
+        # Year line (only if valid)
+        year_line = None
+        try:
+            sy, ey = int(start_year or 0), int(end_year or 0)
+            if sy > 0 and ey > 0:
+                year_line = f"{sy} - {ey}"
+        except Exception:
+            pass
+
+        # Slug line — wrap into short lines so it fits within frame width
+        slug_lines = []
+        if slug and slug.strip():
+            _slug_raw = _clean_text(slug.strip())
+            _slug_words = _slug_raw.split()
+            _max_slug_words = 4 if is_portrait else 6   # tighter wrap for long slugs
+            _cur = []
+            for _w in _slug_words:
+                _cur.append(_w)
+                if len(_cur) >= _max_slug_words or len(' '.join(_cur)) > 22:
+                    slug_lines.append(' '.join(_cur)); _cur = []
+            if _cur:
+                slug_lines.append(' '.join(_cur))
+        slug_clean = slug_lines[0] if slug_lines else ""   # keep for colour-check
+
+        all_sub_lines = lines + ([year_line] if year_line else []) + slug_lines
+
         title_font, subtitle_font = self._load_fonts(title_size, subtitle_size)
+        slug_size = max(18, int(subtitle_size * 0.72))
+        _, slug_font = self._load_fonts(title_size, slug_size)
 
-        # --- CHANNEL NAME (top third) ---
-        cx = width // 2
-        channel_y = height // 3
-        draw.text((cx, channel_y), channel, fill='white', font=title_font, anchor='mm')
-
-        # --- TOPIC LINES (center) ---
-        topic = _clean_text(topic)
-        topic_words = topic.split()
-        max_words_per_line = 2 if is_portrait else 4
-        subtitle_lines = []
-        current_line = []
-        for word in topic_words:
-            current_line.append(word)
-            if len(current_line) >= max_words_per_line or len(' '.join(current_line)) > 20:
-                subtitle_lines.append(' '.join(current_line))
-                current_line = []
-        if current_line:
-            subtitle_lines.append(' '.join(current_line))
-        subtitle_lines.append(f"{start_year} - {end_year}")
-
-        line_spacing = subtitle_size + int(subtitle_size * 0.4)
-        total_block_h = len(subtitle_lines) * line_spacing
-        y_offset = height // 2 - total_block_h // 2 + height // 8
-
-        for line in subtitle_lines:
-            draw.text((cx, y_offset), line, fill='lightblue', font=subtitle_font, anchor='mm')
-            y_offset += line_spacing
-
-        # --- WATERMARK (optional) ---
-        if watermark_enabled:
-            img = self._add_watermark(img, watermark_text, watermark_opacity, width, height, subtitle_size)
-
-        # --- SAVE FRAME PNG ---
-        temp_img_path = output_path.replace('.mp4', '_frame.png')
-        img.save(temp_img_path)
-
-        # --- CONVERT PNG → MP4 via ffmpeg ---
-        cmd = [
-            'ffmpeg', '-y',
-            '-loop', '1',
-            '-i', temp_img_path,
-            '-t', str(duration),  # ✅ Float duration supported
-            '-c:v', 'libx264',
-            '-preset', 'faster',
-            '-crf', '18',
-            '-pix_fmt', 'yuv420p',
-            '-r', str(fps),
-            '-threads', str(OPTIMAL_THREADS),
-            output_path
+        # ── Particle seeds (random but deterministic) ──────────────────────
+        random.seed(42)
+        n_particles = max(30, width // 30)
+        particles = [
+            {
+                'x':  random.randint(0, width),
+                'y':  random.randint(0, height),
+                'vy': random.uniform(0.3, 1.2) * (height / 1080),
+                'r':  random.randint(2, 5),
+                'alpha': random.randint(60, 180),
+            }
+            for _ in range(n_particles)
         ]
-        result = subprocess.run(cmd, capture_output=True, check=False)
-        if result.returncode != 0:
-            raise RuntimeError(f"ffmpeg failed: {result.stderr.decode()[:300]}")
 
-        # --- CLEANUP ---
-        if os.path.exists(temp_img_path):
-            os.remove(temp_img_path)
+        # ── Animation timing (fraction of total_frames) ────────────────────
+        #   0.00 – 0.25  channel fades+scales in
+        #   0.25 – 0.75  topic lines slide up one by one
+        #   0.75 – 1.00  year line pulses in (hold)
+        ch_start, ch_end   = 0.00, 0.25
+        sub_start, sub_end = 0.25, 0.75
+        yr_start           = 0.75
+
+        sub_per = (sub_end - sub_start) / max(len(all_sub_lines), 1)
+
+        # ── Gradient palette ───────────────────────────────────────────────
+        # Deep space → electric purple → neon cyan animated slow drift
+        def gradient_bg(frame_idx):
+            shift = (frame_idx / max(total_frames, 1)) * math.pi * 2
+            img = Image.new('RGB', (width, height))
+            px = img.load()
+            for y in range(height):
+                t = y / height
+                # base: deep navy to dark purple
+                r0 = int(8  + 20  * t)
+                g0 = int(6  + 10  * t)
+                b0 = int(30 + 60  * t)
+                # animated shimmer wave
+                wave = 0.5 + 0.5 * math.sin(shift + t * math.pi * 3)
+                # inject cyan/purple glow band
+                r1 = int(min(255, r0 + 80  * wave * (1 - t)))
+                g1 = int(min(255, g0 + 40  * wave * t))
+                b1 = int(min(255, b0 + 120 * wave))
+                for x in range(width):
+                    px[x, y] = (r1, g1, b1)
+            return img
+
+        # ── Glow helper: draw text with a soft halo ────────────────────────
+        def draw_text_glow(draw, pos, text, font, color, glow_color, anchor='mm', glow_r=3):
+            cx2, cy2 = pos
+            for dx in range(-glow_r, glow_r+1, glow_r):
+                for dy in range(-glow_r, glow_r+1, glow_r):
+                    if dx == 0 and dy == 0: continue
+                    draw.text((cx2+dx, cy2+dy), text, fill=glow_color, font=font, anchor=anchor)
+            draw.text(pos, text, fill=color, font=font, anchor=anchor)
+
+        # ── Per-element alpha easing (smooth in/out) ───────────────────────
+        def ease_in_out(t):
+            return t * t * (3 - 2 * t)
+
+        def alpha_for(t_global, t_in, t_out, hold_end=1.0):
+            """Returns 0-255 alpha. Fades in at t_in, holds to hold_end, fades at t_out."""
+            if t_global < t_in:   return 0
+            if t_global < t_out:  return int(255 * ease_in_out((t_global - t_in) / max(t_out - t_in, 0.001)))
+            if t_global < hold_end: return 255
+            return int(255 * (1 - ease_in_out((t_global - hold_end) / max(1.0 - hold_end, 0.001))))
+
+        # ── Layout positions ───────────────────────────────────────────────
+        cx = width // 2
+        # Channel name: upper third
+        ch_y = int(height * 0.30)
+        # Topic block: centered lower half
+        line_h      = subtitle_size + int(subtitle_size * 0.5)
+        slug_line_h = slug_size + int(slug_size * 0.5)
+        # block height: topic/year lines use line_h, slug lines use slug_line_h
+        n_slug = len(slug_lines)
+        n_other = len(all_sub_lines) - n_slug
+        block_h = n_other * line_h + n_slug * slug_line_h
+        block_y = int(height * 0.52) - block_h // 2
+
+        # ── Render frames into temp dir ────────────────────────────────────
+        tmpdir = tempfile.mkdtemp(prefix='intro_frames_')
+        try:
+            for fi in range(total_frames):
+                t = fi / max(total_frames - 1, 1)   # 0.0 → 1.0
+
+                # Background (animated gradient)
+                img  = gradient_bg(fi)
+                base = img.convert('RGBA')
+                overlay = Image.new('RGBA', (width, height), (0,0,0,0))
+                draw = ImageDraw.Draw(overlay)
+
+                # ── Particles ─────────────────────────────────────────────
+                for p in particles:
+                    px_x = int(p['x'])
+                    px_y = int((p['y'] + fi * p['vy']) % height)
+                    r = p['r']
+                    a = p['alpha']
+                    draw.ellipse(
+                        [px_x - r, px_y - r, px_x + r, px_y + r],
+                        fill=(180, 220, 255, a)
+                    )
+
+                # ── Channel name ───────────────────────────────────────────
+                ch_t_local = (t - ch_start) / max(ch_end - ch_start, 0.001)
+                ch_t_local = max(0.0, min(1.0, ch_t_local))
+                ch_alpha   = int(255 * ease_in_out(ch_t_local))
+                # scale: starts at 60%, grows to 100%
+                ch_scale   = 0.6 + 0.4 * ease_in_out(ch_t_local)
+                # slight upward drift during entrance
+                ch_drift   = int((1 - ease_in_out(ch_t_local)) * subtitle_size)
+
+                if ch_alpha > 0:
+                    scaled_size = max(12, int(title_size * ch_scale))
+                    ch_font, _ = self._load_fonts(scaled_size, subtitle_size)
+                    color_ch = (255, 255, 255, ch_alpha)
+                    glow_ch  = (120, 160, 255, ch_alpha // 3)
+                    draw_text_glow(draw, (cx, ch_y + ch_drift), channel_clean,
+                                   ch_font, color_ch, glow_ch, anchor='mm', glow_r=max(2, title_size//20))
+
+                # ── Topic / subtitle lines ─────────────────────────────────
+                for li, line in enumerate(all_sub_lines):
+                    l_in  = sub_start + li * sub_per
+                    l_out = l_in + sub_per * 0.6
+                    l_t   = (t - l_in) / max(l_out - l_in, 0.001)
+                    l_t   = max(0.0, min(1.0, l_t))
+                    l_alpha = int(255 * ease_in_out(l_t)) if t >= l_in else 0
+
+                    # slide up from below
+                    slide = int((1 - ease_in_out(l_t)) * subtitle_size * 1.5)
+
+                    if l_alpha > 0:
+                        # Accumulate y position respecting mixed line heights
+                        _y = block_y
+                        for _i, _ln in enumerate(all_sub_lines[:li]):
+                            _y += slug_line_h if _ln in slug_lines else line_h
+                        y_pos = _y + slide
+                        is_year = (year_line and line == year_line)
+                        is_slug = (line in slug_lines)
+                        if is_year:
+                            # Year: gold pulsing
+                            pulse = 0.8 + 0.2 * math.sin(t * math.pi * 6)
+                            yr_a  = int(l_alpha * pulse)
+                            color_l = (255, 220, 80, yr_a)
+                            glow_l  = (200, 140, 0, yr_a // 4)
+                            _render_font = subtitle_font
+                        elif is_slug:
+                            # Slug: warm amber, smaller font
+                            color_l = (255, 200, 120, l_alpha)
+                            glow_l  = (180, 80, 0, l_alpha // 5)
+                            _render_font = slug_font
+                        else:
+                            color_l = (140, 210, 255, l_alpha)
+                            glow_l  = (0, 80, 200, l_alpha // 4)
+                            _render_font = subtitle_font
+                        draw_text_glow(draw, (cx, y_pos), line,
+                                       _render_font, color_l, glow_l,
+                                       anchor='mm', glow_r=max(2, subtitle_size//12))
+
+                # Composite overlay onto background
+                img = Image.alpha_composite(base, overlay).convert('RGB')
+
+                # ── Watermark ─────────────────────────────────────────────
+                if watermark_enabled:
+                    img = self._add_watermark(img, watermark_text, watermark_opacity,
+                                              width, height, subtitle_size)
+
+                frame_path = os.path.join(tmpdir, f'frame_{fi:06d}.png')
+                img.save(frame_path, 'PNG')
+
+            # ── Encode frames → MP4 via ffmpeg ─────────────────────────────
+            cmd = [
+                'ffmpeg', '-y',
+                '-framerate', str(fps),
+                '-i', os.path.join(tmpdir, 'frame_%06d.png'),
+                '-c:v', 'libx264',
+                '-preset', 'faster',
+                '-crf', '18',
+                '-pix_fmt', 'yuv420p',
+                '-threads', str(OPTIMAL_THREADS),
+                output_path,
+            ]
+            result = subprocess.run(cmd, capture_output=True, check=False)
+            if result.returncode != 0:
+                raise RuntimeError(f"ffmpeg encode failed: {result.stderr.decode()[:300]}")
+
+        finally:
+            import shutil as _sh
+            _sh.rmtree(tmpdir, ignore_errors=True)
+
 
     # ── Helpers ────────────────────────────────────────────────────────────
     def _generate_audio(self, text: str, output_path: str, speed: float):

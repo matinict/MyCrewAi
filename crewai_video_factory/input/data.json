@@ -1,10 +1,10 @@
 {
   "topic": "Open Vs Closed Source Ai— Which Is More Dangerous?",
-  "start": 2026,
-  "end": 2027,
+  "start":null ,
+  "end":null ,
   "granularity": "yearly",
   "video_formats": [
-     "Shorts","HD"
+     "Shorts"
   ],
   "use_label_mappings": false,
   "fps": 4.9,
@@ -21,7 +21,7 @@
   "watermark_enabled": true,
   "watermark_text": "@PlayOwnAi",
   "watermark_opacity": 60,
-  "intro_enabled": false,
+  "intro_enabled": true,
   "intro_duration": 0,
   "intro_duration_hd": 0,
 
@@ -48,7 +48,7 @@
     "llm_video": "ollama/llama3.1:8b",
     "llm_audio": "ollama/deepseek-r1:1.5b"
   },
-  "debate": false,
+  "debate": true,
   "debate_config": {
     "debate_bg_opacity": 150,
     "intro_slug": "One of the biggest debates in tech right now",
@@ -95,7 +95,7 @@
     "yt_metadata_lang": "50",
     "yt_cc_lang": "50"
   },
-  "publisher": true,
+  "publisher": false,
   "publisher_config": {
     "upload_youtube_video": true,
     "upload_dry_run": true,

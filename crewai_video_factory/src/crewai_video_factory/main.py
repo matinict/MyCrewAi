@@ -207,7 +207,9 @@ def load_config():
             'filename':                   '',
             'output_dir':                 '',
             'fmt':                        'HD',
-            'lang_suffix':                 'En',
+            'lang_suffix':                'En',
+            'start':                      None,
+            'end':                        None,
         }
         for k, v in _task_defaults.items():
             config.setdefault(k, v)
@@ -215,7 +217,7 @@ def load_config():
         return config
 
     except json.JSONDecodeError as e:
-        print(f"❌ Invalid JSON in {config_path}: {e}")
+        print(f"❌ Invalid JSON in {base_path}: {e}")
         print("💡 Check syntax at https://jsonlint.com/")
         sys.exit(1)
     except Exception as e:
@@ -556,10 +558,11 @@ def run():
                 def_text = str(result.raw if hasattr(result, 'raw') else result).strip()
                 if def_text and ("WHAT IS" in def_text or "WHY DOES IT MATTER" in def_text):
                     channel = inputs.get('channel', 'PlayOwnAi')
-                    start   = inputs.get('start', 2015)
-                    end     = inputs.get('end', 2026)
+                    start   = inputs.get('start') or None
+                    end     = inputs.get('end') or None
                     sep     = "━" * 52
-                    header  = f"{sep}\n📖 TOPIC: {inputs['topic']}\nChannel: @{channel}  |  Period: {start}–{end}\n{sep}\n"
+                    _period = f"{start}–{end}" if start and end else (str(start) if start else "")
+                    header  = f"{sep}\n📖 TOPIC: {inputs['topic']}\nChannel: @{channel}" + (f"  |  Period: {_period}" if _period else "") + f"\n{sep}\n"
                     footer  = f"\n{sep}\nSubscribe to @{channel} for more data-driven insights.\n{sep}\n"
                     full    = header + def_text + footer
 

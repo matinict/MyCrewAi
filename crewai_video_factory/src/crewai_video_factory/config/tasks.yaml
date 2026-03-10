@@ -78,8 +78,8 @@ define_topic:
     - Term 3: one-line definition
     - Term 4: one-line definition
 
-    TIMELINE {start} TO {end}
-    [3-4 sentences on key milestones and evolution]
+    TIMELINE
+    [3-4 sentences on key milestones and evolution. If start/end years are available, include them.]
 
     WHAT YOU WILL SEE IN THIS RACE
     [2 sentences on players, trends, and what to watch for]
@@ -183,8 +183,8 @@ create_intro_clip:
     When enabled, creates intro MP4 clips for each format in {video_formats}.
     CRITICAL — call the Intro Clip Tool with EXACTLY these values:
       topic: "{topic}"
-      start_year: {start}
-      end_year: {end}
+      start_year: "{start}"
+      end_year: "{end}"
       output_dir: "{output_dir}"
       video_formats: {video_formats}
       intro_enabled: {intro_enabled}
@@ -324,8 +324,8 @@ generate_youtube_metadata:
       topic: "{topic}"
       filename: "{filename}"
       output_dir: "{output_dir}"
-      start_year: {start}
-      end_year: {end}
+      start_year: "{start}"
+      end_year: "{end}"
       channel: "{channel}"
       channel_lower: "{channel_lower}"
       website: "{website}"
@@ -420,8 +420,8 @@ share_to_social:
       channel: "{channel}"
       website: "{website}"
       image_path: "{output_dir}/{filename}.png"
-      start_year: {start}
-      end_year: {end}
+      start_year: "{start}"
+      end_year: "{end}"
       video_url: ""
 
     The tool will:
@@ -516,7 +516,7 @@ debate_propose:
     Keep total response under {debate_max_chars} characters.
     Write ONLY the argument text — no tool calls, no JSON, no code.
   expected_output: >
-    Full proposition argument as plain text, starting with "PROPOSITION: {topic} ({start}–{end})".
+    Full proposition argument as plain text, starting with "PROPOSITION: {topic}".
     Must be under {debate_max_chars} characters. No tool calls or JSON.
   agent: debater
   output_file: output/{filename}/propose_{lang_suffix}.md
@@ -529,7 +529,7 @@ debate_oppose:
 
     Format your response exactly like this:
 
-    OPPOSITION: {topic} ({start}–{end})
+    OPPOSITION: {topic}
 
     OPENING STATEMENT
     [2-3 sentences establishing your counter-position clearly]
@@ -549,7 +549,7 @@ debate_oppose:
     Keep total response under {debate_max_chars} characters.
     Write ONLY the argument text — no tool calls, no JSON, no code.
   expected_output: >
-    Full opposition argument as plain text, starting with "OPPOSITION: {topic} ({start}–{end})".
+    Full opposition argument as plain text, starting with "OPPOSITION: {topic}".
     Must be under {debate_max_chars} characters. No tool calls or JSON.
   agent: debater
   context:
