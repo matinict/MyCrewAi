@@ -12,6 +12,7 @@ from datetime import datetime
 # ── Language lists ────────────────────────────────────────────────────────────
 # Priority-ordered by viewer analytics (35 non-English languages).
 # Slice with LANGUAGES[:n] for both MD and CC.
+
 # ── Language config — loaded from data/lang.json ─────────────────────────────
 # Edit data/lang.json to change language priority, add/remove languages, or
 # adjust which languages get CC subtitles vs metadata-only.
@@ -32,24 +33,23 @@ def _load_lang_config():
             try:
                 with open(_p, encoding="utf-8") as _f:
                     _cfg = json.load(_f)
-                _langs = sorted(_cfg["languages"], key=lambda x: x["rank"])
-                _codes     = [l["code"] for l in _langs]
-                _names     = {l["code"]: l["name"] for l in _langs}
-                _yt_map    = {l["code"]: l["yt_code"] for l in _langs}
-                # aliases: zh → zh-hans, etc.
-                for alias, target in _cfg.get("aliases", {}).items():
-                    if alias not in _names:
-                        _names[alias]  = _names.get(target, target)
-                    if alias not in _yt_map:
-                        _yt_map[alias] = _yt_map.get(target, target)
-                print(f"[LangConfig] ✅ Loaded {len(_codes)} languages from {_p}")
-                return _codes, _names, _yt_map
+                    _langs = sorted(_cfg["languages"], key=lambda x: x["rank"])
+                    _codes     = [l["code"] for l in _langs]
+                    _names     = {l["code"]: l["name"] for l in _langs}
+                    _yt_map    = {l["code"]: l["yt_code"] for l in _langs}
+                    # aliases: zh → zh-hans, etc.
+                    for alias, target in _cfg.get("aliases", {}).items():
+                        if alias not in _names:
+                            _names[alias]  = _names.get(target, target)
+                        if alias not in _yt_map:
+                            _yt_map[alias] = _yt_map.get(target, target)
+                    print(f"[LangConfig] Loaded {len(_codes)} languages from {_p}")
+                    return _codes, _names, _yt_map
             except Exception as _e:
-                print(f"[LangConfig] ⚠️  Failed to load {_p}: {_e} — using fallback")
+                print(f"[LangConfig] Failed to load {_p}: {_e} — using fallback")
                 break
-
     # ── Minimal fallback (top 10 only) ───────────────────────────────────────
-    print("[LangConfig] ⚠️  data/lang.json not found — using built-in fallback (top 10)")
+    print("[LangConfig] data/lang.json not found — using built-in fallback (top 10)")
     _codes = ['es', 'ar', 'pt', 'id', 'tr', 'vi', 'fr', 'ru', 'hi', 'ko']
     _names = {
         'es': 'Spanish', 'ar': 'Arabic',    'pt': 'Portuguese', 'id': 'Indonesian',
@@ -58,7 +58,6 @@ def _load_lang_config():
     }
     _yt_map = {c: c for c in _codes}
     return _codes, _names, _yt_map
-
 
 LANGUAGES, LANG_NAMES, _LANG_YT_MAP = _load_lang_config()
 
@@ -81,17 +80,16 @@ def _google_translate(text: str, dest: str, retries: int = 3) -> str:
             try:
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
-                    return "".join(part[0] for part in data[0] if part[0])
+                    return " ".join(part[0] for part in data[0] if part[0])
             except Exception as e:
                 if attempt < retries - 1:
                     time.sleep(1.5)
                 else:
-                    print(f"[YTMetadata] ⚠️  Translation failed ({dest}): {e}")
+                    print(f"[YTMetadata] Translation failed ({dest}): {e}")
                     return text
     except Exception as e:
-        print(f"[YTMetadata] ⚠️  Translation error ({dest}): {e}")
+        print(f"[YTMetadata] Translation error ({dest}): {e}")
         return text
-
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -118,11 +116,10 @@ class YouTubeMetadataToolInput(BaseModel):
     animation_video_formats: list   = Field(
         default=[],
         description=(
-            "Real format names (HD, Shorts, …) for the 'animation' branch "
+            "Real format names (HD, Shorts, …) for the 'animation' branch  "
             "AND for per-fmt debate CC/Th splitting."
         ),
     )
-
 
 # ── Tool ──────────────────────────────────────────────────────────────────────
 
@@ -164,7 +161,7 @@ class YouTubeMetadataTool(BaseTool):
         import re as _vre
         t0 = _time.time()
 
-        print(f"[YTMetadata] 🔖 v2.0 — structured YT/{{fmt}}/MD|CC/ output + Thumbnails")
+        print(f"[YTMetadata] v2.0 — structured YT/{{fmt}}/MD|CC/ output + Thumbnails")
 
         # ── Format classification ─────────────────────────────────────────────
         _pipeline = {"debate", "animation"}
@@ -187,33 +184,38 @@ class YouTubeMetadataTool(BaseTool):
         active_md_langs = LANGUAGES[:min(int(yt_metadata_lang), len(LANGUAGES))]
         active_cc_langs = LANGUAGES[:min(int(yt_cc_lang), len(LANGUAGES))]
 
-        clean = filename.strip().replace("/", "").replace("\\", "")
+        clean = filename.strip().replace("/", " ").replace("\\", " ")
 
         print(f"[YTMetadata]   lang config : metadata={len(active_md_langs)} | CC={len(active_cc_langs)}")
-        print(f"[YTMetadata] ▶ Starting — topic='{topic}' filename='{clean}' channel='{channel}'")
+        print(f"[YTMetadata] Starting — topic='{topic}' filename='{clean}' channel='{channel}'")
         print(f"[YTMetadata]   output_dir : {output_dir}")
         print(f"[YTMetadata]   years      : {start_year}–{end_year}  formats: {video_formats}")
         print(f"[YTMetadata]   narration  : {generate_narration} | metadata: {generate_youtube_metadata} | thumbnail: {generate_thumbnail}")
 
         os.makedirs(output_dir, exist_ok=True)
+
+        # Create YT directory for upload_log.json
+        yt_dir = os.path.join(output_dir, "YT")
+        os.makedirs(yt_dir, exist_ok=True)
+
         results = []
 
         self._migrate_old_yt_structure(output_dir, video_formats)
 
-        # ── Step 1: Narration ─────────────────────────────────────────────────
+        # ── Step 1: Narration ────────────────────────────────────────────────
         if generate_narration:
-            print(f"[YTMetadata] 📝 Step 1/3 — Generating narration text …")
+            print(f"[YTMetadata] Step 1/3 — Generating narration text …")
             t1 = _time.time()
             r = self._generate_narration_file(topic, start_year, end_year, output_dir, clean, channel=channel)
-            print(f"[YTMetadata] ✅ Narration done in {_time.time()-t1:.1f}s → {r}")
+            print(f"[YTMetadata] Narration done in {_time.time()-t1:.1f}s → {r}")
             results.append(r)
 
         # ── Step 2: Metadata ──────────────────────────────────────────────────
         if generate_youtube_metadata:
-            print(f"[YTMetadata] 🎬 Step 2/3 — Generating YouTube metadata per format …")
+            print(f"[YTMetadata] Step 2/3 — Generating YouTube metadata per format …")
             t2 = _time.time()
 
-            has_debate    = "debate"    in video_formats
+            has_debate    = "debate" in video_formats
             has_animation = "animation" in video_formats
             direct_fmts   = [f for f in video_formats if f not in _pipeline]
             fmt_results   = []
@@ -225,8 +227,8 @@ class YouTubeMetadataTool(BaseTool):
                     lbl      = f"debate/{real_fmt}"
                     existing = os.path.join(output_dir, "YT", "debate", real_fmt, "MD", "en.json")
                     if os.path.exists(existing):
-                        print(f"[YTMetadata]   • [{lbl}] ⏭️  YT/{lbl}/MD/en.json already exists")
-                        fmt_results.append(f"⏭️  [{lbl}] Skipped")
+                        print(f"[YTMetadata]   • [{lbl}] YT/{lbl}/MD/en.json already exists")
+                        fmt_results.append(f"[{lbl}] Skipped")
                         continue
                     meta = self._build_debate_metadata(
                         topic, output_dir, start_year, end_year,
@@ -246,8 +248,8 @@ class YouTubeMetadataTool(BaseTool):
                 for fmt in animation_video_formats:
                     existing = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
                     if os.path.exists(existing):
-                        print(f"[YTMetadata]   • [{fmt}] ⏭️  YT/{fmt}/MD/en.json already exists")
-                        fmt_results.append(f"⏭️  [{fmt}] Skipped")
+                        print(f"[YTMetadata]   • [{fmt}] YT/{fmt}/MD/en.json already exists")
+                        fmt_results.append(f"[{fmt}] Skipped")
                         continue
                     dur  = self._calc_duration(fmt, periods, fps, fps_hd_offset)
                     desc = self._generate_youtube_description(
@@ -268,8 +270,8 @@ class YouTubeMetadataTool(BaseTool):
                 for fmt in direct_fmts:
                     existing = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
                     if os.path.exists(existing):
-                        print(f"[YTMetadata]   • [{fmt}] ⏭️  YT/{fmt}/MD/en.json already exists")
-                        fmt_results.append(f"⏭️  [{fmt}] Skipped")
+                        print(f"[YTMetadata]   • [{fmt}] YT/{fmt}/MD/en.json already exists")
+                        fmt_results.append(f"[{fmt}] Skipped")
                         continue
                     dur  = self._calc_duration(fmt, periods, fps, fps_hd_offset)
                     desc = self._generate_youtube_description(
@@ -280,12 +282,12 @@ class YouTubeMetadataTool(BaseTool):
                         topic, title, desc, tags, ch,
                         output_dir, fmt=fmt, lang_list=active_md_langs))
 
-            print(f"[YTMetadata] ✅ Metadata done in {_time.time()-t2:.1f}s")
+            print(f"[YTMetadata] Metadata done in {_time.time()-t2:.1f}s")
             results.append("\n".join(fmt_results))
 
         # ── Step 3: Thumbnails → YT/debate/{fmt}/Th/ or YT/{fmt}/Th/ ─────────
         if generate_thumbnail:
-            print(f"[YTMetadata] 🖼️  Step 3/3 — Generating thumbnail images …")
+            print(f"[YTMetadata] Step 3/3 — Generating thumbnail images …")
             t3 = _time.time()
             r = self._generate_thumbnails(
                 topic, start_year, end_year, output_dir, clean,
@@ -293,13 +295,13 @@ class YouTubeMetadataTool(BaseTool):
                 animation_video_formats=animation_video_formats,
                 csv_path=csv_path or f"output/{clean}.csv",
                 channel=channel)
-            print(f"[YTMetadata] ✅ Thumbnail done in {_time.time()-t3:.1f}s → {r}")
+            print(f"[YTMetadata] Thumbnail done in {_time.time()-t3:.1f}s → {r}")
             results.append(r)
 
         # ── Step CC: Translate CC files ───────────────────────────────────────
         # debate  → YT/debate/{real_fmt}/CC/   (per format, separate content)
         # others  → YT/{fmt}/CC/
-        print(f"[YTMetadata] 📝 Step CC — Translating CC narration files …")
+        print(f"[YTMetadata] Step CC — Translating CC narration files …")
         cc_result = self._translate_cc_files(
             output_dir, video_formats,
             lang_list=active_cc_langs,
@@ -308,8 +310,24 @@ class YouTubeMetadataTool(BaseTool):
 
         self._cleanup_and_rename(output_dir, video_formats, channel, topic)
 
-        print(f"[YTMetadata] 🏁 All steps done in {_time.time()-t0:.1f}s")
+        # Save upload_log.json inside YT/ directory
+        self._save_upload_log(yt_dir, topic, channel)
+
+        print(f"[YTMetadata] All steps done in {_time.time()-t0:.1f}s")
         return "\n\n".join(r for r in results if r)
+
+    def _save_upload_log(self, yt_dir: str, topic: str, channel: str):
+        """Save upload log inside YT/ directory"""
+        log_path = os.path.join(yt_dir, "upload_log.json")
+        log_data = {
+            "topic": topic,
+            "channel": channel,
+            "created_at": datetime.now().isoformat(),
+            "status": "ready_for_upload"
+        }
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(log_data, f, indent=2, ensure_ascii=False)
+        print(f"[YTMetadata] Saved: YT/upload_log.json")
 
     # ── Small helpers ─────────────────────────────────────────────────────────
 
@@ -356,26 +374,26 @@ class YouTubeMetadataTool(BaseTool):
                     elif val <= 70: parts.append(f"{yr}. {ldr} shows strength.")
                     else:           parts.append(f"{yr}. {ldr} leads the market.")
                 parts.append(f"Subscribe to @{channel} for more insights.")
-                narration = " ".join(parts)
+                narration = "  ".join(parts)
             except Exception as ex:
-                print(f"[YTMetadata]   ⚠️  CSV read failed: {ex}")
+                print(f"[YTMetadata]   CSV read failed: {ex}")
                 narration = self._fallback_narration(topic, start_year, end_year, channel)
         else:
             narration = self._fallback_narration(topic, start_year, end_year, channel)
 
         with open(os.path.join(output_dir, "cc_en.txt"), "w", encoding="utf-8") as f:
             f.write(narration)
-        return "📝 Narration text saved to: cc_en.txt"
+        return "Narration text saved to: cc_en.txt"
 
     def _fallback_narration(self, topic, start_year, end_year, channel="PlayOwnAi") -> str:
-        return (f"Welcome to @{channel}. Today, we're exploring {topic} from {start_year} to {end_year}. "
-                "Only for basic idea about trending. "
+        return (f"Welcome to @{channel}. Today, we're exploring {topic} from {start_year} to {end_year}.  "
+                 "Only for basic idea about trending.  "
                 f"Subscribe to @{channel} for more insights.")
 
     # ── Debate metadata builder ───────────────────────────────────────────────
 
     def _build_debate_metadata(self, topic, output_dir, start_year, end_year,
-                                fmt="HD",
+                                 fmt="HD",
                                 channel="PlayOwnAi", channel_lower="playownai",
                                 website="youtube.com/@PlayOwnAi") -> dict:
         is_short = fmt in ("Shorts", "ShortsHD", "Shorts4K")
@@ -390,15 +408,15 @@ class YouTubeMetadataTool(BaseTool):
             text = re.sub(r"^#+\s.*$", "", text, flags=re.MULTILINE)
             text = re.sub(r"^\s*[-*]\s+", "", text, flags=re.MULTILINE)
             text = re.sub(r"\*+", "", text)
-            text = re.sub(r"\n{2,}", " ", text).strip()
+            text = re.sub(r"\n{2,}", "  ", text).strip()
             sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if len(s.strip()) > 20]
-            return " ".join(sents[:n])
+            return "  ".join(sents[:n])
 
         pro_raw = _read("propose"); con_raw = _read("oppose"); dec_raw = _read("decide")
-        print(f"[YTMetadata]   • [debate] MD files: "
-              f"propose={'✅' if pro_raw else '❌'} "
-              f"oppose={'✅' if con_raw else '❌'} "
-              f"decide={'✅' if dec_raw else '❌'}")
+        print(f"[YTMetadata]   • [debate] MD files:  "
+              f"propose={'Yes' if pro_raw else 'No'}  "
+              f"oppose={'Yes' if con_raw else 'No'}  "
+              f"decide={'Yes' if dec_raw else 'No'}")
 
         if not (pro_raw or con_raw or dec_raw):
             # Fallback to standard auto-generated metadata
@@ -410,7 +428,7 @@ class YouTubeMetadataTool(BaseTool):
                     channel=channel, channel_lower=channel_lower, website=website),
                 "tags":     self._generate_youtube_tags(topic, channel=channel),
                 "chapters": ("0:00 Introduction\n0:30 Key Argument\n0:55 Verdict"
-                             if is_short else
+                            if is_short else
                              "0:00 Introduction\n0:30 Pro Arguments\n2:00 Con Arguments\n3:30 Verdict"),
             }
 
@@ -421,54 +439,40 @@ class YouTubeMetadataTool(BaseTool):
         # ── Format-specific content ───────────────────────────────────────────
         if is_short:
             # Shorts: lead with the single strongest argument + verdict
-            strongest_label = "✅ PRO" if pro_raw else "❌ CON"
+            strongest_label = "PRO" if pro_raw else "CON"
             strongest_arg   = pro if pro_raw else con
             title       = f"{topic}: The Key Argument in 60s | @{channel} #Shorts"
-            description = f"""⚡ {topic} — Quick Debate
-
+            description = f"""{topic} — Quick Debate
 {strongest_label}
 {strongest_arg}
-
-⚖️ VERDICT
+VERDICT
 {dec}
-
-🔔 Subscribe @{channel} for full debates!
+Subscribe @{channel} for full debates!
 #{topic.replace(' ', '')} #AIDebate #Shorts
----
-⚠️ AI-generated for educational purposes.
+AI-generated for educational purposes.
 """.strip()
             chapters = "0:00 Introduction\n0:10 Key Argument\n0:50 Verdict"
         else:
             # HD / full format: include both sides
             title       = f"{topic}: AI Debate & Analysis | @{channel}"
-            description = f"""🎭 {topic} — AI Debate & Analysis
-
-❓ THE QUESTION
+            description = f"""{topic} — AI Debate & Analysis
+THE QUESTION
 Should {topic}? This debate explores both sides with evidence-based arguments.
-
-✅ PRO ARGUMENTS
+PRO ARGUMENTS
 {pro}
-
-❌ CON ARGUMENTS
+CON ARGUMENTS
 {con}
-
-⚖️ VERDICT
+VERDICT
 {dec}
-
-🔔 Subscribe to @{channel} for more AI debates and analysis!
-
-📱 FOLLOW US:
+Subscribe to @{channel} for more AI debates and analysis!
+FOLLOW US:
 • YouTube: @{channel}
 • LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
 • Website: {website}
-
 #{topic.replace(' ', '')} #AIDebate #ArtificialIntelligence #TechDebate #FutureOfWork #AIAnalysis
-
----
-⚠️ Disclaimer: Arguments generated by AI for educational purposes only.
+Disclaimer: Arguments generated by AI for educational purposes only.
 """.strip()
             chapters = "0:00 Introduction\n0:30 Pro Arguments\n2:00 Con Arguments\n3:30 Verdict & Conclusion"
-
         print(f"[YTMetadata]   • [debate/{fmt}] Title: {title}")
 
         tags = [
@@ -488,7 +492,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
     # ── Metadata file writer ──────────────────────────────────────────────────
 
     def _write_metadata_files(self, topic, title, description, tags, chapters,
-                               output_dir, fmt="", lang_list=None) -> str:
+                                output_dir, fmt="", lang_list=None) -> str:
         if lang_list is None:
             lang_list = LANGUAGES[:35]
         lbl    = fmt if fmt else "Video"
@@ -499,28 +503,28 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
         if not os.path.exists(en_json):
             with open(en_json, "w", encoding="utf-8") as f:
                 json.dump({"title": title, "description": description, "tags": tags,
-                           "chapters": chapters, "category": "Science & Technology",
-                           "language": "en", "created_at": datetime.now().isoformat()},
+                            "chapters": chapters, "category": "Science & Technology",
+                            "language": "en", "created_at": datetime.now().isoformat()},
                           f, indent=2, ensure_ascii=False)
-            print(f"[YTMetadata]   📄 Saved: YT/{lbl}/MD/en.json")
+            print(f"[YTMetadata]   Saved: YT/{lbl}/MD/en.json")
         else:
-            print(f"[YTMetadata]   ⏭️  Exists: YT/{lbl}/MD/en.json")
+            print(f"[YTMetadata]   Exists: YT/{lbl}/MD/en.json")
 
         en_txt = os.path.join(md_dir, "en.txt")
         if not os.path.exists(en_txt):
             with open(en_txt, "w", encoding="utf-8") as f:
                 f.write(f"TITLE:\n{title}\n\nDESCRIPTION:\n{description}\n\n"
                         f"TAGS:\n{', '.join(tags)}\n\nCHAPTERS:\n{chapters}\n")
-            print(f"[YTMetadata]   📄 Saved: YT/{lbl}/MD/en.txt")
+            print(f"[YTMetadata]   Saved: YT/{lbl}/MD/en.txt")
         else:
-            print(f"[YTMetadata]   ⏭️  Exists: YT/{lbl}/MD/en.txt")
+            print(f"[YTMetadata]   Exists: YT/{lbl}/MD/en.txt")
 
-        print(f"[YTMetadata]   🌍 Translating MD to {len(lang_list)} languages …")
+        print(f"[YTMetadata]   Translating MD to {len(lang_list)} languages …")
         ok = 0
         for lang in lang_list:
             p = os.path.join(md_dir, f"{lang}.txt")
             if os.path.exists(p):
-                print(f"[YTMetadata]     ⏭️  YT/{lbl}/MD/{lang}.txt exists")
+                print(f"[YTMetadata]     YT/{lbl}/MD/{lang}.txt exists")
                 ok += 1; continue
             try:
                 t_t  = _google_translate(title, lang)
@@ -529,12 +533,12 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                 with open(p, "w", encoding="utf-8") as f:
                     f.write(f"TITLE:\n{t_t}\n\nDESCRIPTION:\n{t_d}\n\n"
                             f"TAGS:\n{t_tg}\n\nCHAPTERS:\n{chapters}\n")
-                print(f"[YTMetadata]     ✅ YT/{lbl}/MD/{lang}.txt ({LANG_NAMES.get(lang, lang)})")
+                print(f"[YTMetadata]     YT/{lbl}/MD/{lang}.txt ({LANG_NAMES.get(lang, lang)})")
                 ok += 1; time.sleep(0.2)
             except Exception as e:
-                print(f"[YTMetadata]     ❌ {lang}: {e}")
+                print(f"[YTMetadata]     {lang}: {e}")
 
-        return f"🎬 [{lbl}] {ok+2}/{len(lang_list)+2} files in YT/{lbl}/MD/"
+        return f"[{lbl}] {ok+2}/{len(lang_list)+2} files in YT/{lbl}/MD/"
 
     # ── Standard metadata generators ─────────────────────────────────────────
 
@@ -550,25 +554,17 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
     def _generate_youtube_description(self, topic, start_year, end_year, video_duration,
                                        channel="PlayOwnAi", channel_lower="playownai",
                                        website="youtube.com/@PlayOwnAi") -> str:
-        return f"""🎬 {topic} Race {start_year}-{end_year}: Complete Data Visualization
-
-📊 We explore the evolution of {topic} from {start_year} to {end_year}. Watch how market leaders changed!
-
-🔔 Subscribe to @{channel} for more data-driven insights!
-
-📈 DATA SOURCE: Comprehensive market data tracking {topic.lower()} popularity from {start_year} to {end_year}.
-
-🎯 KEY INSIGHTS: Market trends • Year-by-year leader changes • Growth patterns • Competitive landscape
-
-📱 FOLLOW US:
+        return f"""{topic} Race {start_year}-{end_year}: Complete Data Visualization
+We explore the evolution of {topic} from {start_year} to {end_year}. Watch how market leaders changed!
+Subscribe to @{channel} for more data-driven insights!
+DATA SOURCE: Comprehensive market data tracking {topic.lower()} popularity from {start_year} to {end_year}.
+KEY INSIGHTS: Market trends • Year-by-year leader changes • Growth patterns • Competitive landscape
+FOLLOW US:
 • YouTube: @{channel}
 • LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
 • Website: {website}
-
 #DataVisualization #{topic.replace(' ', '')} #MarketAnalysis #TechTrends
-
----
-⚠️ Disclaimer: Educational content. Data compiled from public sources.
+Disclaimer: Educational content. Data compiled from public sources.
 """.strip()
 
     def _generate_youtube_tags(self, topic, channel="PlayOwnAi") -> list:
@@ -594,7 +590,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
     # ── Thumbnail generator ───────────────────────────────────────────────────
 
     def _generate_thumbnails(self, topic, start_year, end_year, output_dir, clean,
-                              video_formats, animation_video_formats,
+                               video_formats, animation_video_formats,
                               csv_path="", channel="PlayOwnAi") -> str:
         """
         Save thumbnails to:
@@ -605,7 +601,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
         try:
             from PIL import Image, ImageDraw, ImageFont
         except ImportError:
-            return "⚠️  Pillow not installed — thumbnails skipped"
+            return "Pillow not installed — thumbnails skipped"
 
         # ── Build target lists ────────────────────────────────────────────────
         # debate_targets: rendered from MD files — no CSV required
@@ -633,7 +629,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
         def _save_img(img, th_dir):
             os.makedirs(th_dir, exist_ok=True)
             for fname, fmt_name, kw in [
-                (f"{clean}.png", "PNG",  {}),
+                (f"{clean}.png", "PNG", {}),
                 (f"{clean}.jpg", "JPEG", {"quality": 95}),
             ]:
                 fpath = os.path.join(th_dir, fname)
@@ -641,10 +637,10 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                     img.save(fpath, fmt_name, **kw)
                     kb  = os.path.getsize(fpath) // 1024
                     rel = os.path.relpath(fpath, output_dir)
-                    print(f"[YTMetadata]   📄 Saved: {rel} ({kb} KB)")
+                    print(f"[YTMetadata]   Saved: {rel} ({kb} KB)")
                 else:
                     rel = os.path.relpath(fpath, output_dir)
-                    print(f"[YTMetadata]   ⏭️  Exists: {rel}")
+                    print(f"[YTMetadata]   Exists: {rel}")
             saved.append(os.path.relpath(th_dir, output_dir))
 
         # ── Debate thumbnails (no CSV) ────────────────────────────────────────
@@ -653,7 +649,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
             img = self._render_debate_thumbnail(
                 topic, output_dir, channel, is_short=is_short)
             _save_img(img, th_dir)
-            print(f"[YTMetadata]   🎭 Debate thumbnail → {os.path.relpath(th_dir, output_dir)}")
+            print(f"[YTMetadata]   Debate thumbnail → {os.path.relpath(th_dir, output_dir)}")
 
         # ── Bar-race thumbnails (need CSV) ────────────────────────────────────
         if bar_targets:
@@ -667,7 +663,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                     except Exception:
                         pass
             if csv_data is None:
-                msg = f"⚠️  CSV not found — bar-race thumbnails skipped for: {bar_targets}"
+                msg = f"CSV not found — bar-race thumbnails skipped for: {bar_targets}"
                 print(f"[YTMetadata]   {msg}")
             else:
                 img = self._render_thumbnail(topic, start_year, end_year, csv_data, channel)
@@ -675,8 +671,8 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                     _save_img(img, th_dir)
 
         if not saved:
-            return "⚠️  No thumbnails generated"
-        return f"✅ Thumbnails saved to: {', '.join(saved)}"
+            return "No thumbnails generated"
+        return f"Thumbnails saved to: {', '.join(saved)}"
 
     def _render_debate_thumbnail(self, topic, output_dir, channel,
                                   is_short=False) -> "Image":
@@ -685,15 +681,15 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
         Layout:
           ┌─────────────────────────────────────────┐
           │  [AI DEBATE]  badge        top-right fmt │
-          │                                          │
-          │   <TOPIC  (2 lines, large)>              │
+          │                                           │
+          │    <TOPIC  (2 lines, large) >              │
           │                                          │
           │  ┌──────────┐  ┌──────────┐  ┌────────┐ │
-          │  │ ✅ PRO   │  │ ❌ CON  │  │ ⚖️ VRD │ │
-          │  │ snippet  │  │ snippet  │  │ snippet│ │
+          │  │ PRO   │  │ CON  │  │ VRD │ │
+          │  │ snip pet  │  │ snippet  │  │ snippet│ │
           │  └──────────┘  └──────────┘  └────────┘ │
           │                                          │
-          │         @channel              footer     │
+          │         @channel              footer      │
           └─────────────────────────────────────────┘
         For Shorts (is_short=True) only the strongest argument panel is shown.
         """
@@ -777,13 +773,13 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                         raw = re.sub(r"^#+\s.*$", "", raw, flags=re.MULTILINE)
                         raw = re.sub(r"^\s*[-*]\s+", "", raw, flags=re.MULTILINE)
                         raw = re.sub(r"\*+", "", raw)
-                        # Strip ALL-CAPS section labels: "PROPOSITION:", "VERDICT:",
-                        # "SUMMARY OF PROPOSITION:", "OPENING STATEMENT:", etc.
+                        # Strip ALL-CAPS section labels: "PROPOSITION: ", "VERDICT: ",
+                        # "SUMMARY OF PROPOSITION: ", "OPENING STATEMENT: ", etc.
                         raw = re.sub(r"\b[A-Z][A-Z\s]{3,}:\s*", "", raw)
-                        raw = re.sub(r"\n{2,}", " ", raw).strip()
+                        raw = re.sub(r"\n{2,}", "  ", raw).strip()
                         sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", raw)
                                  if len(s.strip()) > 15]
-                        return " ".join(sents[:n_sent])
+                        return "  ".join(sents[:n_sent])
                     except Exception:
                         pass
             return ""
@@ -794,14 +790,14 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
 
         # ── BADGE: top-left ───────────────────────────────────────────────────
         badge_f = _font(38)
-        badge_label = "🎭 AI DEBATE"
+        badge_label = "AI DEBATE"
         bb = draw.textbbox((0, 0), badge_label, font=badge_f)
         bw, bh = bb[2] - bb[0] + 40, bb[3] - bb[1] + 20
         draw.rounded_rectangle([(40, 38), (40 + bw, 38 + bh)],
-                                radius=14, fill=(40, 60, 160))
+                                 radius=14, fill=(40, 60, 160))
         draw.text((40 + 20, 38 + 10), badge_label, fill=WHITE, font=badge_f)
 
-        # ── fmt badge: top-right ──────────────────────────────────────────────
+        # ── fmt badge: top-right ────────────────────────────────────────────
         fmt_label = "#SHORTS" if is_short else "HD"
         fmt_col   = GOLD if is_short else CYAN
         fmt_f     = _font(38)
@@ -816,7 +812,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
         title_f = _font(88)
         words   = topic.split()
         mid     = len(words) // 2
-        lines   = [" ".join(words[:mid]), " ".join(words[mid:])]
+        lines   = ["  ".join(words[:mid]), "  ".join(words[mid:])]
         ty      = 120
         for line in lines:
             if not line: continue
@@ -838,12 +834,12 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
             label_f    = _font(52)
             body_f     = _font_reg(40)
             panels = [
-                ("✅  PRO ARGUMENT", GREEN, (30, 55, 35),  pro_txt),
-                ("⚖️  VERDICT",      GOLD,  (55, 45, 20),  dec_txt),
+                ("PRO ARGUMENT", GREEN, (30, 55, 35), pro_txt),
+                ("VERDICT",      GOLD,  (55, 45, 20), dec_txt),
             ]
             gap      = 28
             pw       = W - 160   # full width minus margins
-            panel_h  = (H - panel_y - 160 - gap) // 2   # split remaining height
+            panel_h  = (H - panel_y - 160 - gap) // 2    # split remaining height
             px, py   = 80, panel_y
 
             for label, label_col, bg_col, body in panels:
@@ -868,9 +864,9 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
             label_f    = _font(44)
             body_f     = _font_reg(34)
             panels = [
-                ("✅  PRO",     GREEN, (30, 55, 35),  pro_txt),
-                ("❌  CON",     RED,   (55, 25, 25),  con_txt),
-                ("⚖️  VERDICT", GOLD,  (55, 45, 20),  dec_txt),
+                ("PRO",     GREEN, (30, 55, 35), pro_txt),
+                ("CON",     RED,   (55, 25, 25), con_txt),
+                ("VERDICT", GOLD,  (55, 45, 20), dec_txt),
             ]
             n_panels  = 3
             gap       = 30
@@ -906,7 +902,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
         W, H     = 1920, 1080
         bg       = (15, 15, 25)
         colors   = [(255,82,82),(82,255,166),(82,166,255),(255,200,82),
-                    (200,82,255),(82,255,255),(255,128,0),(128,255,0)]
+                     (200,82,255),(82,255,255),(255,128,0),(128,255,0)]
         txt_col  = (255, 255, 255)
         pri_col  = (100, 200, 255)
 
@@ -927,7 +923,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
         lf, mf, sf = _font(80), _font(55), _font(36)
         ty = 60
         words = topic.split()
-        for line in [" ".join(words[:4]), " ".join(words[4:])]:
+        for line in ["  ".join(words[:4]), "  ".join(words[4:])]:
             if not line: continue
             bb = draw.textbbox((0,0), line, font=lf)
             draw.text(((W-(bb[2]-bb[0]))//2, ty), line, fill=txt_col, font=lf)
@@ -999,9 +995,9 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                         cc_dir  = os.path.join(output_dir, "YT", "debate", real_fmt, "CC")
                         display = f"debate/{real_fmt}"
                         cc_sources.append((found[0], cc_dir, display))
-                        print(f"[YTMetadata] 📝 Found debate CC [{real_fmt}]: {os.path.basename(found[0])}")
+                        print(f"[YTMetadata] Found debate CC [{real_fmt}]: {os.path.basename(found[0])}")
                     else:
-                        print(f"[YTMetadata] ⚠️  No CC file for debate/{real_fmt} (optional)")
+                        print(f"[YTMetadata] No CC file for debate/{real_fmt} (optional)")
                 continue
 
             # ── ANIMATION: expand to real fmt names ───────────────────────────
@@ -1026,9 +1022,9 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                     cc_dir  = os.path.join(output_dir, "YT", real_fmt, "CC")
                     display = real_fmt
                     cc_sources.append((merged[0], cc_dir, display))
-                    print(f"[YTMetadata] 📝 Found CC [{real_fmt}]: {os.path.basename(merged[0])}")
+                    print(f"[YTMetadata] Found CC [{real_fmt}]: {os.path.basename(merged[0])}")
                 else:
-                    print(f"[YTMetadata] ⚠️  No CC file for fmt={real_fmt}")
+                    print(f"[YTMetadata] No CC file for fmt={real_fmt}")
 
         # Standard cc_en.txt fallback — only when non-debate formats are active.
         # debate-only pipeline already has per-fmt CC; cc_en.txt must not spill
@@ -1041,12 +1037,12 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
             display  = first_rf
             if not any(s[1] == cc_dir for s in cc_sources):
                 cc_sources.append((std_cc, cc_dir, display))
-                print(f"[YTMetadata] 📝 Found standard CC: cc_en.txt → {display}")
+                print(f"[YTMetadata] Found standard CC: cc_en.txt → {display}")
         elif not has_non_debate:
-            print(f"[YTMetadata] ⏭️  Skipping cc_en.txt fallback — debate-only pipeline")
+            print(f"[YTMetadata] Skipping cc_en.txt fallback — debate-only pipeline")
 
         if not cc_sources:
-            msg = "⏭️  No CC source files found (optional for debate)"
+            msg = "No CC source files found (optional for debate)"
             print(f"[YTMetadata] {msg}")
             return msg
 
@@ -1054,18 +1050,18 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
             with open(src_path, "r", encoding="utf-8") as f:
                 en_text = f.read().strip()
             if not en_text:
-                print(f"[YTMetadata]   ⚠️  {os.path.basename(src_path)} empty — skipping")
+                print(f"[YTMetadata]   {os.path.basename(src_path)} empty — skipping")
                 continue
             os.makedirs(cc_dir, exist_ok=True)
 
             en_out = os.path.join(cc_dir, "en.txt")
             if not os.path.exists(en_out):
                 with open(en_out, "w", encoding="utf-8") as f: f.write(en_text)
-                print(f"[YTMetadata]   📄 Saved: YT/{display}/CC/en.txt")
+                print(f"[YTMetadata]   Saved: YT/{display}/CC/en.txt")
             else:
-                print(f"[YTMetadata]   ⏭️  Exists: YT/{display}/CC/en.txt")
+                print(f"[YTMetadata]   Exists: YT/{display}/CC/en.txt")
 
-            print(f"[YTMetadata]   🌍 Translating YT/{display}/CC/ → {len(lang_list)} languages …")
+            print(f"[YTMetadata]   Translating YT/{display}/CC/ → {len(lang_list)} languages …")
             ok = 1
             for lang in lang_list:
                 out = os.path.join(cc_dir, f"{lang}.txt")
@@ -1074,16 +1070,16 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                 try:
                     translated = _google_translate(en_text, lang)
                     with open(out, "w", encoding="utf-8") as f: f.write(translated)
-                    print(f"[YTMetadata]     ✅ YT/{display}/CC/{lang}.txt ({LANG_NAMES.get(lang, lang)})")
+                    print(f"[YTMetadata]     YT/{display}/CC/{lang}.txt ({LANG_NAMES.get(lang, lang)})")
                     ok += 1; translated_total += 1
                     import time as _t; _t.sleep(0.2)
                 except Exception as e:
-                    print(f"[YTMetadata]     ❌ {display}/CC/{lang}: {e}")
+                    print(f"[YTMetadata]     {display}/CC/{lang}: {e}")
 
             total = len(lang_list) + 1
-            report.append(f"✅ [{display}] {ok}/{total} CC files in YT/{display}/CC/")
+            report.append(f"[{display}] {ok}/{total} CC files in YT/{display}/CC/")
 
-        summary = (f"📝 CC translations: {translated_total} new, {skipped_total} skipped\n"
+        summary = (f"CC translations: {translated_total} new, {skipped_total} skipped\n"
                    + "\n".join(report))
         print(f"[YTMetadata] {summary}")
         return summary
@@ -1128,14 +1124,14 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
             m    = _re.match(r"cc_([A-Za-z0-9]+)_([A-Za-z-]+)\.txt$", name)
             if not m: continue
             p1, lang = m.group(1), m.group(2)
-            known = {"HD","2K","4K","8K","Shorts","ShortsHD","Shorts4K"}
+            known = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
             fp    = p1 if p1 in known else "standard"
             ddir  = os.path.join(yt_dir, fp, "CC"); os.makedirs(ddir, exist_ok=True)
             np    = os.path.join(ddir, f"{lang}.txt")
             if not os.path.exists(np): os.rename(old, np); moved += 1
             else: os.remove(old)
 
-        if moved: print(f"[YTMetadata] ✅ Migration: {moved} files moved")
+        if moved: print(f"[YTMetadata] Migration: {moved} files moved")
 
         # ── Rename stale YT/Debate/ → YT/debate/ (Linux case-sensitive fix) ──────
         import shutil as _sh
@@ -1145,7 +1141,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
             if not os.path.exists(new_low):
                 _sh.copytree(old_cap, new_low)
                 _sh.rmtree(old_cap)
-                print(f"[YTMetadata] 🔄 Renamed: YT/Debate/ → YT/debate/")
+                print(f"[YTMetadata] Renamed: YT/Debate/ → YT/debate/")
             else:
                 # Both exist — merge missing files then remove old
                 for root, dirs, files in os.walk(old_cap):
@@ -1158,7 +1154,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                             _sh.copy2(os.path.join(root, fname), dst_f)
                             moved += 1
                 _sh.rmtree(old_cap)
-                print(f"[YTMetadata] 🔄 Merged YT/Debate/ into YT/debate/")
+                print(f"[YTMetadata] Merged YT/Debate/ into YT/debate/")
 
         # ── Rename stale TH/ → Th/ under YT/debate/{fmt}/ ───────────────────────
         if os.path.exists(new_low):
@@ -1168,12 +1164,12 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                 new_th = os.path.join(fmt_entry.path, "Th")
                 if os.path.exists(old_th) and not os.path.exists(new_th):
                     _sh.move(old_th, new_th)
-                    print(f"[YTMetadata] 🔄 Renamed: YT/debate/{fmt_entry.name}/TH → Th")
+                    print(f"[YTMetadata] Renamed: YT/debate/{fmt_entry.name}/TH → Th")
 
         # ── Migrate old flat YT/debate/MD/ → YT/debate/{fmt}/MD/ ────────────────
         old_debate_md = os.path.join(yt_dir, "debate", "MD")
         if os.path.exists(old_debate_md):
-            real_fmts = [f for f in video_formats if f in {"HD","2K","4K","8K","Shorts","ShortsHD","Shorts4K"}] or ["HD"]
+            real_fmts = [f for f in video_formats if f in {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}] or ["HD"]
             for fname in os.listdir(old_debate_md):
                 src = os.path.join(old_debate_md, fname)
                 if not os.path.isfile(src): continue
@@ -1184,22 +1180,22 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                     if not os.path.exists(dst):
                         _sh.copy2(src, dst)
                         moved += 1
-                        print(f"[YTMetadata] ✅ Debate MD migrated: debate/MD/{fname} → debate/{rf}/MD/{fname}")
+                        print(f"[YTMetadata] Debate MD migrated: debate/MD/{fname} → debate/{rf}/MD/{fname}")
             try:
                 remaining = [f for f in os.listdir(old_debate_md)
                              if os.path.isfile(os.path.join(old_debate_md, f))]
                 if not remaining:
                     _sh.rmtree(old_debate_md)
-                    print(f"[YTMetadata] 🗑️  Removed old: YT/debate/MD/")
+                    print(f"[YTMetadata] Removed old: YT/debate/MD/")
             except Exception: pass
-        if moved: print(f"[YTMetadata] ✅ Migration total: {moved} files moved")
+        if moved: print(f"[YTMetadata] Migration total: {moved} files moved")
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def _cleanup_and_rename(self, output_dir, video_formats, channel, topic):
         import re, glob as _glob
         topic_slug = "_".join(re.findall(r"\w+", topic)[:4]) if topic else "Video"
-        print(f"[YTMetadata] 🧹 Cleanup starting — formats={video_formats} topic_slug={topic_slug}")
+        print(f"[YTMetadata] Cleanup starting — formats={video_formats} topic_slug={topic_slug}")
 
         glob_fmts = set()
         for pat in ["Final_*.mp4", "Merge_bar_race_*.mp4"]:
@@ -1207,7 +1203,7 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
                 m = re.search(r"(?:Final_|Merge_bar_race_)(.+)\.mp4$", os.path.basename(p))
                 if m: glob_fmts.add(m.group(1))
 
-        _real  = {"HD","2K","4K","8K","Shorts","ShortsHD","Shorts4K"}
+        _real  = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
         base   = [f for f in video_formats if f in _real]
         all_fmts = list(dict.fromkeys(base + sorted(glob_fmts)))
         print(f"[YTMetadata]   Rename targets: {all_fmts} (inputs={video_formats} glob={sorted(glob_fmts)})")
@@ -1215,14 +1211,14 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
         for fmt in all_fmts:
             dst = os.path.join(output_dir, f"{channel}_{topic_slug}_{fmt}.mp4")
             if os.path.exists(dst):
-                print(f"[YTMetadata] ⏭️  Already exists: {os.path.basename(dst)}"); continue
+                print(f"[YTMetadata] Already exists: {os.path.basename(dst)}"); continue
             src = next((p for p in [
                 os.path.join(output_dir, f"Final_{fmt}.mp4"),
                 os.path.join(output_dir, f"Merge_bar_race_{fmt}.mp4"),
             ] if os.path.exists(p)), None)
             if src:
                 os.rename(src, dst)
-                print(f"[YTMetadata] ✅ Renamed: {os.path.basename(src)} → {os.path.basename(dst)}")
+                print(f"[YTMetadata] Renamed: {os.path.basename(src)} → {os.path.basename(dst)}")
             else:
                 print(f"[YTMetadata]    No source found for fmt={fmt}")
 
@@ -1233,16 +1229,16 @@ Should {topic}? This debate explores both sides with evidence-based arguments.
             if any(fname.startswith(p) for p in
                    ["intro_", "bar_race_", "definition_video_", "Merge_bar_race_", "Final_"]):
                 os.remove(fpath)
-                print(f"[YTMetadata] 🗑️  Deleted: {fname}")
+                print(f"[YTMetadata] Deleted: {fname}")
 
         cc_en = os.path.join(output_dir, "cc_en.txt")
         if os.path.exists(cc_en):
             os.remove(cc_en)
-            print(f"[YTMetadata] 🗑️  Deleted old narration: cc_en.txt")
+            print(f"[YTMetadata] Deleted old narration: cc_en.txt")
 
         for pat in ["_temp_*.mp4", "_norm_*.mp4", "_stage*.mp4", "_concat_*.txt"]:
             for p in _glob.glob(os.path.join(output_dir, pat)):
                 os.remove(p)
-                print(f"[YTMetadata] 🗑️  Glob deleted: {os.path.basename(p)}")
+                print(f"[YTMetadata] Glob deleted: {os.path.basename(p)}")
 
-        print(f"[YTMetadata] 🧹 Cleanup done")
+        print(f"[YTMetadata] Cleanup done")

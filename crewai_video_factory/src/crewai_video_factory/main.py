@@ -198,7 +198,10 @@ def load_config():
             'debate_secs_per_line':       3.5,
             'debate_max_chars':           10000,
             'debate_merge_enabled':       False,      # ✅ ADDED
+            'debate_background_enabled':    False,
             'debate_bg_opacity':          255,
+            'debate_background_prompt':    '',
+            'image_gen_backend':           'auto',
             'tts_voices':                 {},
             'intro_context':              'bar_race',  # bar_race | debate | definition
             'intro_slug':                 '',          # custom narration line 2
@@ -365,9 +368,13 @@ def run():
     pub_on = inputs.get('publisher', False)
     print(f"📤 Publisher:        {pub_on}")
     if pub_on:
-        upload_on = inputs.get('upload_youtube_video', False)
+        upload_on  = inputs.get('upload_youtube_video', False)
+        cc_only_on = inputs.get('upload_cc', False) and not upload_on
         print(f"   ▶️  YouTube Upload:  {upload_on}" +
               (f"  [{inputs.get('upload_privacy','private')}]" if upload_on else ""))
+        if cc_only_on:
+            print(f"   📝 CC/MD Update:    True  "
+                  f"[cc_limit={inputs.get('upload_cc_limit',0)}, md_limit={inputs.get('upload_md_limit',0)}]")
 
     # ── Social block ─────────────────────────────────────────
     soc_on = inputs.get('social', False)
@@ -508,7 +515,8 @@ def run():
             inputs['_metadata_video_formats'] = _meta_fmts
             final_tasks.append(full_crew.tasks[10])  # generate_youtube_metadata
 
-        if inputs.get('upload_youtube_video', False):
+        # Run upload task if uploading video OR if CC/MD update needed for existing video
+        if inputs.get('upload_youtube_video', False) or inputs.get('upload_cc', False):
             final_tasks.append(full_crew.tasks[11])  # upload_to_youtube
         if inputs.get('social_share_enabled', False):
             final_tasks.append(full_crew.tasks[12])  # share_to_social

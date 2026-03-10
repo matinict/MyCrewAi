@@ -25,18 +25,27 @@ from pydantic import BaseModel, Field
 FONT_BOLD    = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 FONT_REGULAR = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 
+# ── Image generation (per-paragraph backgrounds) ───────────────────────────
+try:
+    from image_gen_tool import generate_background, _generate_gradient
+    _IMAGE_GEN_AVAILABLE = True
+except ImportError:
+    _IMAGE_GEN_AVAILABLE = False
+    def generate_background(*a, **kw): return None
+    def _generate_gradient(w, h, path, prompt=""): return None
+
 # ── DEFAULT VOICE CONFIG (only used if data.json provides nothing) ─────────
 DEFAULT_PIPER_VOICES = {
     "propose": {
-        "model":    "models/alba_medium.onnx",
+        "model":   "models/alba_medium.onnx",
         "speed":  1.05,
     },
     "oppose": {
-        "model":    "models/en_GB-scott-medium.onnx",
+        "model":   "models/en_GB-scott-medium.onnx",
         "speed":  1.0,
     },
     "decide": {
-        "model":    "models/joe_medium.onnx",
+        "model":   "models/joe_medium.onnx",
         "speed":  0.95,
     },
 }
@@ -47,6 +56,7 @@ DEFAULT_EDGE_TTS_VOICES = {
     "decide":  "en-GB-RyanNeural",
 }
 
+
 def _clean_text(text: str) -> str:
     """
     Convert Mathematical Alphanumeric Symbols (e.g. italic 𝘔𝘪𝘥-𝘭𝘦𝘷𝘦𝘭) to plain ASCII
@@ -55,13 +65,14 @@ def _clean_text(text: str) -> str:
     import unicodedata
     replacements = {
         '–': '-', '—': '--', '…': '...',
-        '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"',
+        '‘': "'", '’': "'", '"': '"', '"': '"',
         '·': '.', '•': '-',
     }
     for uni, ascii_equiv in replacements.items():
         text = text.replace(uni, ascii_equiv)
     normalized = unicodedata.normalize('NFKD', text)
     return normalized.encode('ascii', 'ignore').decode('ascii')
+
 
 class DebateVideoInput(BaseModel):
     """Input schema for DebateVideoTool — ALL from data.json."""
@@ -77,8 +88,12 @@ class DebateVideoInput(BaseModel):
     video_fps:            int   = Field(default=30, description="Output video frame rate")
     tts_engine:           str   = Field(default="gtts", description="TTS engine: 'gtts', 'edge-tts', or 'piper'")
     tts_voices:           dict  = Field(default_factory=dict, description="Per-section voice overrides from data.json")
-    lang_suffix:          str   = Field(default="En", description="Language suffix for output filenames. e.g. 'En', 'Bn', 'Fr'")
-    bg_opacity:           int   = Field(default=255, description="Background opacity: 0=fully transparent, 255=pure black. e.g. 180=semi-transparent dark")
+    bg_opacity:           int   = Field(default=150, description="Background opacity 0-255")
+    debate_background_enabled: bool = Field(default=False, description="Enable AI-generated per-paragraph backgrounds")
+    debate_background_prompt: str = Field(default="", description="Base prompt for background image generation")
+    image_gen_backend:    str   = Field(default="auto", description="Image gen backend: auto|lcm_onnx|gradient")
+    lang_suffix:          str   = Field(default="En", description="Language suffix for output files")
+
 
 class DebateVideoTool(BaseTool):
     """
@@ -95,7 +110,7 @@ class DebateVideoTool(BaseTool):
         "Reads propose.md (PRO), oppose.md (CON), decide.md (Moderator) from output_dir.  "
         "ALL CONFIG FROM data.json — tts_voices defines piper/edge-tts voices.  "
         "Output: debate_video_[format]_with_audio.mp4 (intermediate for merge tool).  "
-        "Triggered by debate_video_enabled=true.  "
+        "Triggered by debate_video_enabled=true. "
     )
     args_schema: Type[BaseModel] = DebateVideoInput
 
@@ -113,8 +128,11 @@ class DebateVideoTool(BaseTool):
         video_fps: int = 30,
         tts_engine: str = "gtts",
         tts_voices: dict = None,
+        bg_opacity: int = 150,
+        debate_background_enabled: bool = False,
+        debate_background_prompt: str = "",
+        image_gen_backend: str = "auto",
         lang_suffix: str = "En",
-        bg_opacity: int = 255,
     ) -> str:
 
         if not debate_video_enabled:
@@ -153,26 +171,16 @@ class DebateVideoTool(BaseTool):
             output_dir = os.path.join(_project_root, output_dir)
         os.makedirs(output_dir, exist_ok=True)
 
-        # ── Load debate content (lang-suffixed md files) ─────────────────────
-        _lang = lang_suffix if lang_suffix else "En"
-        propose_file = os.path.join(output_dir, f"propose_{_lang}.md")
-        oppose_file  = os.path.join(output_dir, f"oppose_{_lang}.md")
-        decide_file  = os.path.join(output_dir, f"decide_{_lang}.md")
+        # ── Load debate content ────────────────────────────────────────────
+        propose_file = os.path.join(output_dir, "propose.md")
+        oppose_file  = os.path.join(output_dir, "oppose.md")
+        decide_file  = os.path.join(output_dir, "decide.md")
 
-        # Fallback to plain .md if lang-suffixed not found (backward compat)
-        for label, path, fallback in [
-            (f"propose_{_lang}.md", propose_file, os.path.join(output_dir, "propose.md")),
-            (f"oppose_{_lang}.md",  oppose_file,  os.path.join(output_dir, "oppose.md")),
-            (f"decide_{_lang}.md",  decide_file,  os.path.join(output_dir, "decide.md")),
-        ]:
+        for label, path in [("propose.md", propose_file),
+                             ("oppose.md",  oppose_file),
+                             ("decide.md",  decide_file)]:
             if not os.path.exists(path):
-                if os.path.exists(fallback):
-                    print(f"[DebateVideo] ⚠️  {label} not found — using fallback {os.path.basename(fallback)}")
-                    if 'propose' in label: propose_file = fallback
-                    elif 'oppose' in label: oppose_file = fallback
-                    else: decide_file = fallback
-                else:
-                    return f"❌ {label} not found in {output_dir}"
+                return f"❌ {label} not found in {output_dir}"
 
         with open(propose_file, 'r', encoding='utf-8') as f:
             pro_text = f.read().strip()
@@ -193,11 +201,10 @@ class DebateVideoTool(BaseTool):
         for fmt in video_formats:
             try:
                 # ── File paths (intermediate — merge tool handles final naming) ──
-                _lang = lang_suffix if lang_suffix else "En"
-                silent_video = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}.mp4")
-                audio_file   = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_audio.mp3")
-                final_merged = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_with_audio.mp4")
-                cc_path      = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_cc.txt")
+                silent_video = os.path.join(output_dir, f"debate_video_{fmt}.mp4")
+                audio_file   = os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")
+                final_merged = os.path.join(output_dir, f"debate_video_{fmt}_with_audio.mp4")
+                cc_path      = os.path.join(output_dir, f"debate_video_{fmt}_cc_en.txt")
 
                 # ✅ SMART SKIP: Check if debate video with audio already exists
                 if os.path.exists(final_merged):
@@ -211,22 +218,11 @@ class DebateVideoTool(BaseTool):
                         os.remove(_stale)
                         print(f"[DebateVideo] 🗑️  Removed stale: {os.path.basename(_stale)}")
 
-                # ── Parse lines ─────────────────────────────────────────────
-                # HD/4K/landscape formats → full content, no filtering
-                # Shorts/portrait formats → short-form (ARG 1 + COUNTER-ARG 1 + DECISION only)
-                _is_short_form = fmt in ("Shorts", "ShortsHD", "Shorts4K")
-                raw_lines = self._parse_lines(raw, short_form=_is_short_form)
-
-                # Append disclaimer + subscribe line to video lines so audio & video end together
-                _disclaimer_text = _clean_text('This video is created for educational and research purposes, shared to spread knowledge and awareness.')
-                _subscribe_text  = _clean_text(f'Subscribe to {channel} for more insights.')
-                raw_lines.append((_disclaimer_text, 'decide'))
-                raw_lines.append((_subscribe_text, 'decide'))
-
+                # ── Parse lines ───────────────────────────────────────────
+                raw_lines   = self._parse_lines(raw)
                 spoken_text = self._lines_to_spoken(raw_lines, topic, channel)
 
-                print(f"[DebateVideo] [{fmt}] Parsed {len(raw_lines)} lines   "
-                      f"({'short-form: opening+ARG1/COUNTER-ARG1, DECISION-only verdict' if _is_short_form else 'full content'})")
+                print(f"[DebateVideo] [{fmt}] Parsed {len(raw_lines)} lines")
 
                 # ── Save narration text ───────────────────────────────────
                 with open(cc_path, 'w', encoding='utf-8') as _f:
@@ -239,102 +235,37 @@ class DebateVideoTool(BaseTool):
                 w, h        = (1080, 1920) if is_portrait else (1920, 1080)
                 print(f"\n[DebateVideo] [{fmt}] {w}x{h}  secs_per_line={secs_per_line}")
 
-                _bg_color = tuple(int(x) for x in str(bg_opacity).split(", "))[:3] if ", " in str(bg_opacity) else (0, 0, 0)
                 self._render(raw_lines, out_path, w, h, secs_per_line,
                              channel, watermark_enabled, watermark_text,
-                             video_fps, topic=topic, bg_opacity=bg_opacity, bg_color=_bg_color)
+                             topic=topic,
+                             bg_enabled=debate_background_enabled,
+                             bg_opacity=bg_opacity,
+                             topic_prompt=debate_background_prompt,
+                             image_gen_backend=image_gen_backend)
 
                 if not os.path.exists(out_path):
                     errors.append(f"❌ {fmt}: video missing after render")
                     continue
 
                 # ── TTS audio ─────────────────────────────────────────────
-                audio_path = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_audio.mp3")
+                audio_path = os.path.join(output_dir, f"debate_video_{fmt}_audio.mp3")
                 video_dur  = self._get_duration(out_path)
-
-                # Build per-section spoken text
-                _pro_spoken = self._section_to_spoken(pro_text,       "propose", channel, short_form=_is_short_form)
-                _con_spoken = self._section_to_spoken(con_text,       "oppose",  channel, short_form=_is_short_form)
-                _mod_spoken = self._section_to_spoken(moderator_text, "decide",  channel, short_form=_is_short_form)
-
-                # spoken_text_no_sub = pro + con + mod only
-                _spoken_no_sub = f"{_pro_spoken} {_con_spoken} {_mod_spoken}".strip()
-
-                # Separate gTTS clips for disclaimer and subscribe (independent — if one fails the other still plays)
-                _disclaimer_spoken = _clean_text(
-                    'This video is created for educational and research purposes, '
-                    'shared to spread knowledge and awareness.'
-                )
-                _subscribe_spoken = _clean_text(f'Subscribe to {channel} for more insights.')
-
-                _pre_sub_audio    = audio_path.replace('.mp3', '_presub.mp3')
-                _disclaimer_audio = audio_path.replace('.mp3', '_disclaimer.mp3')
-                _subscribe_audio  = audio_path.replace('.mp3', '_subscribe.mp3')
-
-                # 1. Generate main debate audio (PRO + CON + MOD, engine-specific voices)
                 self._generate_tts(
-                    _spoken_no_sub, _pre_sub_audio,
-                    max(1.0, video_dur - secs_per_line * 2 - 1.0),
-                    tts_engine,
-                    pro_text=_pro_spoken,
-                    con_text=_con_spoken,
-                    mod_text=_mod_spoken,
+                    spoken_text, audio_path, video_dur, tts_engine,
+                    pro_text=self._section_to_spoken(pro_text,   "propose", channel),
+                    con_text=self._section_to_spoken(con_text,   "oppose",  channel),
+                    mod_text=self._section_to_spoken(moderator_text,  "decide", channel),
                     voices=_voices,
                 )
 
-                # 2. Generate disclaimer clip via gTTS (independent temp file)
-                self._tts_gtts(_disclaimer_spoken, _disclaimer_audio)
-                print(f"[DebateVideo] 🎤 Disclaimer: {'✅' if os.path.exists(_disclaimer_audio) else '⚠️ failed'}")
-
-                # 3. Generate subscribe clip via gTTS (independent temp file)
-                self._tts_gtts(_subscribe_spoken, _subscribe_audio)
-                print(f"[DebateVideo] 🎤 Subscribe: {'✅' if os.path.exists(_subscribe_audio) else '⚠️ failed'}")
-
-                # 4. Concat: main + disclaimer + subscribe → final audio_path
-                _clips = [_pre_sub_audio, _disclaimer_audio, _subscribe_audio]
-                _clips_exist = [c for c in _clips if os.path.exists(c)]
-
-                if len(_clips_exist) >= 1:
-                    if len(_clips_exist) == 1:
-                        # Only main audio — just rename
-                        os.replace(_clips_exist[0], audio_path)
-                        print(f"[DebateVideo] 🎤 Only main audio available — no disclaimer/subscribe appended")
-                    else:
-                        # Build ffmpeg inputs + filter_complex for N clips
-                        _inputs = []
-                        for c in _clips_exist:
-                            _inputs += ["-i", c]
-                        n = len(_clips_exist)
-                        _resample = " ".join(f"[{i}:a]aresample=44100[a{i}];" for i in range(n))
-                        _concat_in = " ".join(f"[a{i}]" for i in range(n))
-                        _filter = f"{_resample}{_concat_in}concat=n={n}:v=0:a=1[aout]"
-                        _r = subprocess.run(
-                            ["ffmpeg", "-y"] + _inputs +
-                            ["-filter_complex", _filter,
-                             "-map", "[aout]", "-q:a", "2", audio_path],
-                            capture_output=True, check=False
-                        )
-                        if _r.returncode == 0 and os.path.exists(audio_path):
-                            print(f"[DebateVideo] 🎤 Final audio assembled ({len(_clips_exist)} clips) ✅")
-                        else:
-                            print(f"[DebateVideo] ⚠️ Concat failed: {_r.stderr.decode()[:120]}")
-                            os.replace(_pre_sub_audio, audio_path)
-                    # Cleanup temp clips
-                    for _tmp in [_pre_sub_audio, _disclaimer_audio, _subscribe_audio]:
-                        if os.path.exists(_tmp):
-                            os.remove(_tmp)
-
                 # ── Merge audio + video ───────────────────────────────────
                 if os.path.exists(audio_path):
-                    _audio_dur = self._get_duration(audio_path)
-                    print(f"[DebateVideo] 🔊 audio={_audio_dur:.1f}s  video={video_dur:.1f}s   "
-                          f"delta={_audio_dur - video_dur:+.1f}s")
-                    self._merge_audio_video(out_path, audio_path, final_merged, max(video_dur, _audio_dur))
+                    self._merge_audio_video(out_path, audio_path, final_merged, video_dur)
 
                     merged_kb = os.path.getsize(final_merged) // 1024
                     results.append(
-                        f"✅ {fmt}: {os.path.basename(final_merged)} ({merged_kb} KB)    "
-                        f"Duration: {max(video_dur, _audio_dur):.1f}s"
+                        f"✅ {fmt}: {os.path.basename(final_merged)} ({merged_kb} KB)   "
+                        f"Duration: {video_dur:.1f}s"
                     )
                     print(f"[DebateVideo] ✅ {fmt}: {os.path.basename(final_merged)} ({merged_kb} KB)")
                 else:
@@ -355,32 +286,28 @@ class DebateVideoTool(BaseTool):
         return out
 
 
-# ── Helpers ───────────────────────────────────────────────────────────
+    # ── Helpers ───────────────────────────────────────────────────────────
 
     def _lines_to_spoken(self, lines: list, topic: str, channel: str) -> str:
-        """Convert display (line, section) tuples to spoken narration.
-        Subscribe line is already appended to raw_lines before this is called.
-        """
+        """Convert display (line, section) tuples to spoken narration."""
         parts = []
         for item in lines:
             parts.append(item[0] if isinstance(item, tuple) else item)
-        text = ' '.join(parts)
-        text = _clean_text(text)
+        text  = ' '.join(parts)
+        text  = _clean_text(text)
+        text += f'  Subscribe to {channel} for more insights.'
         return text
 
-    def _section_to_spoken(self, raw_md: str, role: str, channel: str,
-                           short_form: bool = True) -> str:
-        """Convert a single debate section to clean spoken text.
-        short_form=True  → Shorts filtering (ARG 1 / COUNTER-ARG 1 / post-DECISION only)
-        short_form=False → HD full content, no restrictions
-        """
-        items = self._parse_lines(raw_md, default_section=role, short_form=short_form)
+    def _section_to_spoken(self, raw_md: str, role: str, channel: str) -> str:
+        """Convert a single debate section to clean spoken text."""
+        items = self._parse_lines(raw_md)
         parts = []
         for item in items:
             parts.append(item[0] if isinstance(item, tuple) else item)
         text = ' '.join(parts)
-        text = _clean_text(text)
-        # Subscribe is appended as the last raw_line — spoken via the main spoken_text
+        text  = _clean_text(text)
+        if role == "decide":
+            text += f' Subscribe to {channel} for more insights.'
         return text
 
     def _get_duration(self, video_path: str) -> float:
@@ -428,10 +355,7 @@ class DebateVideoTool(BaseTool):
                 if pro_text and con_text and mod_text:
                     self._tts_edge_3voice(pro_text, con_text, mod_text, tmp, voices=_voices)
                 else:
-                    _fallback_voice = DEFAULT_EDGE_TTS_VOICES.get("propose", "en-US-AriaNeural")
-                    if isinstance(_voices.get("propose"), dict):
-                        _fallback_voice = _voices["propose"].get("edge_voice", _fallback_voice)
-                    self._tts_edge(text, tmp, voice=_fallback_voice)
+                    self._tts_edge(text, tmp)
             else:
                 self._tts_gtts(text, tmp)
 
@@ -441,49 +365,7 @@ class DebateVideoTool(BaseTool):
 
             raw_dur = self._get_duration(tmp)
             print(f"[DebateVideo] 🔊 TTS raw_dur={raw_dur:.1f}s  video_dur={video_dur:.1f}s")
-
-            # ── atempo sync: stretch/compress audio to exactly match video ──
-            # Keeps voice pitch natural while eliminating silence gaps.
-            # atempo range: 0.5–2.0 per filter; chain two filters for extreme ratios.
-            if video_dur > 0 and raw_dur > 0:
-                ratio = raw_dur / video_dur
-                ratio = max(0.25, min(4.0, ratio))   # safety clamp
-                print(f"[DebateVideo] 🔊 atempo ratio={ratio:.4f}   "
-                      f"({'speeding up' if ratio > 1 else 'slowing down'} audio to match video)")
-
-                # Build atempo filter chain (each filter handles 0.5–2.0)
-                if ratio <= 2.0 and ratio >= 0.5:
-                    atempo_filter = f"atempo={ratio:.6f}"
-                elif ratio > 2.0:
-                    # e.g. ratio=3.0 → atempo=1.732,atempo=1.732
-                    import math
-                    r1 = math.sqrt(ratio)
-                    atempo_filter = f"atempo={r1:.6f},atempo={r1:.6f}"
-                else:
-                    # ratio < 0.5 → atempo=0.707,atempo=0.707
-                    import math
-                    r1 = math.sqrt(ratio)
-                    atempo_filter = f"atempo={r1:.6f},atempo={r1:.6f}"
-
-                synced = audio_path.replace('.mp3', '_synced.mp3')
-                r = subprocess.run(
-                    ["ffmpeg", "-y", "-i", tmp,
-                     "-filter:a", atempo_filter,
-                     "-q:a", "2", synced],
-                    capture_output=True, check=False
-                )
-                if r.returncode == 0 and os.path.exists(synced):
-                    synced_dur = self._get_duration(synced)
-                    print(f"[DebateVideo] ✅ atempo synced: {synced_dur:.1f}s  "
-                          f"(target={video_dur:.1f}s  delta={synced_dur-video_dur:+.2f}s)")
-                    os.replace(synced, audio_path)
-                    if os.path.exists(tmp):
-                        os.remove(tmp)
-                else:
-                    print(f"[DebateVideo] ⚠️ atempo failed — using raw audio")
-                    os.rename(tmp, audio_path)
-            else:
-                os.rename(tmp, audio_path)
+            os.rename(tmp, audio_path)
 
         except Exception as e:
             print(f"[DebateVideo] ⚠️ TTS error: {e}")
@@ -506,7 +388,7 @@ class DebateVideoTool(BaseTool):
             return os.path.join(_project_root, rel)
 
         _v = voices if voices else DEFAULT_PIPER_VOICES
-        sections = [
+        sections  = [
             ("PRO",  pro_text, _v.get("propose", DEFAULT_PIPER_VOICES["propose"])),
             ("CON",  con_text, _v.get("oppose",  DEFAULT_PIPER_VOICES["oppose"])),
             ("MOD",  mod_text, _v.get("decide",  DEFAULT_PIPER_VOICES["decide"])),
@@ -538,7 +420,7 @@ class DebateVideoTool(BaseTool):
                 wav_out = os.path.join(tmp_dir, f"debate_{label.lower()}.wav")
                 speed   = vcfg.get("speed", 1.0)
 
-                print(f"[DebateVideo]   🎤 {label}: piper {os.path.basename(model_path)}   "
+                print(f"[DebateVideo]   🎤 {label}: piper {os.path.basename(model_path)}  "
                       f"speed={speed}  ({len(text_chunk)} chars)")
 
                 result = subprocess.run(
@@ -591,32 +473,17 @@ class DebateVideoTool(BaseTool):
             _sh.rmtree(tmp_dir, ignore_errors=True)
 
     def _tts_gtts(self, text: str, out_path: str):
-        """Generate audio using gTTS. Saves to temp file first, then renames atomically."""
-        import tempfile, os
+        """Generate audio using gTTS."""
         try:
             from gtts import gTTS
         except ImportError:
             print("[DebateVideo] ⚠️ gTTS not installed. Run: pip install gTTS")
             return
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix='.mp3')
-        os.close(tmp_fd)
-        try:
-            tts = gTTS(text=text, lang='en', slow=False)
-            tts.save(tmp_path)
-            size = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
-            if size < 1000:
-                raise RuntimeError(f"gTTS output too small ({size} bytes) — likely empty/corrupt")
-            os.replace(tmp_path, out_path)
-            print(f"[DebateVideo] ✅ gTTS saved: {out_path} ({size//1024}KB)")
-        except Exception as e:
-            print(f"[DebateVideo] ⚠️ gTTS failed: {e}")
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            # Remove corrupt output if it exists
-            if os.path.exists(out_path):
-                os.remove(out_path)
+        tts = gTTS(text=text, lang='en', slow=False)
+        tts.save(out_path)
+        print(f"[DebateVideo] ✅ gTTS saved: {out_path}")
 
-    def _tts_edge(self, text: str, out_path: str, voice: str = "en-US-AriaNeural", timeout: int = 60):
+    def _tts_edge(self, text: str, out_path: str, timeout: int = 60):
         """Generate audio using edge-tts with timeout."""
         try:
             import edge_tts
@@ -628,7 +495,7 @@ class DebateVideoTool(BaseTool):
             return
 
         async def _generate():
-            communicate = edge_tts.Communicate(text, voice=voice)
+            communicate = edge_tts.Communicate(text, voice="en-US-AriaNeural")
             await communicate.save(out_path)
 
         async def _with_timeout():
@@ -741,11 +608,8 @@ class DebateVideoTool(BaseTool):
             _sh.rmtree(tmp_dir, ignore_errors=True)
 
     def _merge_audio_video(self, video_path: str, audio_path: str,
-                            output_path: str, target_duration: float):
-        """Merge audio into video, ensuring both are exactly target_duration.
-        Uses target_duration (max of video_dur and audio_dur) so subscribe line is never cut.
-        apad ensures silence fills any gap if audio finishes before video ends.
-        """
+                            output_path: str, video_dur: float):
+        """Merge audio into video with silence padding if needed."""
         print(f"[DebateVideo] 🎬 Merging audio+video → {os.path.basename(output_path)}")
         result = subprocess.run([
             "ffmpeg", "-y",
@@ -753,128 +617,53 @@ class DebateVideoTool(BaseTool):
             "-i", audio_path,
             "-c:v", "copy",
             "-c:a", "aac",
-            # Pad audio with silence then trim/extend to exact target duration
-            "-filter_complex", f"[1:a]apad=whole_dur={target_duration:.3f}[aout]",
+            "-filter_complex", "[1:a]apad[aout]",
             "-map", "0:v",
             "-map", "[aout]",
-            "-t", str(round(target_duration, 3)),
+            "-shortest",
             output_path
         ], capture_output=True, check=False)
         if result.returncode != 0:
-            print(f"[DebateVideo] ⚠️ merge failed: {result.stderr.decode()[:200]}")
+            print(f"[DebateVideo] ⚠️ merge failed: {result.stderr.decode()[:150]}")
 
-    def _parse_lines(self, raw: str, default_section: str = 'propose', short_form: bool = True) -> List[Tuple[str, str]]:
-        """
-        Parse debate markdown into (line_text, section) tuples.
-
-        short_form=True  (Shorts/portrait) → PROPOSITION and OPPOSITION show
-                                              OPENING STATEMENT + ARG 1 / COUNTER-ARG 1
-                                              only. Stops permanently at ARG 2+.
-                                              VERDICT: starts from DECISION: header only.
-        short_form=False (HD/landscape)    → full content, no restrictions
-        """
+    def _parse_lines(self, raw: str) -> List[Tuple[str, str]]:
+        """Parse debate markdown into (line_text, section) tuples."""
         result  = []
-        section = default_section
+        section = 'propose'
 
-        # Section-switch markers — DECISION handled separately so its content isn't lost
         _section_map = [
             (re.compile(r'^PROPOSITION\s*[:\-]?', re.I), 'propose'),
-            (re.compile(r'^OPPOSITION\s*[:\-]?',  re.I), 'oppose'),
-            (re.compile(r'^VERDICT\s*[:\-]?',     re.I), 'decide'),
-            (re.compile(r'^MODERATOR\s*[:\-]?',   re.I), 'decide'),
-            (re.compile(r'^JUDGE\s*[:\-]?',       re.I), 'decide'),
+            (re.compile(r'^OPPOSITION\s*[:\-]?',     re.I), 'oppose'),
+            (re.compile(r'^VERDICT\s*[:\-]?',        re.I), 'decide'),
+            (re.compile(r'^MODERATOR\s*[:\-]?',      re.I), 'decide'),
+            (re.compile(r'^JUDGE\s*[:\-]?',          re.I), 'decide'),
+            (re.compile(r'^DECISION\s*[:\-]?',       re.I), 'decide'),
         ]
 
-        # Numbered argument headers — we extract the digit
-        _arg_re         = re.compile(r'^ARGUMENT\s+(\d+)\s*[:\-]', re.I)
-        _counter_arg_re = re.compile(r'^COUNTER[\s\-]?ARGUMENT\s+(\d+)\s*[:\-]', re.I)
-        _decision_re    = re.compile(r'^DECISION\s*[:\-]?', re.I)
-
-        # Headers that close the currently-open includable block
-        _block_end_headers = [
-            re.compile(r'^OPENING\s+STATEMENT\s*[:\-]?',  re.I),
-            re.compile(r'^CLOSING\s+STATEMENT\s*[:\-]?',  re.I),
-            re.compile(r'^CONCLUSION\s*[:\-]?',            re.I),
-            re.compile(r'^SUMMARY\s+OF\s+\w+',             re.I),
-            re.compile(r'^SUMMARY\s*[:\-]?\s*$',          re.I),
-            re.compile(r'^ANALYSIS\s*[:\-]?',             re.I),
-            re.compile(r'^IN\s+CONCLUSION\s*[:\-]?\s*$',  re.I),
-            re.compile(r'^FINAL\s+(VERDICT|DECISION|THOUGHTS?)\s*[:\-]?\s*$', re.I),
-        ]
-
-        # Pure structural lines always dropped
         _skip = [
+            re.compile(r'^SUMMARY\s+OF\s+(PROPOSITION|OPPOSITION|VERDICT)\s*$', re.I),
+            re.compile(r'^SUMMARY\s*[:\-]\s*$',                    re.I),
+            re.compile(r'^(COUNTER[\s\-]?ARGUMENT|COUNTER[\s\-]?POINT)\s*\d*\s*[:\-]?\s*$', re.I),
+            re.compile(r'^(ARGUMENT|POINT)\s+\d+\s*[:\-]\s*$',     re.I),
+            re.compile(r'^(SUPPORTING\s+)?(ARGUMENT|POINT)\s+\d+\s*$', re.I),
+            re.compile(r'^(PRO|CON)\s+ARGUMENT\s+\d+\s*$',         re.I),
+            re.compile(r'^OPENING\s+STATEMENT\s*[:\-]?\s*$',       re.I),
+            re.compile(r'^CLOSING\s+STATEMENT\s*[:\-]?\s*$',       re.I),
+            re.compile(r'^CONCLUSION\s*[:\-]?\s*$',                re.I),
+            re.compile(r'^ANALYSIS\s*[:\-]?\s*$',                  re.I),
+            re.compile(r'^REBUTTAL\s*[:\-]?\d*\s*$',               re.I),
+            re.compile(r'^KEY\s+(POINTS?|ARGUMENTS?)\s*$',         re.I),
+            re.compile(r'^MAIN\s+(POINTS?|ARGUMENTS?)\s*$',        re.I),
+            re.compile(r'^IN\s+CONCLUSION\s*[:\-]?\s*$',           re.I),
+            re.compile(r'^FINAL\s+(VERDICT|DECISION|THOUGHTS?)\s*[:\-]?\s*$', re.I),
             re.compile(r'^-{3,}$'),
             re.compile(r'^\*{3,}$'),
             re.compile(r'^#{1,6}\s+'),
-            re.compile(r'^KEY\s+(POINTS?|ARGUMENTS?)\s*$',  re.I),
-            re.compile(r'^MAIN\s+(POINTS?|ARGUMENTS?)\s*$', re.I),
-            re.compile(r'^REBUTTAL\s*[:\-]?\d*\s*$',        re.I),
         ]
-
-        # ── HD / full-content mode: no filtering ──────────────────────────
-        if not short_form:
-            for raw_line in raw.splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("━") or line.startswith("─") or line.startswith("=== "):
-                    continue
-                line = re.sub(
-                    r'^[\U00010000-\U0010ffff\U0001f300-\U0001f9ff'
-                    r'\u2600-\u27ff\u2000-\u206f\ufe00-\ufe0f]+\s*',
-                    '', line
-                ).strip()
-                if not line: continue
-                line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
-                line = re.sub(r'\[.*?\]',  '', line).strip()
-                if not line: continue
-                line = _clean_text(line)
-                if not line: continue
-                # detect section changes (section headers are skipped from output)
-                matched_section = next((role for p, role in [
-                    (re.compile(r'^PROPOSITION\s*[:\-]?', re.I), 'propose'),
-                    (re.compile(r'^OPPOSITION\s*[:\-]?',  re.I), 'oppose'),
-                    (re.compile(r'^VERDICT\s*[:\-]?',     re.I), 'decide'),
-                    (re.compile(r'^MODERATOR\s*[:\-]?',   re.I), 'decide'),
-                    (re.compile(r'^JUDGE\s*[:\-]?',       re.I), 'decide'),
-                ] if p.match(line)), None)
-                if matched_section:
-                    section = matched_section
-                    print(f"[DebateVideo] 📑 Section: {section}")
-                    continue
-                # drop pure structural markers
-                _hdr_skip = [
-                    re.compile(r'^-{3,}$'), re.compile(r'^\*{3,}$'), re.compile(r'^#{1,6}\s+'),
-                    re.compile(r'^(ARGUMENT|POINT)\s+\d+\s*[:\-]\s*$', re.I),
-                    re.compile(r'^COUNTER[\s\-]?ARGUMENT\s+\d+\s*[:\-]\s*$', re.I),
-                    re.compile(r'^OPENING\s+STATEMENT\s*[:\-]?\s*$',  re.I),
-                    re.compile(r'^CLOSING\s+STATEMENT\s*[:\-]?\s*$',  re.I),
-                    re.compile(r'^CONCLUSION\s*[:\-]?\s*$',            re.I),
-                    re.compile(r'^SUMMARY\s+OF\s+\w+',                 re.I),
-                    re.compile(r'^SUMMARY\s*[:\-]?\s*$',               re.I),
-                    re.compile(r'^ANALYSIS\s*[:\-]?\s*$',              re.I),
-                ]
-                if any(p.match(line) for p in _hdr_skip):
-                    continue
-                line = line[0].upper() + line[1:]
-                result.append((line, section))
-            print(f"[DebateVideo] 📊 Parsed {len(result)} content lines (full)")
-            return result
-
-        # ── Short-form state ───────────────────────────────────────────────
-        # propose / oppose : include OPENING STATEMENT + ARGUMENT 1 /
-        #   COUNTER-ARGUMENT 1 body only. Gate closes permanently at ARG 2+.
-        # decide            : starts False; opens only after DECISION: header.
-        include_content         = (default_section in ('propose', 'oppose'))
-        decide_decision_reached = False
-
-        _opening_re = re.compile(r'^OPENING\s+STATEMENT\s*[:\-]?', re.I)
-        _closing_re = re.compile(
-            r'^(CLOSING\s+STATEMENT|CONCLUSION|IN\s+CONCLUSION'
-            r'|FINAL\s+(VERDICT|DECISION|THOUGHTS?))\s*[:\-]?', re.I)
 
         for raw_line in raw.splitlines():
             line = raw_line.strip()
-            if not line or line.startswith("\u254b") or line.startswith("\u2500") or line.startswith("=== "):
+            if not line or line.startswith("━") or line.startswith("─") or line.startswith("==="):
                 continue
             line = re.sub(
                 r'^[\U00010000-\U0010ffff\U0001f300-\U0001f9ff'
@@ -888,89 +677,20 @@ class DebateVideoTool(BaseTool):
             line = _clean_text(line)
             if not line: continue
 
-            # ── Section switch ──────────────────────────────────────────────
-            matched_section = next((role for p, role in _section_map if p.match(line)), None)
-            if matched_section:
-                if matched_section != section:
-                    section                 = matched_section
-                    # Re-open gate for new propose/oppose section; close for decide
-                    include_content         = (section in ('propose', 'oppose'))
-                    decide_decision_reached = False
-                    print(f"[DebateVideo] 📄 Section switch: {section}")
-                continue  # never render a section-header line
-
-            # ── DECISION header (decide section) ───────────────────────────
-            if _decision_re.match(line):
-                if section == 'decide':
-                    decide_decision_reached = True
-                    include_content         = True
-                    print(f"[DebateVideo]   ✅ DECISION: reached — including content")
-                    rest = line[_decision_re.match(line).end():].strip()
-                    if rest:
-                        rest = rest[0].upper() + rest[1:]
-                        result.append((rest, section))
-                continue  # skip the header token itself
-
-            # ── propose / oppose: structural header handling ────────────────
-            if section in ('propose', 'oppose'):
-                arg_m     = _arg_re.match(line)
-                counter_m = _counter_arg_re.match(line)
-                if arg_m or counter_m:
-                    m   = arg_m or counter_m
-                    num = int(m.group(1))
-                    tag = "ARG" if arg_m else "COUNTER-ARG"
-                    if num == 1:
-                        # ARGUMENT 1 / COUNTER-ARGUMENT 1 — keep gate open
-                        include_content = True
-                        print(f"[DebateVideo]   ✅ {tag} 1 — continuing to include")
-                        # Capture any inline content on the header line itself
-                        rest = line[m.end():].strip()
-                        if rest:
-                            rest = rest[0].upper() + rest[1:]
-                            result.append((rest, section))
-                    else:
-                        # ARGUMENT 2+ / COUNTER-ARGUMENT 2+ — stop permanently
-                        include_content = False
-                        print(f"[DebateVideo]   ⏭️  {tag} {num} — short-form limit reached, stopping")
-                    continue  # skip the header token itself
-
-                # OPENING STATEMENT — skip the token, capture any inline text
-                if _opening_re.match(line):
-                    print(f"[DebateVideo]   📢 OPENING STATEMENT header — content included")
-                    rest = line[_opening_re.match(line).end():].strip()
-                    if rest and include_content:
-                        rest = rest[0].upper() + rest[1:]
-                        result.append((rest, section))
-                    continue
-
-                # Closing / conclusion headers — close the gate
-                if _closing_re.match(line):
-                    include_content = False
-                    print(f"[DebateVideo]   ⏭️  Closing block: {line[:50]}")
-                    continue
-
-                # SUMMARY / ANALYSIS — always skip the header line
-                if any(p.match(line) for p in _block_end_headers):
-                    print(f"[DebateVideo]   ⏭️  Header skipped: {line[:50]}")
-                    continue
-
-            # ── decide: skip everything before DECISION: ────────────────────
-            if section == 'decide' and not decide_decision_reached:
-                print(f"[DebateVideo]   ⏭️  Pre-DECISION skipped: {line[:50]}")
+            matched = next((role for p, role in _section_map if p.match(line)), None)
+            if matched:
+                section = matched
+                print(f"[DebateVideo] 📑 Section switch: {section}")
                 continue
 
-            # ── Always-skip structural lines ────────────────────────────────
             if any(p.match(line) for p in _skip):
-                continue
-
-            # ── Gate: only emit when inside an includable block ─────────────
-            if not include_content:
+                print(f"[DebateVideo]   ⏭️  Skipped header: {line[:50]}")
                 continue
 
             line = line[0].upper() + line[1:]
             result.append((line, section))
 
-        print(f"[DebateVideo] 📊 Parsed {len(result)} content lines (short-form)")
+        print(f"[DebateVideo] 📊 Parsed {len(result)} content lines")
         return result
 
     def _pixel_wrap(self, text: str, font, max_px: int) -> List[str]:
@@ -1068,10 +788,12 @@ class DebateVideoTool(BaseTool):
             cx += ww + gap
 
     def _render(self, raw_lines, out_path, w, h, secs_per_line,
-                channel, wm_enabled, wm_text, video_fps, topic="", bg_opacity=255, bg_color=(0,0,0)):
+                channel, wm_enabled, wm_text, topic="",
+                bg_enabled=False, bg_opacity=150, topic_prompt="", image_gen_backend="auto"):
         """Render debate video — identical layout engine to definition_video_tool."""
-        from PIL import Image, ImageDraw, ImageFont
-        FPS             = video_fps
+        from PIL import Image, ImageDraw, ImageFont, ImageFilter
+        import hashlib as _hl
+        FPS             = 24
         frames_per_line = int(secs_per_line * FPS)
         fade_frames     = min(6, frames_per_line // 5)
         BASE_ACTIVE     = w // 28
@@ -1080,7 +802,7 @@ class DebateVideoTool(BaseTool):
         base_wm         = w // 52
 
         try:
-            f_active = ImageFont.truetype(FONT_BOLD,  BASE_ACTIVE)
+            f_active = ImageFont.truetype(FONT_BOLD, BASE_ACTIVE)
             f_wm     = ImageFont.truetype(FONT_BOLD, base_wm)
         except Exception:
             f_active = f_wm = ImageFont.load_default()
@@ -1095,14 +817,14 @@ class DebateVideoTool(BaseTool):
         pad_x         = int(w * 0.05)
         header_h      = int(h * 0.17)
         pad_top       = header_h + int(h * 0.02)
-        wm_zone       = int(h * 0.80)           # raised: more space for avatar section
+        wm_zone       = int(h * 0.88)
         body_h        = wm_zone - pad_top
         active_font_h = int(BASE_ACTIVE * 1.9)
         active_y      = pad_top + body_h // 2 - active_font_h // 2
         max_px        = w - pad_x - int(w * 0.05)
 
         hdr_title  = _clean_text(topic) if topic else _clean_text(channel)
-        _acronyms  = {'ai', 'ml', 'api',  'ui', 'ux', 'llm', 'gpt', 'ceo', 'cto', 'it'}
+        _acronyms  = {'ai', 'ml', 'api', 'ui', 'ux', 'llm', 'gpt', 'ceo', 'cto', 'it'}
         hdr_title  = ' '.join(
             _word.upper() if _word.lower() in _acronyms else _word.capitalize()
             for _word in hdr_title.split()
@@ -1144,9 +866,98 @@ class DebateVideoTool(BaseTool):
                 lines_data.append((wrapped, sec))
 
         total_frames = len(lines_data) * frames_per_line
-        print(f"[DebateVideo]   Wrapped lines: {len(lines_data)}     "
-              f"Total frames: {total_frames}     "
+        print(f"[DebateVideo]   Wrapped lines: {len(lines_data)}    "
+              f"Total frames: {total_frames}    "
               f"Est: {total_frames/FPS:.0f}s ({total_frames/FPS/60:.1f}min)")
+
+        # ── Pre-generate one background image per paragraph ───────────────
+        # A "paragraph" = a run of lines sharing the same heading/arg label.
+        # We detect paragraph boundaries by looking at the raw_lines tuples
+        # whose text matches section headers or Arg-N patterns.
+        _para_images = []       # list of PIL Image (one per paragraph), pre-loaded
+        _line_to_para = []      # line_idx -> paragraph index
+
+        if _IMAGE_GEN_AVAILABLE and bg_enabled:
+            _CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image_gen_cache")
+            os.makedirs(_CACHE_DIR, exist_ok=True)
+
+            # ── Build paragraph list from raw_lines ───────────────────────
+            _section_prompts = {
+                'propose': "pro side debate podium, blue spotlight, confident speaker, cinematic",
+                'oppose':  "opposition debate stage, red dramatic light, tense atmosphere, cinematic",
+                'decide':  "judge tribunal chamber, golden gavel, balanced scales of justice, cinematic",
+            }
+            _paragraphs = []   # list of (prompt, first_line_idx_in_lines_data)
+            _arg_re = re.compile(r'^(Arg|Argument|Point|Claim|Counter|Opening|Closing|Conclusion|Analysis|Summary|Rebuttal|Decision|Verdict|PROPOSITION|OPPOSITION|VERDICT)', re.I)
+
+            cur_para_prompt = None
+            cur_para_start  = 0
+            for li, (ltext, lsec) in enumerate(lines_data):
+                is_new_para = (
+                    li == 0 or
+                    lsec != lines_data[li-1][1] or          # section changed
+                    bool(_arg_re.match(ltext.strip()))       # new argument heading
+                )
+                if is_new_para:
+                    # Build prompt for this paragraph
+                    _base  = _section_prompts.get(lsec, "abstract debate background, cinematic")
+                    _label = ltext.strip()[:60]
+                    _topic_short = (topic_prompt or topic or "debate")[:50]
+                    _prompt = (
+                        f"{_base}, {_topic_short}, {_label}, "
+                        "dark background, blurred bokeh, no text overlay, no people faces, "
+                        "cinematic wide angle, high contrast"
+                    )
+                    # Cache key — same prompt+size → same image
+                    _key  = _hl.md5(f"{_prompt}|{w}|{h}".encode()).hexdigest()[:10]
+                    _path = os.path.join(_CACHE_DIR, f"para_{lsec}_{_key}.png")
+                    _paragraphs.append((_prompt, _path, li))
+
+            # ── Generate images (parallel where possible) ─────────────────
+            print(f"[DebateVideo] 🎨 Pre-generating {len(_paragraphs)} paragraph backgrounds...")
+            _para_pil = []    # PIL Image per paragraph (opacity-blended, ready to copy)
+            for _pi, (_prompt, _path, _start_li) in enumerate(_paragraphs):
+                if not os.path.exists(_path):
+                    print(f"[DebateVideo]   [{_pi+1}/{len(_paragraphs)}] Generating: {_prompt[:70]}...")
+                    try:
+                        result = generate_background(
+                            prompt=_prompt, width=w, height=h,
+                            output_path=_path, backend=image_gen_backend,
+                        )
+                    except Exception as _ge:
+                        print(f"[DebateVideo]   ⚠️  gen failed: {_ge} — gradient fallback")
+                        result = _generate_gradient(w, h, _path, _prompt)
+                else:
+                    print(f"[DebateVideo]   [{_pi+1}/{len(_paragraphs)}] Cache hit: {os.path.basename(_path)}")
+                    result = _path
+
+                # Load + blend with black at bg_opacity
+                try:
+                    _raw  = Image.open(result).convert("RGB")
+                    if _raw.size != (w, h):
+                        _raw = _raw.resize((w, h), Image.LANCZOS)
+                    _black = Image.new("RGB", (w, h), (0, 0, 0))
+                    _blended = Image.blend(_black, _raw, max(0, min(255, bg_opacity)) / 255.0)
+                    _para_pil.append(_blended)
+                except Exception as _le:
+                    print(f"[DebateVideo]   ⚠️  load failed: {_le} — black fallback")
+                    _para_pil.append(Image.new("RGB", (w, h), (0, 0, 0)))
+
+            # ── Build line_idx → para_index map ──────────────────────────
+            _line_to_para = [0] * len(lines_data)
+            for _pi, (_prompt, _path, _start_li) in enumerate(_paragraphs):
+                _end_li = _paragraphs[_pi+1][2] if _pi+1 < len(_paragraphs) else len(lines_data)
+                for _li in range(_start_li, _end_li):
+                    _line_to_para[_li] = _pi
+
+            _para_images = _para_pil
+            print(f"[DebateVideo] ✅ {len(_para_images)} paragraph backgrounds ready")
+        else:
+            print("[DebateVideo] ⚠️  image_gen_tool not available — black background")
+            _line_to_para = [0] * len(lines_data)
+
+        # Cross-fade duration when switching paragraph images (frames)
+        _BG_FADE_FRAMES = min(frames_per_line, int(FPS * 1.2))   # ~1.2 second fade
 
         cmd = ['ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
                '-s', f'{w}x{h}', '-pix_fmt', 'rgb24', '-r', str(FPS), '-i', '-',
@@ -1163,8 +974,8 @@ class DebateVideoTool(BaseTool):
                 desc=f"  🎬 [{out_path.split('/')[-1]}]",
                 unit="fr",
                 bar_format=(
-                    "{desc}: {percentage:3.0f}%|{bar:35}|    "
-                    "{n_fmt}/{total_fmt} fr [{elapsed}<{remaining}, {rate_fmt}]"
+                    "{desc}: {percentage:3.0f}%|{bar:35}|   "
+                    "{n_fmt}/{total_fmt} fr [{elapsed} <{remaining}, {rate_fmt}]"
                 ),
                 dynamic_ncols=True,
                 leave=True,
@@ -1179,339 +990,32 @@ class DebateVideoTool(BaseTool):
         _section_colors = {'propose': (130, 210, 255), 'oppose': (255, 100, 100), 'decide': (140, 255, 140)}
         _prev_section   = None
 
-        import math as _math
-        import random as _random
-
-        # ── Base background ───────────────────────────────────────────────
-        _bg_v  = max(0, min(255, bg_opacity))
-        _base  = Image.new("RGBA", (w, h), (bg_color[0], bg_color[1], bg_color[2], 255))
-
-        # ── Section color map ─────────────────────────────────────────────
-        _sec_rgb = {
-            'propose': (130, 210, 255),
-            'oppose':  (255, 100, 100),
-            'decide':  (140, 255, 140),
-        }
-
-        # ── Particle system (seeded for reproducibility) ──────────────────
-        _rng = _random.Random(42)
-        _N_PARTICLES = 22
-        _particles = [
-            {
-                'x':   _rng.uniform(0, w),
-                'y':   _rng.uniform(0, h),
-                'vx':  _rng.uniform(-0.18, 0.18),
-                'vy':  _rng.uniform(-0.22, -0.06),
-                'r':   _rng.uniform(1.2, 3.0),
-                'phase': _rng.uniform(0, _math.tau),
-            }
-            for _ in range(_N_PARTICLES)
-        ]
-
-        # ── Avatar layout constants (+30% section height) ────────────────
-        # Left: PRO  |  Center: Verdict  |  Right: OPPO
-        # Inset by (r * 1.34 * 1.10 + margin)  so wings never clip at edges
-        _av_y      = int(h * 0.875)         # lower — bigger avatar zone below text
-        _av_r      = int(w * 0.080)         # base radius
-        _av_margin = int(_av_r * 1.34 * 1.15) + int(w * 0.010)  # wing-tip safe margin
-        _av_left   = max(_av_margin, int(w * 0.16))   # PRO x-centre (inset from left edge)
-        _av_right  = min(w - _av_margin, int(w * 0.84))  # OPPO x-centre (inset from right edge)
-        _av_mid    = w // 2                 # Verdict x-centre
-
-        # Each avatar always uses its own fixed color — never the active section color
-        _av_colors = {
-            'propose': (100, 180, 255),   # blue  — PRO
-            'oppose':  (255, 90,  90),    # red   — OPPO
-            'decide':  (120, 240, 140),   # green — Verdict
-        }
-        # Display labels under each avatar
-        _av_labels = {
-            'propose': 'PRO',
-            'oppose':  'OPPO',
-            'decide':  'Verdict',
-        }
-
-        # ── Waveform bar constants ────────────────────────────────────────
-        _WV_BARS   = 32
-        _WV_W      = int(w * 0.38)
-        _WV_H      = int(h * 0.048)
-        _WV_Y      = _av_y + _av_r + int(h * 0.012)  # below avatars
-        _WV_X      = (w - _WV_W) // 2
-        _BAR_GAP   = _WV_W // _WV_BARS
-
-        # ── Section transition flash + avatar pop-in state ──────────────
-        _flash_frames    = int(FPS * 0.35)   # 0.35s flash on section change
-        _flash_counter   = 0
-        _section_frame   = 0                 # frames elapsed in current section
-        _prev_sec_for_fr = None              # tracks section changes for _section_frame
-
-        def _draw_avatar(draw, cx, cy, r, role, speaking, frame):
-            """
-            Animated speaker avatar.
-            Speaking  → 45% visual area (r * 1.34×) — wings, smile, confidence
-            Silent    → 55% base (r * 0.74×) — dim, closed, waiting
-            """
-            import math as _m
-            ac  = _av_colors.get(role, (200, 200, 200))
-            dim = tuple(int(c * 0.28) for c in ac)   # dim version of color
-
-            # ── WINGS (speaking only) ────────────────────────────────────
-            # Two curved arcs fanning out left/right, flapping sinusoidally
-            if speaking:
-                wing_flap  = _m.sin(frame * 0.22)          # -1..1 flap cycle
-                wing_raise = int(r * 0.55 * abs(wing_flap)) # how high wings lift
-                wing_span  = int(r * 1.10)                  # lateral reach
-                wing_thick = max(2, int(r * 0.10))
-
-                # Left wing — 3 arcs getting lighter toward tip
-                for wi, (wspan, wthick, walpha) in enumerate([
-                    (wing_span,         wing_thick,     140),
-                    (wing_span + r//3,  wing_thick - 1, 80),
-                    (wing_span + r//2,  max(1, wing_thick - 2), 40),
-                ]):
-                    w_tip_y = cy - wing_raise - wi * int(r * 0.08)
-                    draw.line(
-                        [cx - r + int(r*0.2), cy,
-                         cx - r - wspan + int(r*0.2), w_tip_y],
-                        fill=(*ac, walpha), width=wthick
-                    )
-                    # Feather curl at tip
-                    curl_r = max(3, int(r * 0.18))
-                    draw.arc(
-                        [cx - r - wspan - curl_r + int(r*0.2),
-                         w_tip_y - curl_r,
-                         cx - r - wspan + curl_r + int(r*0.2),
-                         w_tip_y + curl_r],
-                        start=0, end=180 + int(40 * wing_flap),
-                        fill=(*ac, walpha), width=max(1, wthick - 1)
-                    )
-
-                # Right wing (mirror)
-                for wi, (wspan, wthick, walpha) in enumerate([
-                    (wing_span,         wing_thick,     140),
-                    (wing_span + r//3,  wing_thick - 1, 80),
-                    (wing_span + r//2,  max(1, wing_thick - 2), 40),
-                ]):
-                    w_tip_y = cy - wing_raise - wi * int(r * 0.08)
-                    draw.line(
-                        [cx + r - int(r*0.2), cy,
-                         cx + r + wspan - int(r*0.2), w_tip_y],
-                        fill=(*ac, walpha), width=wthick
-                    )
-                    curl_r = max(3, int(r * 0.18))
-                    draw.arc(
-                        [cx + r + wspan - curl_r - int(r*0.2),
-                         w_tip_y - curl_r,
-                         cx + r + wspan + curl_r - int(r*0.2),
-                         w_tip_y + curl_r],
-                        start=0, end=180 - int(40 * wing_flap),
-                        fill=(*ac, walpha), width=max(1, wthick - 1)
-                    )
-
-            # ── HEAD CIRCLE ──────────────────────────────────────────────
-            if speaking:
-                # Multi-layer pulsing glow halo
-                pulse = 0.55 + 0.45 * _m.sin(frame * 0.14)
-                for dr in range(8, 0, -2):
-                    ga = int(65 * (9 - dr) / 8 * pulse)
-                    draw.ellipse([cx-r-dr*2, cy-r-dr*2, cx+r+dr*2, cy+r+dr*2],
-                                outline=(*ac, ga), width=1)
-                # Confident posture: slight upward bob
-                bob = int(r * 0.04 * _m.sin(frame * 0.08))
-                head_fill = tuple(int(c * 0.38) for c in ac)
-                draw.ellipse([cx-r, cy-r+bob, cx+r, cy+r+bob],
-                            fill=(*head_fill, 250), outline=(*ac, 255), width=3)
-                _face_cy = cy + bob   # shift face features with bob
-            else:
-                # Dim ring only
-                draw.ellipse([cx-r-1, cy-r-1, cx+r+1, cy+r+1],
-                            outline=(*ac, 30), width=1)
-                head_fill = tuple(int(c * 0.07) for c in ac)
-                draw.ellipse([cx-r, cy-r, cx+r, cy+r],
-                            fill=(*head_fill, 160), outline=(*ac, 50), width=1)
-                _face_cy = cy
-
-            # ── EYES ──────────────────────────────────────────────────────
-            eye_y  = _face_cy - int(r * 0.20)
-            eye_dx = int(r * 0.28)
-            eye_r  = max(2, int(r * 0.12))
-
-            if speaking:
-                # Confident wide eyes with shine dot
-                blink = _m.sin(frame * 0.041 + 1.2) > 0.93
-                eye_col = (*ac, 255)
-                for ex_off in [-eye_dx, eye_dx]:
-                    if not blink:
-                        # Main iris
-                        draw.ellipse([cx+ex_off-eye_r, eye_y-eye_r,
-                                      cx+ex_off+eye_r, eye_y+eye_r],
-                                    fill=eye_col)
-                        # White shine dot (top-right of each eye)
-                        sh = max(1, eye_r // 3)
-                        draw.ellipse([cx+ex_off+eye_r//3, eye_y-eye_r+1,
-                                      cx+ex_off+eye_r//3+sh, eye_y-eye_r+1+sh],
-                                    fill=(255, 255, 255, 200))
-                    else:
-                        draw.line([cx+ex_off-eye_r, eye_y,
-                                    cx+ex_off+eye_r, eye_y],
-                                  fill=eye_col, width=max(2, eye_r//2))
-                # Raised eyebrows (confidence)
-                brow_y = eye_y - eye_r - int(r * 0.09)
-                brow_w = int(eye_r * 1.5)
-                brow_raise = int(r * 0.03 * _m.sin(frame * 0.06))
-                for ex_off in [-eye_dx, eye_dx]:
-                    draw.line([cx+ex_off-brow_w, brow_y - brow_raise,
-                              cx+ex_off+brow_w, brow_y - brow_raise - int(r*0.04)],
-                             fill=(*ac, 200), width=max(2, int(r * 0.06)))
-            else:
-                # Dim half-closed eyes
-                for ex_off in [-eye_dx, eye_dx]:
-                    draw.ellipse([cx+ex_off-eye_r, eye_y-eye_r//2,
-                                  cx+ex_off+eye_r, eye_y+eye_r//2],
-                                fill=(*ac, 45))
-
-            # ── SMILE / MOUTH ───────────────────────────────────────────
-            mouth_cy = _face_cy + int(r * 0.26)
-            mouth_w  = int(r * 0.44)
-            mouth_h  = int(r * 0.18)
-
-            if speaking:
-                # Animated talking mouth — cycles open/closed
-                talk_open = abs(_m.sin(frame * 0.52)) * int(r * 0.20) + int(r * 0.06)
-                # Smile: arc bottom lip curves up at corners
-                smile_lift = int(r * 0.08)
-                # Draw smile arc (upper lip)
-                draw.arc([cx - mouth_w, mouth_cy - smile_lift,
-                          cx + mouth_w, mouth_cy + mouth_h + smile_lift],
-                         start=200, end=340,
-                         fill=(*ac, 255), width=max(2, int(r * 0.07)))
-                # Inner mouth (dark gap, opens/closes)
-                inner_h = max(2, int(talk_open * 0.6))
-                inner_w = int(mouth_w * 0.72)
-                draw.ellipse([cx - inner_w, mouth_cy - inner_h//2,
-                              cx + inner_w, mouth_cy + inner_h],
-                             fill=(*tuple(int(c*0.12) for c in ac), 220))
-                # Teeth flash (bright strip)
-                if talk_open > int(r * 0.08):
-                    teeth_h = max(1, int(inner_h * 0.45))
-                    draw.rectangle([cx - inner_w + 2, mouth_cy - teeth_h//2,
-                                    cx + inner_w - 2, mouth_cy - teeth_h//2 + teeth_h],
-                                   fill=(240, 240, 245, 200))
-            else:
-                # Neutral slight frown — not speaking
-                draw.arc([cx - int(mouth_w*0.55), mouth_cy - int(r*0.04),
-                          cx + int(mouth_w*0.55), mouth_cy + int(r*0.10)],
-                         start=15, end=165,
-                         fill=(*ac, 38), width=max(1, int(r * 0.05)))
-
-            # ── CONFIDENCE SPARKLES (speaking only) ─────────────────────
-            if speaking:
-                import math as _ms
-                n_sparks = 5
-                spark_ring = r + int(r * 0.55)
-                for si in range(n_sparks):
-                    ang   = _ms.tau * si / n_sparks + frame * 0.06
-                    sx    = cx + int(spark_ring * _ms.cos(ang))
-                    sy    = _face_cy + int(spark_ring * _ms.sin(ang))
-                    spulse = 0.4 + 0.6 * abs(_ms.sin(frame * 0.15 + si * 1.2))
-                    sr    = max(1, int(r * 0.07 * spulse))
-                    sa    = int(180 * spulse)
-                    draw.ellipse([sx-sr, sy-sr, sx+sr, sy+sr], fill=(*ac, sa))
-                    # Star cross
-                    cl = max(1, int(sr * 1.6))
-                    draw.line([sx-cl, sy, sx+cl, sy], fill=(*ac, int(sa*0.6)), width=1)
-                    draw.line([sx, sy-cl, sx, sy+cl], fill=(*ac, int(sa*0.6)), width=1)
-
-            # ── LABEL ────────────────────────────────────────────────────
-            role_label = _av_labels.get(role, role.upper())
-            lbl_size   = max(16, int(r * 0.50)) if speaking else max(10, int(r * 0.36))
-            try:    _fl = ImageFont.truetype(FONT_BOLD, lbl_size)
-            except: _fl = ImageFont.load_default()
-            lb    = draw.textbbox((0, 0), role_label, font=_fl)
-            lw    = lb[2] - lb[0]
-            lbl_y = cy + r + int(r * 0.22)
-            if speaking:
-                for ddx, ddy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1)]:
-                    draw.text((cx - lw//2 + ddx, lbl_y + ddy), role_label,
-                              font=_fl, fill=(*ac, 90))
-                draw.text((cx - lw//2, lbl_y), role_label, font=_fl, fill=(*ac, 255))
-            else:
-                draw.text((cx - lw//2, lbl_y), role_label, font=_fl, fill=(*ac, 55))
-
-        def _draw_waveform(draw, cx, cy_top, bar_w_total, bar_h_max, n_bars, frame, sec_col, speaking):
-            """Draw animated equalizer waveform bars."""
-            import math as _m
-            bar_w   = (bar_w_total // n_bars) - 2
-            bar_gap = bar_w + 2
-            start_x = cx - bar_w_total // 2
-            for i in range(n_bars):
-                # Each bar oscillates at a slightly different phase/frequency
-                phase  = i * 0.38 + frame * 0.18
-                amp    = 0.3 + 0.7 * abs(_m.sin(phase))
-                if not speaking:
-                    amp = 0.08 + 0.06 * abs(_m.sin(phase * 0.3))
-                bh = max(3, int(bar_h_max * amp))
-                bx = start_x + i * bar_gap
-                by = cy_top + bar_h_max - bh
-                # Color gradient: section color, brighter in center
-                center_dist = abs(i - n_bars / 2) / (n_bars / 2)
-                brightness  = int(255 * (0.5 + 0.5 * (1 - center_dist)) * (0.9 if speaking else 0.3))
-                bar_col = tuple(min(255, int(c * brightness / 180)) for c in sec_col)
-                draw.rectangle([bx, by, bx+bar_w, cy_top+bar_h_max],
-                               fill=(*bar_col, 200 if speaking else 80))
-
-        def _draw_particles(draw, particles, sec_col, frame):
-            """Draw floating ambient particles."""
-            import math as _m
-            for p in particles:
-                # Drift upward, wrap around
-                p['x'] = (p['x'] + p['vx']) % w
-                p['y'] = p['y'] + p['vy']
-                if p['y'] < -5:
-                    p['y'] = h + 5
-                pulse  = 0.4 + 0.6 * abs(_m.sin(frame * 0.04 + p['phase']))
-                alpha  = int(40 * pulse)
-                r_now  = max(1, int(p['r'] * pulse))
-                pcol   = tuple(int(c * 0.6) for c in sec_col)
-                x, y   = int(p['x']), int(p['y'])
-                draw.ellipse([x-r_now, y-r_now, x+r_now, y+r_now],
-                             fill=(*pcol, alpha))
-
-        def _draw_flash(draw, w, h, sec_col, intensity):
-            """Draw section-change color flash overlay."""
-            if intensity <= 0:
-                return
-            alpha = int(60 * intensity)
-            draw.rectangle([0, 0, w, h], fill=(*sec_col, alpha))
-
         global_frame = 0
         for line_idx, (ltext, cur_section) in enumerate(lines_data):
-
-            # Detect section change for flash + avatar pop-in
-            if line_idx > 0 and lines_data[line_idx-1][1] != cur_section:
-                _flash_counter = _flash_frames
-                _section_frame = 0
-                _prev_sec_for_fr = cur_section
-
             for fi in range(frames_per_line):
-                alpha    = min(1.0, fi / max(fade_frames, 1))
-                sec_col  = _sec_rgb.get(cur_section, (200, 200, 200))
-                _section_frame  += 1
+                alpha = min(1.0, fi / max(fade_frames, 1))
+                # ── Background: paragraph image with cross-fade ──────
+                cur_para  = _line_to_para[line_idx] if _line_to_para else 0
+                if _para_images:
+                    _cur_bg = _para_images[cur_para]
+                    # Detect paragraph boundary and compute cross-fade alpha
+                    if line_idx > 0 and _line_to_para[line_idx] != _line_to_para[line_idx - 1]:
+                        # First _BG_FADE_FRAMES of this paragraph: cross-fade from previous image
+                        _prev_para = _line_to_para[line_idx - 1]
+                        _fade_pos  = line_idx * frames_per_line + fi   # absolute frame within this para
+                        # fi counts within the current line; at line boundary fi resets to 0
+                        _bg_alpha  = min(1.0, fi / max(_BG_FADE_FRAMES, 1))
+                        if _prev_para < len(_para_images):
+                            _prev_bg = _para_images[_prev_para]
+                            img = Image.blend(_prev_bg, _cur_bg, _bg_alpha)
+                        else:
+                            img = _cur_bg.copy()
+                    else:
+                        img = _cur_bg.copy()
+                else:
+                    img = Image.new("RGB", (w, h), (0, 0, 0))
+                draw  = ImageDraw.Draw(img)
 
-                # ── Base frame (dark bg with opacity) ───────────────────
-                img  = Image.new("RGBA", (w, h), (0, 0, 0, _bg_v))
-                draw = ImageDraw.Draw(img)
-
-                # ── Particles (behind everything) ────────────────────────
-                _draw_particles(draw, _particles, sec_col, global_frame)
-
-                # ── Section transition flash ──────────────────────────────
-                if _flash_counter > 0:
-                    _flash_intensity = _flash_counter / _flash_frames
-                    _draw_flash(draw, w, h, sec_col, _flash_intensity)
-                    _flash_counter -= 1
-
-                # ── Header title ─────────────────────────────────────────
                 hdr_line_h = int(hdr_topic_size * 1.35)
                 hdr_y      = int(h * 0.018)
                 for hdr_ln in hdr_lines:
@@ -1521,10 +1025,10 @@ class DebateVideoTool(BaseTool):
                     self._draw_diamond_title(draw, hdr_x, hdr_y, hdr_ln, f_hdr_topic, global_frame)
                     hdr_y   += hdr_line_h
 
-                # ── Section badge ───────────────────────────────────────────
                 _sec_label = _section_labels.get(cur_section, cur_section.capitalize())
+                _sec_color = _section_colors.get(cur_section, (220, 220, 220))
                 _sec_size  = max(w // 44, 22)
-                try:     _f_sec = ImageFont.truetype(FONT_BOLD, _sec_size)
+                try:    _f_sec = ImageFont.truetype(FONT_BOLD, _sec_size)
                 except: _f_sec = ImageFont.load_default()
                 _sec_gap  = int(h * 0.005)
                 _sec_y    = hdr_y + _sec_gap
@@ -1534,16 +1038,16 @@ class DebateVideoTool(BaseTool):
                 _sec_x    = (w - _sec_w) // 2
                 _sec_alpha = min(1.0, fi / max(fade_frames, 1)) if cur_section != _prev_section else 1.0
                 _pad_x2, _pad_y2 = int(w * 0.018), int(h * 0.004)
-                _bg_badge = tuple(int(ch * 0.28 * _sec_alpha) for ch in sec_col)
-                _border   = tuple(int(ch * _sec_alpha) for ch in sec_col)
+                _bg      = tuple(int(ch * 0.28 * _sec_alpha) for ch in _sec_color)
+                _border  = tuple(int(ch * _sec_alpha) for ch in _sec_color)
                 draw.rectangle(
                     [_sec_x - _pad_x2, _sec_y - _pad_y2, _sec_x + _sec_w + _pad_x2, _sec_y + _sec_h + _pad_y2],
-                    fill=_bg_badge, outline=_border, width=2
+                    fill=_bg, outline=_border, width=2
                 )
                 _ca = (int(255 * _sec_alpha),) * 3
                 for _dx, _dy in [(-1,0),(1,0),(0,-1),(0,1)]:
                     draw.text((_sec_x+_dx, _sec_y+_dy), _sec_label, font=_f_sec,
-                              fill=tuple(int(ch * 0.5 * _sec_alpha) for ch in sec_col))
+                              fill=tuple(int(ch * 0.5 * _sec_alpha) for ch in _sec_color))
                 draw.text((_sec_x, _sec_y), _sec_label, font=_f_sec, fill=_ca)
                 _prev_section = cur_section
                 _ul_y = _sec_y + _sec_h + _pad_y2 + 2
@@ -1551,16 +1055,7 @@ class DebateVideoTool(BaseTool):
                 sep_y = max(header_h - 2, _ul_y + int(h * 0.008))
                 draw.line([(pad_x, sep_y), (w - pad_x, sep_y)], fill=(50, 60, 80), width=1)
 
-                # ── Active line glow highlight bar ───────────────────────
-                glow_h  = active_font_h + int(h * 0.012)
-                glow_y  = active_y - int(h * 0.006)
-                glow_a  = int(35 * alpha)
-                glow_c  = tuple(int(c * 0.5) for c in sec_col)
-                draw.rectangle([0, glow_y, w, glow_y + glow_h],
-                               fill=(*glow_c, glow_a))
-
-                # ── Past lines (scroll up, fade/shrink) ──────────────────
-                past_indices  = list(range(max(0, line_idx - 30), line_idx))
+                past_indices = list(range(max(0, line_idx - 30), line_idx))
                 past_indices.reverse()
                 y_cursor = active_y
                 for age, pi in enumerate(past_indices, start=1):
@@ -1575,11 +1070,9 @@ class DebateVideoTool(BaseTool):
                     self._justify(draw, pad_x, y_pos, lines_data[pi][0], fnt, max_px, c)
                     y_cursor = y_pos
 
-                # ── Active line (neon glow) ───────────────────────────────
                 neon_c = self._neon_white(alpha, global_frame)
                 self._justify(draw, pad_x, active_y, ltext, f_active, max_px, neon_c)
 
-                # ── Future lines (fade in below) ──────────────────────────
                 future_start = active_y + active_font_h + int(h * 0.025)
                 y_cursor     = future_start
                 for ahead, fi2 in enumerate(range(line_idx + 1, min(line_idx + 20, len(lines_data))), start=1):
@@ -1593,51 +1086,21 @@ class DebateVideoTool(BaseTool):
                     self._justify(draw, pad_x, y_cursor, lines_data[fi2][0], fnt, max_px, c)
                     y_cursor += line_h
 
-                # ── Avatars ──────────────────────────────────────────────────
-                # Active  → 1.34× base radius  → ~45% visual area
-                # Inactive→ 0.74× base radius  → ~55% relative area (smaller, dim)
-                # Pop-in bounce: overshoots 25% then settles over 18 frames
-                import math as _mav
-                _pop_frames = 18
-                _pop_t      = min(1.0, _section_frame / _pop_frames)
-                _bounce     = 1.0 + 0.25 * _mav.sin(_pop_t * _mav.pi) * (1.0 - _pop_t)
-                _SPK = 1.34 * _bounce   # active radius multiplier
-                _SIL = 0.74             # inactive radius multiplier
-                _pro_r = int(_av_r * (_SPK if cur_section == 'propose' else _SIL))
-                _con_r = int(_av_r * (_SPK if cur_section == 'oppose' else _SIL))
-                _mod_r = int(_av_r * (_SPK * 0.78 if cur_section == 'decide' else _SIL * 0.72))
-                _draw_avatar(draw, _av_left,  _av_y, _pro_r, 'propose',
-                             cur_section == 'propose', global_frame)
-                _draw_avatar(draw, _av_right, _av_y, _con_r, 'oppose',
-                             cur_section == 'oppose', global_frame)
-                _draw_avatar(draw, _av_mid,   _av_y, _mod_r, 'decide',
-                             cur_section == 'decide', global_frame)
-
-                # ── Waveform equalizer bars ────────────────────────────────
-                _draw_waveform(draw, w//2, _WV_Y, _WV_W, _WV_H, _WV_BARS,
-                               global_frame, sec_col, speaking=True)
-
-                # ── Progress bar (section-colored) ───────────────────────
                 prog   = (line_idx * frames_per_line + fi) / total_frames
-                bar_y  = h - int(h * 0.008)
-                bar_h  = max(3, int(h * 0.007))
+                bar_y  = h - 2
                 filled = int(w * prog)
-                draw.rectangle([0, bar_y, w, bar_y + bar_h], fill=(25, 25, 35, 200))
+                draw.line([(0, bar_y), (w - 1, bar_y)], fill=(40, 40, 40), width=1)
                 if filled > 0:
-                    draw.rectangle([0, bar_y, filled, bar_y + bar_h],
-                                   fill=(*sec_col, 220))
+                    draw.line([(0, bar_y), (filled, bar_y)], fill=(200, 200, 200), width=1)
 
-                # ── Watermark ─────────────────────────────────────────────
                 tag     = wm_text if wm_enabled else f"@{channel}"
                 tw_bbox = draw.textbbox((0, 0), tag, font=f_wm)
                 tw      = tw_bbox[2] - tw_bbox[0]
                 wm_x    = (w - tw) // 2
-                wm_y    = wm_zone + int(h * 0.005)
+                wm_y    = wm_zone + int(h * 0.02)
                 draw.text((wm_x, wm_y), tag, font=f_wm, fill=(30, 30, 38))
 
-                # ── Composite and pipe ────────────────────────────────────
-                _composited  = Image.alpha_composite(_base, img)
-                proc.stdin.write(_composited.convert("RGB").tobytes())
+                proc.stdin.write(img.tobytes())
                 global_frame += 1
                 if pbar is not None:
                     pbar.update(1)

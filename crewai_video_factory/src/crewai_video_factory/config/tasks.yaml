@@ -366,7 +366,7 @@ generate_youtube_metadata:
 upload_to_youtube:
   description: >
     Upload final merged videos and CC subtitle files to YouTube for {topic}.
-    Skips automatically if upload_youtube_video is false.
+    Skips video upload if upload_youtube_video is false, but ALWAYS calls the tool when upload_cc is true to upload CC/MD to existing videos.
 
     CRITICAL — call the YouTube Upload Tool with EXACTLY these values:
       topic: "{topic}"
@@ -475,7 +475,10 @@ create_debate_video:
       tts_engine: "{tts_engine}"
       tts_voices: {tts_voices}
       lang_suffix: "{lang_suffix}"
-    bg_opacity: {debate_bg_opacity}
+      debate_background_enabled: {debate_background_enabled}
+      bg_opacity: {debate_bg_opacity}
+      debate_background_prompt: "{debate_background_prompt}"
+      image_gen_backend: "{image_gen_backend}"
 
     Output files per format in {output_dir}/:
       debate_video_[format].mp4              (silent video)
