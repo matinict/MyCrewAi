@@ -5,7 +5,7 @@ import time
 import urllib.request
 import urllib.parse
 from crewai.tools import BaseTool
-from typing import Type
+from typing import Type, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 
@@ -96,9 +96,9 @@ def _google_translate(text: str, dest: str, retries: int = 3) -> str:
 class YouTubeMetadataToolInput(BaseModel):
     topic: str                      = Field(...,           description="Topic/title for the video")
     filename: str                   = Field(...,           description="Base filename slug")
-    output_dir: str                 = Field(...,           description="Output directory")
-    start_year: int                 = Field(default=2015)
-    end_year: int                   = Field(default=2026)
+    output_dir: str                 = Field(...,           description="Output directory")     
+    start_year: Optional[int]       = Field(default=2015)
+    end_year: Optional[int]         = Field(default=2026)
     video_duration: float           = Field(default=60.0,  description="Legacy field")
     generate_narration: bool        = Field(default=True)
     generate_youtube_metadata: bool = Field(default=True)
@@ -120,6 +120,14 @@ class YouTubeMetadataToolInput(BaseModel):
             "AND for per-fmt debate CC/Th splitting."
         ),
     )
+    video_style: list = Field(
+        default=[],
+        description=(
+            "Pipeline style(s) to activate: 'debate', 'animation', or both. "
+            "Drives which metadata branch is used (YT/debate/{fmt}/ vs YT/{fmt}/). "
+            "Takes priority over pipeline tokens in video_formats."
+        ),
+    )
 
 # ── Tool ──────────────────────────────────────────────────────────────────────
 
@@ -133,14 +141,15 @@ class YouTubeMetadataTool(BaseTool):
     args_schema: Type[BaseModel] = YouTubeMetadataToolInput
 
     # ─────────────────────────────────────────────────────────────────────────
+ 
 
     def _run(
         self,
         topic: str,
         filename: str,
         output_dir: str,
-        start_year: int = 2015,
-        end_year: int = 2026,
+        start_year: int = None,
+        end_year: int = None,
         video_duration: float = 60.0,
         generate_narration: bool = True,
         generate_youtube_metadata: bool = True,
@@ -156,7 +165,10 @@ class YouTubeMetadataTool(BaseTool):
         yt_metadata_lang: int = 35,
         yt_cc_lang: int = 20,
         animation_video_formats: list = None,
+        video_style: list = None,
     ) -> str:
+        start_year = start_year or 2015
+        end_year   = end_year   or 2026
         import time as _time
         import re as _vre
         t0 = _time.time()
@@ -174,6 +186,19 @@ class YouTubeMetadataTool(BaseTool):
             video_formats = [v.strip() for v in _vre.findall(r"[A-Za-z0-9]+", video_formats)
                              if v not in ("true", "false", "null", "list")]
         video_formats = [f for f in video_formats if f in _valid] or ["HD"]
+
+        # ── video_style injects pipeline tokens into video_formats ────────────
+        # data.json: metadata_prep_config.video_style: ["debate"] or ["animation"] or both
+        # This lets a pure-real-format run (e.g. video_formats=["Shorts"]) still
+        # activate the debate or animation metadata branch.
+        if video_style:
+            _style_list = [video_style] if isinstance(video_style, str) else list(video_style)
+            _style_tokens = [s.strip().lower() for s in _style_list if s.strip().lower() in _pipeline]
+            for _tok in _style_tokens:
+                if _tok not in video_formats:
+                    video_formats = [_tok] + video_formats  # prepend so branch check fires first
+            if _style_tokens:
+                print(f"[YTMetadata]   video_style={_style_tokens} → injected into video_formats: {video_formats}")
 
         # animation_video_formats = real formats used for animation branch AND debate per-fmt splits
         if not animation_video_formats:
@@ -217,7 +242,8 @@ class YouTubeMetadataTool(BaseTool):
 
             has_debate    = "debate" in video_formats
             has_animation = "animation" in video_formats
-            direct_fmts   = [f for f in video_formats if f not in _pipeline]
+            #direct_fmts   = [f for f in video_formats if f not in _pipeline]
+            direct_fmts   = [] if (has_debate or has_animation) else [f for f in video_formats if f not in _pipeline]
             fmt_results   = []
 
             # DEBATE → YT/debate/{real_fmt}/MD/  (separate content per format)
@@ -225,11 +251,15 @@ class YouTubeMetadataTool(BaseTool):
                 print(f"[YTMetadata]   • [debate] real formats: {animation_video_formats}")
                 for real_fmt in animation_video_formats:
                     lbl      = f"debate/{real_fmt}"
+ 
+                    # existing = os.path.join(output_dir, "YT", "debate", real_fmt, "MD", "en.json")
+                    # if os.path.exists(existing):
+                    #     print(f"[YTMetadata]   • [{lbl}] YT/{lbl}/MD/en.json already exists — skipping")
+                    #     fmt_results.append(f"[{lbl}] Skipped")
+                    #     continue
                     existing = os.path.join(output_dir, "YT", "debate", real_fmt, "MD", "en.json")
-                    if os.path.exists(existing):
-                        print(f"[YTMetadata]   • [{lbl}] YT/{lbl}/MD/en.json already exists")
-                        fmt_results.append(f"[{lbl}] Skipped")
-                        continue
+                    # always regenerate debate metadata — topic/content changes each run
+
                     meta = self._build_debate_metadata(
                         topic, output_dir, start_year, end_year,
                         fmt=real_fmt,
@@ -426,10 +456,11 @@ class YouTubeMetadataTool(BaseTool):
                 "description": self._generate_youtube_description(
                     topic, start_year, end_year, dur,
                     channel=channel, channel_lower=channel_lower, website=website),
-                "tags":     self._generate_youtube_tags(topic, channel=channel),
-                "chapters": ("0:00 Introduction\n0:30 Key Argument\n0:55 Verdict"
+                "tags":     self._generate_youtube_tags(topic, channel=channel), 
+
+                "chapters": ("0:00 Introduction\n0:10 Pro Argument\n0:35 Counter Argument\n0:50 Verdict"
                             if is_short else
-                             "0:00 Introduction\n0:30 Pro Arguments\n2:00 Con Arguments\n3:30 Verdict"),
+                             "0:00 Introduction\n0:30 Pro Argument\n1:30 Counter Argument\n2:30 Verdict & Conclusion"),
             }
 
         pro  = _sentences(pro_raw)  if pro_raw  else "Strong arguments support this position."
@@ -451,7 +482,9 @@ Subscribe @{channel} for full debates!
 #{topic.replace(' ', '')} #AIDebate #Shorts
 AI-generated for educational purposes.
 """.strip()
-            chapters = "0:00 Introduction\n0:10 Key Argument\n0:50 Verdict"
+           # chapters = "0:00 Introduction\n0:10 Key Argument\n0:50 Verdict"
+            chapters = "0:00 Introduction\n0:10 Pro Argument\n0:35 Counter Argument\n0:50 Verdict"
+            
         else:
             # HD / full format: include both sides
             title       = f"{topic}: AI Debate & Analysis | @{channel}"
@@ -472,7 +505,9 @@ FOLLOW US:
 #{topic.replace(' ', '')} #AIDebate #ArtificialIntelligence #TechDebate #FutureOfWork #AIAnalysis
 Disclaimer: Arguments generated by AI for educational purposes only.
 """.strip()
-            chapters = "0:00 Introduction\n0:30 Pro Arguments\n2:00 Con Arguments\n3:30 Verdict & Conclusion"
+            #chapters = "0:00 Introduction\n0:30 Pro Arguments\n2:00 Con Arguments\n3:30 Verdict & Conclusion"
+            chapters = "0:00 Introduction\n0:30 Pro Argument\n1:30 Counter Argument\n2:30 Verdict & Conclusion"
+            
         print(f"[YTMetadata]   • [debate/{fmt}] Title: {title}")
 
         tags = [
@@ -809,15 +844,13 @@ Disclaimer: Educational content. Data compiled from public sources.
         draw.text((W - 40 - fw + 20, 38 + 10), fmt_label, fill=fmt_col, font=fmt_f)
 
         # ── TOPIC title (2 lines) ─────────────────────────────────────────────
-        title_f = _font(88)
-        words   = topic.split()
-        mid     = len(words) // 2
-        lines   = ["  ".join(words[:mid]), "  ".join(words[mid:])]
+        title_f = _font(72)
         ty      = 120
-        for line in lines:
+        title_lines = _wrap_text(topic, title_f, W - 80, max_lines=3)
+        for line in title_lines:
             if not line: continue
             h = _center_text(line, ty, title_f, WHITE)
-            ty += h + 12
+            ty += h + 10
         ty += 18  # gap after title
 
         # ── horizontal rule ───────────────────────────────────────────────────
@@ -828,18 +861,19 @@ Disclaimer: Educational content. Data compiled from public sources.
         panel_y = ty
 
         if is_short:
-            # Portrait layout: panels stacked vertically, full width
-            panel_pad  = 36
+            # Portrait layout: 3 panels stacked vertically, full width
+            panel_pad  = 30
             panel_r    = 22
-            label_f    = _font(52)
-            body_f     = _font_reg(40)
+            label_f    = _font(44)
+            body_f     = _font_reg(34)
             panels = [
                 ("PRO ARGUMENT", GREEN, (30, 55, 35), pro_txt),
+                ("CON ARGUMENT", RED,   (55, 25, 25), con_txt),
                 ("VERDICT",      GOLD,  (55, 45, 20), dec_txt),
             ]
-            gap      = 28
-            pw       = W - 160   # full width minus margins
-            panel_h  = (H - panel_y - 160 - gap) // 2    # split remaining height
+            gap      = 20
+            pw       = W - 160
+            panel_h  = (H - panel_y - 160 - gap * 2) // 3
             px, py   = 80, panel_y
 
             for label, label_col, bg_col, body in panels:
@@ -848,11 +882,11 @@ Disclaimer: Educational content. Data compiled from public sources.
                     radius=panel_r, fill=bg_col)
                 draw.text((px + panel_pad, py + panel_pad),
                           label, fill=label_col, font=label_f)
-                body_lines = _wrap_text(body, body_f, pw - panel_pad * 2, max_lines=7)
-                by = py + panel_pad + 66
+                body_lines = _wrap_text(body, body_f, pw - panel_pad * 2, max_lines=5)
+                by = py + panel_pad + 54
                 for bl in body_lines:
                     draw.text((px + panel_pad, by), bl, fill=WHITE, font=body_f)
-                    by += 52
+                    by += 42
                 py += panel_h + gap
 
             foot_y = py + 20
@@ -1001,6 +1035,10 @@ Disclaimer: Educational content. Data compiled from public sources.
                 continue
 
             # ── ANIMATION: expand to real fmt names ───────────────────────────
+            #real_fmts = animation_video_formats if fmt == "animation" else [fmt]
+            
+
+            if "debate" in video_formats and fmt in _real: continue
             real_fmts = animation_video_formats if fmt == "animation" else [fmt]
 
             for real_fmt in real_fmts:
@@ -1029,7 +1067,9 @@ Disclaimer: Educational content. Data compiled from public sources.
         # Standard cc_en.txt fallback — only when non-debate formats are active.
         # debate-only pipeline already has per-fmt CC; cc_en.txt must not spill
         # into YT/HD/CC/ when video_formats = ['debate'] only.
-        has_non_debate = any(f != "debate" for f in video_formats)
+        #has_non_debate = any(f != "debate" for f in video_formats)
+        #has_non_debate = any(f != "debate" for f in video_formats) and not has_debate
+        has_non_debate = any(f != "debate" for f in video_formats) and "debate" not in video_formats
         std_cc = os.path.join(output_dir, "cc_en.txt")
         if has_non_debate and os.path.exists(std_cc):
             first_rf = animation_video_formats[0] if animation_video_formats else "standard"

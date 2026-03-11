@@ -106,17 +106,22 @@ def load_config():
                 if isinstance(_nested, dict):
                     # metadata_prep: rename video_formats → metadata_video_formats to avoid
                     # overwriting the main pipeline video_formats
-                    if _switch == 'metadata_prep' and 'video_formats' in _nested:
-                        _nested['metadata_video_formats'] = _nested.pop('video_formats')
-                    config.update(_nested)
+                    # if _switch == 'metadata_prep' and 'video_formats' in _nested:
+                    #     _nested['metadata_video_formats'] = _nested.pop('video_formats')
+                    # config.update(_nested)
+
+                   if _switch == 'metadata_prep' and ('video_formats' in _nested or 'video_style' in _nested):
+                        _key = 'video_style' if 'video_style' in _nested else 'video_formats'
+                        #_nested['metadata_video_formats'] = _nested.pop(_key) 
+                        _nested['metadata_video_formats'] = _nested[_key]
+                        _nested['video_style'] = _nested.pop(_key) if _key == 'video_style' else []
+
+                   config.update(_nested)
+
+
             else:
                 config[_flag] = False  # guarantee gate flag is off
-
-        # ── Alias publisher_config lang keys → internal names ─────────────
-        # upload_cc_lang  → upload_cc_limit  (caps CC files uploaded to YouTube)
-        # upload_md_lang  → upload_md_limit  (caps MD localizations uploaded to YouTube)
-        # NOTE: yt_cc_lang / yt_metadata_lang are set by metadata_prep_config separately
-        #       and control how many files are GENERATED — independent of upload limits
+ 
         if 'upload_cc_lang' in config:
             config.setdefault('upload_cc_limit', int(config['upload_cc_lang']))
         if 'upload_md_lang' in config:
@@ -161,7 +166,8 @@ def load_config():
             'generate_yt_thumbnail':      False,  # generate_yt_thumbnail from metadata_prep_config
             'yt_metadata_lang':           35,
             'yt_cc_lang':                 20,
-            'metadata_video_formats':     [],   # video_formats from metadata_prep_config
+            #'metadata_video_formats':     [],   # video_formats from metadata_prep_config
+            'metadata_video_formats':     [], 'video_style':                [],
             '_metadata_video_formats':    [],   # resolved at run() — passed to task
             'animation_video_formats':    [],   # = main video_formats, used by metadata tool for animation branch
             # publisher_config

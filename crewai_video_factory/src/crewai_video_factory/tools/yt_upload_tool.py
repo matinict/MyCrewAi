@@ -188,9 +188,19 @@ class YTUploadTool(BaseTool):
                 _log_candidates = [
                     os.path.join(output_dir, "YT", fmt, "upload_log.json"),
                     os.path.join(output_dir, "YT", "debate", fmt, "upload_log.json"),
+                ]
+                # Root-level logs only if format matches — prevents HD log being used for Shorts
+                for _root_log in [
                     os.path.join(output_dir, "YT", "upload_log.json"),
                     os.path.join(output_dir, "YT", "debate", "upload_log.json"),
-                ]
+                ]:
+                    if os.path.exists(_root_log):
+                        try:
+                            _rf = json.load(open(_root_log)).get("format", "")
+                            if _rf.upper() == fmt.upper():
+                                _log_candidates.append(_root_log)
+                        except Exception:
+                            pass
                 # Pick first log that EXISTS and has a non-empty video_id
                 log_path = None
                 for _lc in _log_candidates:
