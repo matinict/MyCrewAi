@@ -78,8 +78,8 @@ define_topic:
     - Term 3: one-line definition
     - Term 4: one-line definition
 
-    TIMELINE
-    [3-4 sentences on key milestones and evolution. If start/end years are available, include them.]
+    TIMELINE {start} TO {end}
+    [3-4 sentences on key milestones and evolution]
 
     WHAT YOU WILL SEE IN THIS RACE
     [2 sentences on players, trends, and what to watch for]
@@ -183,18 +183,17 @@ create_intro_clip:
     When enabled, creates intro MP4 clips for each format in {video_formats}.
     CRITICAL — call the Intro Clip Tool with EXACTLY these values:
       topic: "{topic}"
-      start_year: "{start}"
-      end_year: "{end}"
+      start_year: {start}
+      end_year: {end}
       output_dir: "{output_dir}"
       video_formats: {video_formats}
       intro_enabled: {intro_enabled}
       intro_duration: {intro_duration}
       intro_context: "{intro_context}"
-      intro_slug: "{intro_slug}"
+      intro_slug: "biggest debates"
       channel: "{channel}"
       watermark_enabled: {watermark_enabled}
       watermark_text: "{watermark_text}"
-      lang_suffix: "{lang_suffix}"
 
     Output files: {output_dir}/intro_[format].mp4
     Example: output/LLMPopularity/intro_Shorts.mp4, output/LLMPopularity/intro_HD.mp4
@@ -221,11 +220,11 @@ add_bar_race_audio:
     The tool reads the CSV from output/{filename}.csv automatically.
     DO NOT substitute topic for filename. filename must be the slug: "{filename}" (e.g. "LLMPopularity").
     - Audio files saved to: {output_dir}/bar_race_[format]_audio.mp3
-    - Narration text: {output_dir}/bar_race_cc.txt
+    - Narration text: {output_dir}/bar_race_cc_en.txt
   expected_output: >
     List of bar race audio files created, OR skip message if disabled.
     Example: "🎵 Bar race audio files created:\n   • bar_race_Shorts_audio.mp3\n   • bar_race_HD_audio.mp3"
-    Narration file: "bar_race_cc.txt"
+    Narration file: "bar_race_cc_en.txt"
   agent: bar_race_audio_engineer
   context:
     - create_bar_race_video
@@ -236,11 +235,11 @@ add_audio:
     This task will automatically skip if audio is disabled in inputs.
     When enabled, creates audio files for all generated videos based on {topic}.
     - Audio files saved to: output/{filename}/[style]_[format]_audio.mp3
-    - Narration text file: output/{filename}/{filename}_cc.txt
+    - Narration text file: output/{filename}/{filename}_cc_en.txt
   expected_output: >
     List of audio files created, OR skip message if disabled.
     Example: "🎵 Audio narration files created:\n   • ProgrammingLanguage_bar_Shorts_audio.mp3"
-    Narration file: "ProgrammingLanguage_cc.txt"
+    Narration file: "ProgrammingLanguage_cc_en.txt"
   agent: audio_engineer
   context:
     - create_video
@@ -277,12 +276,12 @@ bar_merge:
           → Merged_[format].mp4
 
     Also merges CC text files:
-      intro_[format]_cc.txt
+      intro_[format]_cc_en.txt
         +
-      bar_race_[format]_cc.txt
+      bar_race_[format]_cc_en.txt
         +
-      definition_video_[format]_cc.txt
-          → Merged_[format]_cc.txt
+      definition_video_[format]_cc_en.txt
+          → Merged_[format]_cc_en.txt
 
     CRITICAL — call the Bar Merge Tool with EXACTLY these values:
       output_dir: "{output_dir}"
@@ -293,15 +292,15 @@ bar_merge:
 
     Output files per format:
       • Merged_[format].mp4          (final video with perfect audio sync)
-      • Merged_[format]_cc.txt    (merged closed captions text)
+      • Merged_[format]_cc_en.txt    (merged closed captions text)
 
     Example for Shorts format:
       output/{filename}/Merged_Shorts.mp4
-      output/{filename}/Merged_Shorts_cc.txt
+      output/{filename}/Merged_Shorts_cc_en.txt
 
     Example for HD format:
       output/{filename}/Merged_HD.mp4
-      output/{filename}/Merged_HD_cc.txt
+      output/{filename}/Merged_HD_cc_en.txt
   expected_output: >
     A message starting with "✅ SUCCESS" listing the final files created.
     Once you receive output from the tool containing "completed" or "skipped", return it as your Final Answer immediately.
@@ -313,60 +312,48 @@ generate_youtube_metadata:
     Generate YouTube metadata and narration text file for {topic}.
     Generate YouTube metadata AND thumbnail images for {topic}.
     This includes:
-    - Narration text file: output/{filename}/{filename}_cc.txt
-    - YouTube title, description, tags, chapters (sourced from propose/oppose/decide .md for debate format)
-    - Thumbnail images: output/{filename}/YT/debate/{fmt}/Th/{filename}.[png|jpg] (debate)
-                        output/{filename}/YT/{fmt}/Th/{filename}.[png|jpg] (animation/direct)
+    - Narration text file: output/{filename}/{filename}_cc_en.txt
+    - YouTube title, description, tags, chapters
+    - Thumbnail images: output/{filename}/{filename}.[png|jpg]
     - Metadata saved to output/{filename}/YT/format/MD/
-    - CC subtitle files saved to output/{filename}/YT/debate/{fmt}/CC/ (debate) or YT/{fmt}/CC/
 
     CRITICAL — call the YouTube Metadata Tool with EXACTLY these values:
       topic: "{topic}"
       filename: "{filename}"
       output_dir: "{output_dir}"
-      start_year: "{start}"
-      end_year: "{end}"
+      start_year: {start}
+      end_year: {end}
       channel: "{channel}"
       channel_lower: "{channel_lower}"
       website: "{website}"
-      video_formats: {_metadata_video_formats}
+      video_formats: {video_formats}
       fps: {fps}
       fps_hd_offset: {fps_hd_offset}
       generate_youtube_metadata: {generate_youtube_metadata}
-      generate_thumbnail: {generate_yt_thumbnail}
-      csv_path: "output/{filename}.csv"
-      yt_metadata_lang: {yt_metadata_lang}
-      yt_cc_lang: {yt_cc_lang}
-      animation_video_formats: {video_formats}
-
-    video_formats controls what gets generated:
-      "debate"    → reads propose_En.md / oppose_En.md / decide_En.md for metadata;
-                    finds {channel}_*_{fmt}_*_cc.txt for CC (optional)
-      "animation" → auto-generates from CSV / year range (standard bar race flow)
-      "HD"/"Shorts"/etc → standard bar race flow
-
-    yt_metadata_lang controls how many languages (top N from LANGUAGES list) to translate
-    title/description/tags into. Default 35 = all viewer languages.
-    yt_cc_lang controls how many languages for CC subtitle files (top N from LANGUAGES list).
+      generate_thumbnail: true          # ← ADDED
+      csv_path: "output/{filename}.csv" # ← ADDED
 
     The tool will:
-      1. For each format in video_formats — generate metadata (MD) files
-      2. Find and translate CC narration files (CC) — debate CC is optional
+      1. Generate narration text (cc_en.txt)
+      2. Generate YouTube metadata per format (YT/format/MD/*.txt)
       3. Generate 1920x1080 thumbnails (PNG + JPG)
-      4. Cleanup and rename final videos
+      4. Translate CC to 31 languages
+      5. Cleanup and rename final videos
   expected_output: >
-    Confirmation of all files created per format:
-    - YT/debate/MD/en.json + N language translations
-    - YT/debate/CC/en.txt + up to 20 language translations (if CC file found)
-    - YT/animation/MD/en.json + N language translations (if animation format present)
-    - {filename}.png + {filename}.jpg (thumbnails)
+    Confirmation of all files created:
+    - cc_en.txt (Narration)
+    - YT/format/MD/en.json + translations
+    - {filename}.png (thumbnail)
+    - {filename}.jpg (thumbnail)
   agent: youtube_metadata_specialist
+  context:
+    - generate_csv
 
 
 upload_to_youtube:
   description: >
     Upload final merged videos and CC subtitle files to YouTube for {topic}.
-    Skips video upload if upload_youtube_video is false, but ALWAYS calls the tool when upload_cc is true to upload CC/MD to existing videos.
+    Skips automatically if upload_youtube_video is false.
 
     CRITICAL — call the YouTube Upload Tool with EXACTLY these values:
       topic: "{topic}"
@@ -377,9 +364,6 @@ upload_to_youtube:
       privacy_status: "{upload_privacy}"
       category_id: "{upload_category_id}"
       upload_cc: {upload_cc}
-      upload_cc_limit: {upload_cc_limit}
-      upload_md_limit: {upload_md_limit}
-      dry_run: {upload_dry_run}
       notify_subscribers: {upload_notify_subscribers}
       client_secrets_file: "{upload_client_secrets_file}"
       token_file: "{upload_token_file}"
@@ -420,8 +404,8 @@ share_to_social:
       channel: "{channel}"
       website: "{website}"
       image_path: "{output_dir}/{filename}.png"
-      start_year: "{start}"
-      end_year: "{end}"
+      start_year: {start}
+      end_year: {end}
       video_url: ""
 
     The tool will:
@@ -474,17 +458,12 @@ create_debate_video:
       video_fps: {video_fps}
       tts_engine: "{tts_engine}"
       tts_voices: {tts_voices}
-      lang_suffix: "{lang_suffix}"
-      debate_background_enabled: {debate_background_enabled}
-      bg_opacity: {debate_bg_opacity}
-      debate_background_prompt: "{debate_background_prompt}"
-      image_gen_backend: "{image_gen_backend}"
 
     Output files per format in {output_dir}/:
       debate_video_[format].mp4              (silent video)
       debate_video_[format]_audio.mp3        (TTS audio)
       debate_video_[format]_with_audio.mp4   (final merged)
-      debate_video_[format]_cc.txt        (narration text)
+      debate_video_[format]_cc_en.txt        (narration text)
 
   expected_output: >
     List of debate video files created per format, OR skip message if disabled.
@@ -499,18 +478,18 @@ debate_propose:
 
     Format your response exactly like this:
 
-    PROPOSITION: {topic}
+    PROPOSITION: {topic} ({start}–{end})
 
     OPENING STATEMENT
     [2-3 sentences establishing your position clearly]
 
-    Arg-1: [Title]
+    ARGUMENT 1: [Title]
     [3-4 sentences with evidence and reasoning]
 
-    Arg-2: [Title]
+    ARGUMENT 2: [Title]
     [3-4 sentences with evidence and reasoning]
 
-    Arg-3: [Title]
+    ARGUMENT 3: [Title]
     [3-4 sentences with evidence and reasoning]
 
     CONCLUSION
@@ -519,10 +498,10 @@ debate_propose:
     Keep total response under {debate_max_chars} characters.
     Write ONLY the argument text — no tool calls, no JSON, no code.
   expected_output: >
-    Full proposition argument as plain text, starting with "PROPOSITION: {topic}".
+    Full proposition argument as plain text, starting with "PROPOSITION: {topic} ({start}–{end})".
     Must be under {debate_max_chars} characters. No tool calls or JSON.
   agent: debater
-  output_file: output/{filename}/propose_{lang_suffix}.md
+  output_file: output/{filename}/propose.md
 
 debate_oppose:
   description: >
@@ -532,18 +511,18 @@ debate_oppose:
 
     Format your response exactly like this:
 
-    OPPOSITION: {topic}
+    OPPOSITION: {topic} ({start}–{end})
 
     OPENING STATEMENT
     [2-3 sentences establishing your counter-position clearly]
 
-    Arg-1 (Con): [Title]
+    COUNTER-ARGUMENT 1: [Title]
     [3-4 sentences with evidence and reasoning]
 
-    Arg-2 (Con): [Title]
+    COUNTER-ARGUMENT 2: [Title]
     [3-4 sentences with evidence and reasoning]
 
-    Arg-3 (Con): [Title]
+    COUNTER-ARGUMENT 3: [Title]
     [3-4 sentences with evidence and reasoning]
 
     CONCLUSION
@@ -552,12 +531,12 @@ debate_oppose:
     Keep total response under {debate_max_chars} characters.
     Write ONLY the argument text — no tool calls, no JSON, no code.
   expected_output: >
-    Full opposition argument as plain text, starting with "OPPOSITION: {topic}".
+    Full opposition argument as plain text, starting with "OPPOSITION: {topic} ({start}–{end})".
     Must be under {debate_max_chars} characters. No tool calls or JSON.
   agent: debater
   context:
     - debate_propose
-  output_file: output/{filename}/oppose_{lang_suffix}.md
+  output_file: output/{filename}/oppose.md
 
 debate_decide:
   description: >
@@ -567,7 +546,7 @@ debate_decide:
 
     Format your response exactly like this:
 
-    VERDICT: {topic}
+    VERDICT: {topic} ({start}–{end})
 
     SUMMARY OF PROPOSITION
     [2-3 sentences summarizing the PRO arguments]
@@ -584,49 +563,46 @@ debate_decide:
     Keep total response under {debate_max_chars} characters.
     Write ONLY the verdict text — no tool calls, no JSON, no code.
   expected_output: >
-    Full moderator verdict as plain text, starting with "VERDICT: {topic} .
+    Full moderator verdict as plain text, starting with "VERDICT: {topic} ({start}–{end})".
     Must be under {debate_max_chars} characters. No tool calls or JSON.
   agent: judge
   context:
     - debate_propose
     - debate_oppose
-  output_file: output/{filename}/decide_{lang_suffix}.md
+  output_file: output/{filename}/decide.md
 
 # ✅ NEW: Debate Merge Task (ADDED - DO NOT REMOVE)
 debate_merge:
   description: >
     Concatenate intro + debate video segments WITH AUDIO into a single final MP4 per format.
     This task will automatically skip if debate_merge_enabled is false in inputs.
+  Pipeline per format (where [format] is each entry in {video_formats}):
+    intro_[format]_with_audio.mp4
+      +
+    debate_video_[format]_with_audio.mp4
+        → ffmpeg concat (with -reset_timestamps 1 for perfect sync)
+        → {channel}_{topic_slug}_[format].mp4
 
-    Pipeline per format (where [format] is each entry in {video_formats}):
-      intro_[format]_with_audio.mp4
-        +
-      debate_video_[format]_with_audio.mp4
-          ffmpeg concat (with -reset_timestamps 1 for perfect sync)
-          {channel}_{topic_slug}_[format].mp4
+  Also merges CC text files:
+    intro_[format]_cc_en.txt
+      +
+    debate_video_[format]_cc_en.txt
+        → {channel}_{topic_slug}_[format]_cc_en.txt
 
-    Also merges CC text files:
-      intro_[format]_cc.txt
-        +
-      debate_video_[format]_cc.txt
-          {channel}_{topic_slug}_[format]_cc.txt
+  CRITICAL — call the Debate Merge Tool with EXACTLY these values:
+    output_dir: "{output_dir}"
+    video_formats: {video_formats}
+    debate_merge_enabled: {debate_merge_enabled}    # ✅ Must match _task_defaults key
+    channel: "{channel}"
+    topic: "{topic}"
 
-    CRITICAL — call the Debate Merge Tool with EXACTLY these values:
-      output_dir: "{output_dir}"
-      video_formats: {video_formats}
-      debate_merge_enabled: {debate_merge_enabled}
-      channel: "{channel}"
-      topic: "{topic}"
-      topic_slug: "{topic_slug}"
-      lang_suffix: "{lang_suffix}"
+  Output files per format:
+    • {channel}_{topic_slug}_[format].mp4          (final video with perfect audio sync)
+    • {channel}_{topic_slug}_[format]_cc_en.txt    (merged closed captions text)
 
-    Output files per format:
-      {channel}_{topic_slug}_[format].mp4          (final video with perfect audio sync)
-      {channel}_{topic_slug}_[format]_cc.txt    (merged closed captions text)
-
-    Example for Shorts format:
-      output/{filename}/PlayOwnAi_AIReplaceEntry_Shorts.mp4
-      output/{filename}/PlayOwnAi_AIReplaceEntry_Shorts_cc.txt
+  Example for HD format:
+    output/{filename}/PlayOwnAi_AIReplaceEntry_HD.mp4
+    output/{filename}/PlayOwnAi_AIReplaceEntry_HD_cc_en.txt
 
   expected_output: >
     A message starting with "✅ SUCCESS" listing the final files created.
