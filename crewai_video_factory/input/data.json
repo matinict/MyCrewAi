@@ -1,10 +1,10 @@
 {
-  "topic": "Open Vs Closed Source Ai\u2014 Which Is More Dangerous?",
+  "topic": "OpenAI vs Anthropic — Which AI Company Will Win the Future?",
   "start": null,
   "end": null,
   "granularity": "yearly",
   "video_formats": [
-    "HD"
+    "Shorts"
   ],
   "use_label_mappings": false,
   "fps": 4.9,
@@ -48,12 +48,11 @@
   },
   "debate": false,
   "debate_config": {
-    "intro_slug": "One of the biggest debates in tech right now",
-    "debate_definition_enabled": true,
+    "intro_slug": "One of the biggest debates in Ai tech right now",
+    "debate_definition_enabled": false,
     "debate_max_chars": 2000,
     "llm_debate": "dashscope/qwen-plus",
-
-    "debate_video_enabled": true,
+    "debate_video_enabled": false,
     "debate_secs_per_line": 3.5,
     "debate_background_enabled": false,
     "debate_bg_opacity": 150,
@@ -94,13 +93,13 @@
 
   "metadata_prep": false,
   "metadata_prep_config": {
-    "video_formats": [
+    "video_style": [
       "debate"
     ],
     "generate_youtube_metadata": true,
-    "generate_yt_thumbnail": true,
-    "yt_metadata_lang": "50",
-    "yt_cc_lang": "50"
+    "generate_thumbnail": true,
+    "yt_metadata_lang": "30",
+    "yt_cc_lang": "4"
   },
   "publisher": true,
   "publisher_config": {
@@ -108,7 +107,7 @@
     "upload_dry_run": false,
     "upload_privacy": "private",
     "upload_category_id": "28",
-    "upload_cc": true,
+    "upload_cc": false,
     "upload_cc_lang": "1",
     "upload_md_lang": "5",
     "upload_notify_subscribers": false,
@@ -117,7 +116,13 @@
     "llm_youtube": "ollama/qwen2.5:latest",
     "llm_upload": "ollama/qwen2.5-coder:3b",
     "llm_embed": "ollama/nomic-embed-text:latest",
-    "yt_pin_commnet_gen": false
+    "yt_pin_commnet_gen": false,
+    "fb_upload": true,
+    "fb_upload_config": {
+        "upload_facebook_video": true,
+        "privacy_status": "SELF",
+        "credentials_file": "input/fb_credentials.json"
+    }
   },
   "social": false,
   "social_config": {

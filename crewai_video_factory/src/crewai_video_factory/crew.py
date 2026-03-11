@@ -16,6 +16,8 @@ from crewai_video_factory.tools.yt_upload_tool import YTUploadTool
 from crewai_video_factory.tools.social_share_tool import SocialShareTool
 from crewai_video_factory.tools.debate_video_tool import DebateVideoTool
 from crewai_video_factory.tools.debate_merge_tool import DebateMergeTool
+#from crewai_video_factory.fb_upload_tool import FBUploadTool
+from crewai_video_factory.tools.fb_upload_tool import FBUploadTool
 
 @CrewBase
 class CrewaiVideoFactory:
@@ -129,6 +131,14 @@ class CrewaiVideoFactory:
         if self._llm('llm_upload'):
             kwargs['llm'] = self._llm('llm_upload')
         return Agent(**kwargs)
+    
+    @agent
+    def facebook_upload_specialist(self) -> Agent:
+        return Agent(
+            config=self.agents_config['facebook_upload_specialist'],
+            tools=[FBUploadTool()],
+            verbose=True
+        )
 
     @agent
     def social_share_specialist(self) -> Agent:
@@ -212,6 +222,12 @@ class CrewaiVideoFactory:
     @task
     def upload_to_youtube(self) -> Task:
         return Task(config=self.tasks_config['upload_to_youtube'])
+    
+    @task
+    def upload_to_facebook(self) -> Task:
+        return Task(
+            config=self.tasks_config['upload_to_facebook'],
+        )
 
     @task
     def share_to_social(self) -> Task:

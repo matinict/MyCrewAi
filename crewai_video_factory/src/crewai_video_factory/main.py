@@ -98,30 +98,35 @@ def load_config():
             ("metadata_prep", "metadata_prep_config", "generate_youtube_metadata"),
             ("publisher",     "publisher_config",     "upload_youtube_video"),
             ("social",        "social_config",        "social_share_enabled"),
+            ("fb_upload",     "fb_upload_config",     "upload_facebook_video"),
+
+
 
         ]
         for _switch, _block, _flag in _block_map:
             _nested = config.pop(_block, None)
             if config.get(_switch, False):
                 if isinstance(_nested, dict):
-                    # metadata_prep: rename video_formats → metadata_video_formats to avoid
-                    # overwriting the main pipeline video_formats
-                    # if _switch == 'metadata_prep' and 'video_formats' in _nested:
-                    #     _nested['metadata_video_formats'] = _nested.pop('video_formats')
-                    # config.update(_nested)
+                    # publisher: hoist fb_upload/fb_upload_config out before flattening
+                    if _switch == 'publisher' and 'fb_upload' in _nested:
+                        config.setdefault('fb_upload', _nested.pop('fb_upload'))
+                        _fb_cfg = _nested.pop('fb_upload_config', {})
+                        if 'privacy_status' in _fb_cfg:
+                            _fb_cfg['fb_privacy_status'] = _fb_cfg.pop('privacy_status')
+                        if 'credentials_file' in _fb_cfg:
+                            _fb_cfg['fb_credentials_file'] = _fb_cfg.pop('credentials_file')
+                        config.setdefault('fb_upload_config', _fb_cfg)
 
-                   if _switch == 'metadata_prep' and ('video_formats' in _nested or 'video_style' in _nested):
+                    if _switch == 'metadata_prep' and ('video_formats' in _nested or 'video_style' in _nested):
                         _key = 'video_style' if 'video_style' in _nested else 'video_formats'
-                        #_nested['metadata_video_formats'] = _nested.pop(_key) 
                         _nested['metadata_video_formats'] = _nested[_key]
                         _nested['video_style'] = _nested.pop(_key) if _key == 'video_style' else []
 
-                   config.update(_nested)
-
+                    config.update(_nested)
 
             else:
                 config[_flag] = False  # guarantee gate flag is off
- 
+
         if 'upload_cc_lang' in config:
             config.setdefault('upload_cc_limit', int(config['upload_cc_lang']))
         if 'upload_md_lang' in config:
@@ -449,9 +454,9 @@ def run():
         # [3] create_definition_video [4] create_video             [5] create_bar_race_video
         # [6] create_intro_clip       [7] bar_merge                [8] add_audio
         # [9] merge_audio_video       [10] generate_youtube_metadata [11] upload_to_youtube
-        # [12] share_to_social
-        # [13] debate_propose  [14] debate_oppose  [15] debate_decide
-        # [16] create_debate_video    [17] debate_merge
+        # [12] upload_to_facebook     [13] share_to_social
+        # [14] debate_propose  [15] debate_oppose  [16] debate_decide
+        # [17] create_debate_video    [18] debate_merge
 
         if inputs.get('bar_race_video_enabled', False):
             final_tasks.append(full_crew.tasks[5])  # create_bar_race_video
@@ -500,16 +505,16 @@ def run():
             if _propose_exists and _oppose_exists and _decide_exists:
                 print(f"⭐️  Debate files exist ({_lang}) — skipping LLM generation (using existing)")
             else:
-                final_tasks.append(full_crew.tasks[13])  # debate_propose
-                final_tasks.append(full_crew.tasks[14])  # debate_oppose
-                final_tasks.append(full_crew.tasks[15])  # debate_decide
+                final_tasks.append(full_crew.tasks[14])  # debate_propose
+                final_tasks.append(full_crew.tasks[15])  # debate_oppose
+                final_tasks.append(full_crew.tasks[16])  # debate_decide
 
         if inputs.get('debate_video_enabled', False):
-            final_tasks.append(full_crew.tasks[16])  # create_debate_video
+            final_tasks.append(full_crew.tasks[17])  # create_debate_video
 
         # ✅ Debate merge AFTER debate video (needs debate_video_with_audio ready)
         if inputs.get('debate_merge_enabled', False):
-            final_tasks.append(full_crew.tasks[17])  # debate_merge
+            final_tasks.append(full_crew.tasks[18])  # debate_merge
 
         # ── generate_youtube_metadata runs LAST (after all video/merge tasks) ──
         if inputs.get('generate_youtube_metadata', False):
@@ -524,8 +529,10 @@ def run():
         # Run upload task if uploading video OR if CC/MD update needed for existing video
         if inputs.get('upload_youtube_video', False) or inputs.get('upload_cc', False):
             final_tasks.append(full_crew.tasks[11])  # upload_to_youtube
+        if inputs.get('upload_facebook_video', False):
+            final_tasks.append(full_crew.tasks[12])  # upload_to_facebook
         if inputs.get('social_share_enabled', False):
-            final_tasks.append(full_crew.tasks[12])  # share_to_social
+            final_tasks.append(full_crew.tasks[13])  # share_to_social
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")

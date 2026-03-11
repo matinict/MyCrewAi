@@ -612,3 +612,39 @@ debate_merge:
     Once you receive output from the tool containing "completed" or "skipped", return it as your Final Answer immediately.
     Do NOT call the tool again.
   agent: debate_merge_specialist
+  
+upload_to_facebook:
+  description: >
+    Upload final merged videos to the Facebook Page for {topic}.
+    Shorts → Facebook Reels. HD → Facebook Video.
+    Skips automatically if upload_facebook_video is false.
+
+    CRITICAL — call the Facebook Upload Tool with EXACTLY these values:
+      topic: "{topic}"
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      upload_facebook_video: {upload_facebook_video}
+      channel: "{channel}"
+      privacy_status: "{fb_privacy_status}"
+      credentials_file: "{fb_credentials_file}"
+
+    The tool will (per format in video_formats):
+      1. Locate {channel}_{topic_slug}_[fmt].mp4 in {output_dir}
+      2. Read metadata from {output_dir}/YT/debate/[fmt]/MD/en.json
+      3. Shorts → upload as Facebook Reel
+         HD     → upload as Facebook Video
+      4. Save fb_upload_log.json to {output_dir}/YT/debate/[fmt]/
+
+    Smart skip: If fb_upload_log.json already contains a video_id, that format is skipped.
+    Once you receive the tool output, return it immediately as your Final Answer.
+
+  expected_output: >
+    Upload confirmation per format with Facebook video URLs:
+      ✅ Shorts: https://www.facebook.com/video/abc123
+      ✅ HD: https://www.facebook.com/video/xyz456
+    OR skip/already-uploaded message.
+  agent: facebook_upload_specialist
+  context:
+    - upload_to_youtube  
+
+
