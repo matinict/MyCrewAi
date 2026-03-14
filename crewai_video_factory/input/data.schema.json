@@ -245,6 +245,12 @@
         "description": "Generate bar race video. Output: bar_race_{fmt}_with_audio.mp4.",
         "example": true
       },
+      "bar_race_audio_enabled": {
+        "type": "boolean",
+        "description": "Generate TTS audio narration specifically for bar race videos. Reads CSV data to create data-driven commentary synced to the animation. Output: bar_race_{fmt}_audio.mp3 and bar_race_cc_en.txt. Independent of audio_enabled.",
+        "default": false,
+        "example": true
+      },
       "bar_merge_enabled": {
         "type": "boolean",
         "description": "Concatenate intro + bar_race + definition_video into final video per format. Output: {channel}_{topic_slug}_{fmt}.mp4.",
@@ -492,6 +498,31 @@
         "maximum": 255,
         "default": 150,
         "example": 150
+      },
+      "debate_background_enabled": {
+        "type": "boolean",
+        "description": "Generate an AI-created background image and composite it behind the debate text. Requires image_gen_backend to be configured.",
+        "default": false,
+        "example": false
+      },
+      "debate_background_prompt": {
+        "type": "string",
+        "description": "Text prompt for AI background image generation. Keep cinematic and abstract — avoid text, people, and faces.",
+        "example": "futuristic digital debate arena, dark navy deep purple, abstract geometric circuit patterns, soft volumetric light beams, blurred bokeh background, cinematic, no text, no people, no faces"
+      },
+      "image_gen_backend": {
+        "type": "string",
+        "description": "Backend for AI image generation when debate_background_enabled=true.",
+        "enum": ["auto", "replicate", "stability", "openai", "local"],
+        "default": "auto",
+        "example": "auto",
+        "options": {
+          "auto": "Tries backends in order: replicate → stability → openai → local",
+          "replicate": "Replicate API (REPLICATE_API_TOKEN required)",
+          "stability": "Stability AI API (STABILITY_API_KEY required)",
+          "openai": "OpenAI DALL-E (OPENAI_API_KEY required)",
+          "local": "Local diffusion model (requires local setup)"
+        }
       }
     }
   },
@@ -631,130 +662,161 @@
           "debate"
         ],
         "note": "Use ['HD','Shorts'] for animation pipeline, ['debate'] for debate pipeline."
+      },
+      "llm_youtube": {
+        "type": ["string", "null"],
+        "description": "LLM for youtube_metadata_specialist agent. null=project default.",
+        "example": "ollama/qwen2.5:latest"
       }
     }
   },
   "_section_publisher": "════════════════════════════════════════",
   "publisher": {
     "type": "boolean",
-    "description": "Master switch for publishing pipeline. When false, all publisher_config settings are ignored and no upload tasks run.",
-    "example": false
+    "description": "Gates LLM key hoisting (llm_upload, llm_embed) and the legacy upload_youtube_video flag ONLY. Sub-blocks (yt_upload, fb_upload) are ALWAYS extracted independently of this switch — their own switch controls whether they run. Example: publisher=false + fb_upload=true → Facebook uploads, YouTube skipped.",
+    "example": true
   },
   "publisher_config": {
     "type": "object",
-    "description": "YouTube publishing settings. Only read when publisher=true.",
+    "description": "Upload destination settings. Sub-blocks (yt_upload_config, fb_upload_config) are always extracted regardless of the publisher switch. Shared LLM keys are only hoisted when publisher=true.",
     "properties": {
-      "upload_youtube_video": {
-        "type": "boolean",
-        "description": "Upload final merged videos to YouTube via Data API v3. Smart skip: if upload_log.json already contains video_id, re-upload is skipped.",
-        "example": true,
-        "note": "Requires client_secrets.json from Google Cloud Console. First run opens browser for OAuth2 login."
-      },
-      "upload_dry_run": {
-        "type": "boolean",
-        "description": "Dry run mode — validates that video files, metadata, and CC files exist without uploading anything to YouTube. No API calls made. Useful for testing before real upload.",
-        "default": false,
-        "example": true
-      },
-      "upload_privacy": {
-        "type": "string",
-        "description": "YouTube video privacy on upload.",
-        "enum": [
-          "private",
-          "unlisted",
-          "public"
-        ],
-        "default": "private",
-        "example": "private",
-        "tip": "Use 'private' to review before publishing."
-      },
-      "upload_category_id": {
-        "type": "string",
-        "description": "YouTube category ID.",
-        "default": "28",
-        "example": "28",
-        "enum_reference": {
-          "22": "People & Blogs",
-          "27": "Education",
-          "28": "Science & Technology",
-          "24": "Entertainment",
-          "25": "News & Politics"
-        }
-      },
-      "upload_cc": {
-        "type": "boolean",
-        "description": "Upload CC subtitle files from YT/{fmt}/CC/ to YouTube after video upload. Covers all 31 languages.",
-        "default": true,
-        "example": true
-      },
-      "upload_cc_lang": {
-        "type": "string",
-        "description": "Max number of CC subtitle languages to upload to YouTube (0 or omit = upload all). String-encoded integer. Independent from yt_cc_lang (generation count).",
-        "default": "0",
-        "example": "5"
-      },
-      "upload_md_lang": {
-        "type": "string",
-        "description": "Max number of MD localization languages to upload to YouTube (0 or omit = upload all). String-encoded integer. Independent from yt_metadata_lang (generation count).",
-        "default": "0",
-        "example": "35"
-      },
-      "upload_notify_subscribers": {
-        "type": "boolean",
-        "description": "Notify channel subscribers when video is uploaded. Recommended false for private/unlisted.",
-        "default": false,
-        "example": false
-      },
-      "upload_client_secrets_file": {
-        "type": "string",
-        "description": "Path to OAuth2 client_secrets.json from Google Cloud Console.",
-        "default": "client_secrets.json",
-        "example": "client_secrets.json",
-        "setup": "https://console.cloud.google.com → APIs & Services → Credentials → Create OAuth 2.0 Client ID → Desktop App → Download JSON"
-      },
-      "upload_token_file": {
-        "type": "string",
-        "description": "Path to saved OAuth2 token. Auto-created after first browser login. Reused on subsequent runs.",
-        "default": "token.json",
-        "example": "token.json"
-      },
-      "yt_pin_commnet_gen": {
-        "type": "boolean",
-        "description": "Generate a pinned comment for the uploaded video using LLM. Typo preserved for backward compatibility (was 'comment').",
-        "default": false,
-        "example": true
-      },
-      "llm_youtube": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "description": "LLM for youtube_metadata_specialist agent. null=project default.",
-        "example": "ollama/qwen2.5:latest"
-      },
       "llm_upload": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "description": "LLM for youtube_upload_specialist agent. null=project default.",
+        "type": ["string", "null"],
+        "description": "LLM for youtube_upload_specialist agent. Hoisted only when publisher=true. null=project default.",
         "example": "ollama/qwen2.5-coder:3b"
       },
       "llm_embed": {
-        "type": [
-          "string",
-          "null"
-        ],
-        "description": "LLM for embedding tasks (semantic search). null=project default.",
+        "type": ["string", "null"],
+        "description": "LLM for embedding tasks (semantic search). Hoisted only when publisher=true. null=project default.",
         "example": "ollama/nomic-embed-text:latest"
+      },
+      "yt_upload": {
+        "type": "boolean",
+        "description": "Switch for the YouTube upload sub-block. Always extracted from publisher_config regardless of the parent publisher switch.",
+        "default": false,
+        "example": false
+      },
+      "yt_upload_config": {
+        "type": "object",
+        "description": "YouTube upload settings. Only active when yt_upload=true.",
+        "properties": {
+          "upload_youtube_video": {
+            "type": "boolean",
+            "description": "Upload final merged videos to YouTube via Data API v3. Smart skip: if upload_log.json already contains video_id, re-upload is skipped.",
+            "example": true,
+            "note": "Requires client_secrets.json from Google Cloud Console. First run opens browser for OAuth2 login."
+          },
+          "upload_dry_run": {
+            "type": "boolean",
+            "description": "Dry run mode — validates that video files, metadata, and CC files exist without uploading anything to YouTube. No API calls made. Useful for testing before real upload.",
+            "default": false,
+            "example": true
+          },
+          "upload_privacy": {
+            "type": "string",
+            "description": "YouTube video privacy on upload.",
+            "enum": ["private", "unlisted", "public"],
+            "default": "private",
+            "example": "private",
+            "tip": "Use 'private' to review before publishing."
+          },
+          "upload_category_id": {
+            "type": "string",
+            "description": "YouTube category ID.",
+            "default": "28",
+            "example": "28",
+            "enum_reference": {
+              "22": "People & Blogs",
+              "27": "Education",
+              "28": "Science & Technology",
+              "24": "Entertainment",
+              "25": "News & Politics"
+            }
+          },
+          "upload_cc": {
+            "type": "boolean",
+            "description": "Upload CC subtitle files from YT/{fmt}/CC/ to YouTube after video upload. Covers all 31 languages.",
+            "default": true,
+            "example": true
+          },
+          "upload_cc_lang": {
+            "type": "string",
+            "description": "Max number of CC subtitle languages to upload to YouTube (0 or omit = upload all). String-encoded integer. Independent from yt_cc_lang (generation count).",
+            "default": "0",
+            "example": "5"
+          },
+          "upload_md_lang": {
+            "type": "string",
+            "description": "Max number of MD localization languages to upload to YouTube (0 or omit = upload all). String-encoded integer. Independent from yt_metadata_lang (generation count).",
+            "default": "0",
+            "example": "35"
+          },
+          "upload_notify_subscribers": {
+            "type": "boolean",
+            "description": "Notify channel subscribers when video is uploaded. Recommended false for private/unlisted.",
+            "default": false,
+            "example": false
+          },
+          "upload_client_secrets_file": {
+            "type": "string",
+            "description": "Path to OAuth2 client_secrets.json from Google Cloud Console.",
+            "default": "input/client_secrets.json",
+            "example": "input/client_secrets.json",
+            "setup": "https://console.cloud.google.com → APIs & Services → Credentials → Create OAuth 2.0 Client ID → Desktop App → Download JSON"
+          },
+          "upload_token_file": {
+            "type": "string",
+            "description": "Path to saved OAuth2 token. Auto-created after first browser login. Reused on subsequent runs.",
+            "default": "input/token.json",
+            "example": "input/token.json"
+          },
+          "yt_pin_comment_gen": {
+            "type": "boolean",
+            "description": "Auto-generate and pin a comment on the video after upload using LLM.",
+            "default": false,
+            "example": true
+          }
+        }
+      },
+      "fb_upload": {
+        "type": "boolean",
+        "description": "Switch for the Facebook upload sub-block. Always extracted from publisher_config regardless of the parent publisher switch. Set publisher=false + fb_upload=true to upload only to Facebook.",
+        "default": false,
+        "example": true
+      },
+      "fb_upload_config": {
+        "type": "object",
+        "description": "Facebook upload settings. Only active when fb_upload=true. Shorts → Facebook Reel. HD → Facebook Video. Smart skip: if fb_upload_log.json already contains video_id, re-upload is skipped.",
+        "properties": {
+          "upload_facebook_video": {
+            "type": "boolean",
+            "description": "Upload video directly to Facebook Page via Graph API.",
+            "example": true,
+            "note": "Requires input/fb_credentials.json with page_id and access_token."
+          },
+          "privacy_status": {
+            "type": "string",
+            "description": "Facebook video privacy level.",
+            "enum": ["SELF", "FRIENDS", "EVERYONE"],
+            "default": "SELF",
+            "example": "SELF",
+            "tip": "Use SELF (only me) for testing before setting EVERYONE for public."
+          },
+          "credentials_file": {
+            "type": "string",
+            "description": "Path to Facebook credentials JSON. Must contain page_id and access_token.",
+            "default": "input/fb_credentials.json",
+            "example": "input/fb_credentials.json"
+          }
+        }
       }
     }
   },
   "_section_social": "════════════════════════════════════════",
   "social": {
     "type": "boolean",
-    "description": "Master switch for social sharing pipeline. When false, all social_config settings are ignored.",
-    "example": false
+    "description": "Master switch for social sharing pipeline. When false, all social_config settings are ignored. Posts the YouTube video URL as a link post — completely independent of publisher/fb_upload. Reads upload_log.json directly.",
+    "example": true
   },
   "social_config": {
     "type": "object",
@@ -783,9 +845,40 @@
         ],
         "example": [
           "LinkedIn",
+          "Instagram",
           "Facebook"
         ],
-        "tip": "YouTube posts a Community post. Instagram requires a publicly accessible video URL for Reels."
+        "tip": "Facebook here = link post to FB Page (not a video upload). YouTube posts a Community post. Instagram requires a publicly accessible image URL."
+      },
+      "schedule_post": {
+        "type": "boolean",
+        "description": "Wait until schedule_datetime before posting to social platforms. The crew sleeps in 60-second chunks with countdown logs until the target time is reached. If the scheduled time has already passed, posts immediately.",
+        "default": false,
+        "example": true
+      },
+      "schedule_datetime": {
+        "type": "string",
+        "description": "Target date and time to post. Interpreted in schedule_timezone.",
+        "format": "YYYY-MM-DD HH:MM:SS",
+        "example": "2026-03-15 18:00:00"
+      },
+      "schedule_timezone": {
+        "type": "string",
+        "description": "IANA timezone string for schedule_datetime. Used with Python's zoneinfo module (Python 3.9+).",
+        "default": "UTC",
+        "example": "Asia/Dhaka",
+        "common_values": {
+          "UTC": "Coordinated Universal Time",
+          "Asia/Dhaka": "Bangladesh Standard Time (UTC+6)",
+          "Asia/Kolkata": "India Standard Time (UTC+5:30)",
+          "Asia/Dubai": "Gulf Standard Time (UTC+4)",
+          "Europe/London": "GMT / BST (UTC+0 / UTC+1)",
+          "Europe/Berlin": "CET / CEST (UTC+1 / UTC+2)",
+          "America/New_York": "Eastern Time (UTC-5 / UTC-4)",
+          "America/Los_Angeles": "Pacific Time (UTC-8 / UTC-7)",
+          "Asia/Tokyo": "Japan Standard Time (UTC+9)",
+          "Australia/Sydney": "Australian Eastern Time (UTC+10 / UTC+11)"
+        }
       },
       "llm_social": {
         "type": [

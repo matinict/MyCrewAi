@@ -410,6 +410,9 @@ share_to_social:
       start_year: {start}
       end_year: {end}
       video_url: ""
+      schedule_post: {schedule_post}
+      schedule_datetime: "{schedule_datetime}"
+      schedule_timezone: "{schedule_timezone}"
 
     The tool will:
       1. Read YT/[fmt]/upload_log.json to find the uploaded video URL
@@ -436,8 +439,6 @@ share_to_social:
     OR skip message if social_share_enabled=false.
   agent: social_share_specialist
   dry_run: {social_share_dry_run}
-  context:
-    - upload_to_youtube
 
 create_debate_video:
   description: >
@@ -644,7 +645,3 @@ upload_to_facebook:
       ✅ HD: https://www.facebook.com/video/xyz456
     OR skip/already-uploaded message.
   agent: facebook_upload_specialist
-  context:
-    - upload_to_youtube  
-
-

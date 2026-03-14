@@ -192,14 +192,26 @@ class SocialShareTool(BaseTool):
         fmt = video_formats[0] if video_formats else "HD"
 
         for fmt_check in video_formats:
-            log_path = os.path.join(self._yt_dir(output_dir, fmt_check), "upload_log.json")
-            if os.path.exists(log_path):
-                with open(log_path) as f:
-                    log = json.load(f)
-                if log.get("video_id") and log.get("video_url"):
-                    found_url = log["video_url"]
-                    fmt = fmt_check
-                    break
+            # Search order: YT/debate/{fmt}/ → YT/{fmt}/ → YT/ (root)
+            _candidates = [
+                os.path.join(self._yt_dir(output_dir, fmt_check), "upload_log.json"),
+                os.path.join(output_dir, "YT", "upload_log.json"),  # root YT fallback
+            ]
+            for log_path in _candidates:
+                if os.path.exists(log_path):
+                    with open(log_path) as f:
+                        log = json.load(f)
+                    # root log: verify format matches if field present
+                    _log_fmt = log.get("format", fmt_check)
+                    if _log_fmt and _log_fmt.lower() not in (fmt_check.lower(), ""):
+                        continue
+                    if log.get("video_id") and log.get("video_url"):
+                        found_url = log["video_url"]
+                        fmt = fmt_check
+                        print(f"[SocialShare] 📋 Found upload_log at: {log_path}")
+                        break
+            if found_url:
+                break
 
         if not found_url:
             if video_url:
@@ -996,6 +1008,3 @@ class SocialShareTool(BaseTool):
         print(f"[SocialShare] 💾 Share log → {json_path}")
         print(f"[SocialShare] 💾 Share log → {txt_path}")
         print(f"[SocialShare] 📊 Total platforms logged: {len(merged_shares)}")
-    
-    
-    

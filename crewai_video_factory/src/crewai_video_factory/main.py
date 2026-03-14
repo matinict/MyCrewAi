@@ -92,40 +92,115 @@ def load_config():
         # ── Parent-switch-aware flattening ────────────────────────────────
         # When switch=true  → hoist all nested block keys to top level
         # When switch=false → force master flag to False, discard nested content
+        #
+        # publisher_config is special: its sub-blocks (yt_upload, fb_upload, future
+        # platforms like tiktok_upload) are ALWAYS extracted independently of the
+        # parent "publisher" switch. The publisher switch only gates the legacy
+        # upload_youtube_video top-level flag and shared LLM keys (llm_upload, llm_embed).
+        # This lets "publisher": false + "fb_upload": true work correctly.
+
+        # ── Step 1: Extract publisher_config sub-blocks FIRST (always) ────────
+        _pub_cfg = config.pop('publisher_config', None) or {}
+        if isinstance(_pub_cfg, dict):
+            _pub_on = config.get('publisher', False)
+
+            # ── yt_upload sub-block (always extract, gated by its own yt_upload switch) ──
+            if 'yt_upload' in _pub_cfg:
+                config.setdefault('yt_upload', _pub_cfg.pop('yt_upload'))
+            _yt_cfg = _pub_cfg.pop('yt_upload_config', {})
+            if _yt_cfg:
+                config.setdefault('yt_upload_config', _yt_cfg)
+
+            # ── fb_upload sub-block (always extract, gated by its own fb_upload switch) ──
+            if 'fb_upload' in _pub_cfg:
+                config.setdefault('fb_upload', _pub_cfg.pop('fb_upload'))
+            _fb_cfg = _pub_cfg.pop('fb_upload_config', {})
+            if _fb_cfg:
+                if 'privacy_status' in _fb_cfg:
+                    _fb_cfg['fb_privacy_status'] = _fb_cfg.pop('privacy_status')
+                if 'credentials_file' in _fb_cfg:
+                    _fb_cfg['fb_credentials_file'] = _fb_cfg.pop('credentials_file')
+                config.setdefault('fb_upload_config', _fb_cfg)
+
+            # ── Future platform sub-blocks follow the same pattern ─────────────
+            # Example (TikTok — uncomment when tiktok_upload_tool.py is ready):
+            # if 'tiktok_upload' in _pub_cfg:
+            #     config.setdefault('tiktok_upload', _pub_cfg.pop('tiktok_upload'))
+            # _tt_cfg = _pub_cfg.pop('tiktok_upload_config', {})
+            # if _tt_cfg:
+            #     config.setdefault('tiktok_upload_config', _tt_cfg)
+
+            # ── Remaining publisher_config keys (LLM overrides etc.) ──────────
+            # Only hoist when publisher=true; discard silently when false
+            if _pub_on:
+                config.update(_pub_cfg)
+
+        # If publisher=false, force legacy gate flag off (does NOT affect sub-blocks)
+        if not config.get('publisher', False):
+            config.setdefault('upload_youtube_video', False)
+
+        # ── Step 2: Standard block_map for non-publisher blocks ───────────────
+        # intro_enabled / intro_duration / intro_duration_hd are special:
+        # they live inside animation_config AND debate_config independently.
+        # We must not let the second block's update() overwrite the first.
+        # Rule: intro_enabled=true from ANY active block wins (OR logic).
+        _intro_enabled    = False
+        _intro_duration   = None
+        _intro_duration_hd = None
+
         _block_map = [
             ("animation",     "animation_config",     "bar_race_video_enabled"),
             ("debate",        "debate_config",        "debate_video_enabled"),
             ("metadata_prep", "metadata_prep_config", "generate_youtube_metadata"),
-            ("publisher",     "publisher_config",     "upload_youtube_video"),
             ("social",        "social_config",        "social_share_enabled"),
-            ("fb_upload",     "fb_upload_config",     "upload_facebook_video"),
-
-
-
         ]
         for _switch, _block, _flag in _block_map:
             _nested = config.pop(_block, None)
             if config.get(_switch, False):
                 if isinstance(_nested, dict):
-                    # publisher: hoist fb_upload/fb_upload_config out before flattening
-                    if _switch == 'publisher' and 'fb_upload' in _nested:
-                        config.setdefault('fb_upload', _nested.pop('fb_upload'))
-                        _fb_cfg = _nested.pop('fb_upload_config', {})
-                        if 'privacy_status' in _fb_cfg:
-                            _fb_cfg['fb_privacy_status'] = _fb_cfg.pop('privacy_status')
-                        if 'credentials_file' in _fb_cfg:
-                            _fb_cfg['fb_credentials_file'] = _fb_cfg.pop('credentials_file')
-                        config.setdefault('fb_upload_config', _fb_cfg)
+                    # ── Collect intro keys before update so blocks don't clobber each other ──
+                    if _switch in ('animation', 'debate'):
+                        if _nested.get('intro_enabled', False):
+                            _intro_enabled = True
+                        if _intro_duration is None and 'intro_duration' in _nested:
+                            _intro_duration = _nested['intro_duration']
+                        if _intro_duration_hd is None and 'intro_duration_hd' in _nested:
+                            _intro_duration_hd = _nested['intro_duration_hd']
+                        # Remove from nested so update() doesn't overwrite collected values
+                        _nested.pop('intro_enabled', None)
+                        _nested.pop('intro_duration', None)
+                        _nested.pop('intro_duration_hd', None)
 
                     if _switch == 'metadata_prep' and ('video_formats' in _nested or 'video_style' in _nested):
                         _key = 'video_style' if 'video_style' in _nested else 'video_formats'
                         _nested['metadata_video_formats'] = _nested[_key]
                         _nested['video_style'] = _nested.pop(_key) if _key == 'video_style' else []
-
                     config.update(_nested)
-
             else:
                 config[_flag] = False  # guarantee gate flag is off
+
+        # Apply collected intro values — OR logic: any active block with intro_enabled=true wins
+        config['intro_enabled']     = _intro_enabled
+        config['intro_duration']    = _intro_duration    if _intro_duration    is not None else 7
+        config['intro_duration_hd'] = _intro_duration_hd if _intro_duration_hd is not None else 10
+
+        # ── Step 3: Flatten yt_upload_config and fb_upload_config ─────────────
+        # yt_upload
+        if config.get('yt_upload', False):
+            _yt_cfg = config.pop('yt_upload_config', {})
+            for _k, _v in _yt_cfg.items():
+                config.setdefault(_k, _v)
+        else:
+            config.setdefault('upload_youtube_video', False)
+
+        # fb_upload — flatten fb_upload_config keys when fb_upload=true
+        if config.get('fb_upload', False):
+            _fb_cfg = config.pop('fb_upload_config', {})
+            for _k, _v in _fb_cfg.items():
+                config.setdefault(_k, _v)
+            config.setdefault('upload_facebook_video', True)
+        else:
+            config.setdefault('upload_facebook_video', False)
 
         if 'upload_cc_lang' in config:
             config.setdefault('upload_cc_limit', int(config['upload_cc_lang']))
@@ -190,6 +265,16 @@ def load_config():
             'social_share_enabled':       False,
             'social_share_dry_run':       False,
             'social_platforms':           [],
+            'schedule_post':              False,
+            'schedule_datetime':          '',
+            'schedule_timezone':          'UTC',
+            # fb_upload_config
+            'upload_facebook_video':      False,
+            'fb_privacy_status':          'SELF',
+            'fb_credentials_file':        'input/fb_credentials.json',
+            # yt_upload_config
+            'yt_upload':                  False,
+            'fb_upload':                  False,
             # watermark / branding
             'watermark_enabled':          False,
             'watermark_text':             '',
@@ -377,15 +462,20 @@ def run():
 
     # ── Publisher block ──────────────────────────────────────
     pub_on = inputs.get('publisher', False)
+    fb_on  = inputs.get('fb_upload', False)
     print(f"📤 Publisher:        {pub_on}")
     if pub_on:
         upload_on  = inputs.get('upload_youtube_video', False)
         cc_only_on = inputs.get('upload_cc', False) and not upload_on
-        print(f"   ▶️  YouTube Upload:  {upload_on}" +
-              (f"  [{inputs.get('upload_privacy','private')}]" if upload_on else ""))
+        yt_upload_on = inputs.get('yt_upload', False)
+        print(f"   ▶️  YouTube Upload:  {upload_on or yt_upload_on}" +
+              (f"  [{inputs.get('upload_privacy','private')}]" if (upload_on or yt_upload_on) else ""))
         if cc_only_on:
             print(f"   📝 CC/MD Update:    True  "
                   f"[cc_limit={inputs.get('upload_cc_limit',0)}, md_limit={inputs.get('upload_md_limit',0)}]")
+    if fb_on:
+        print(f"   📘 Facebook Upload: {inputs.get('upload_facebook_video', False)}" +
+              (f"  [{inputs.get('fb_privacy_status','SELF')}]" if inputs.get('upload_facebook_video') else ""))
 
     # ── Social block ─────────────────────────────────────────
     soc_on = inputs.get('social', False)
@@ -530,9 +620,9 @@ def run():
         if inputs.get('upload_youtube_video', False) or inputs.get('upload_cc', False):
             final_tasks.append(full_crew.tasks[11])  # upload_to_youtube
         if inputs.get('upload_facebook_video', False):
-            final_tasks.append(full_crew.tasks[12])  # upload_to_facebook
+            final_tasks.append(full_crew.tasks[12])  # upload_to_facebook (independent of social share)
         if inputs.get('social_share_enabled', False):
-            final_tasks.append(full_crew.tasks[13])  # share_to_social
+            final_tasks.append(full_crew.tasks[13])  # share_to_social (reads upload_log independently)
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
