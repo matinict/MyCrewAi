@@ -353,8 +353,14 @@ generate_youtube_metadata:
 
 upload_to_youtube:
   description: >
-    Upload final merged videos and CC subtitle files to YouTube for {topic}.
-    Skips automatically if upload_youtube_video is false.
+    Upload final merged videos and/or CC subtitle files to YouTube for {topic}.
+
+    ⚠️ IMPORTANT — DO NOT decide to skip based on upload_youtube_video alone.
+    You MUST always call the YouTube Upload Tool. The tool itself handles all skip logic:
+      - If upload_youtube_video=false AND upload_cc=false → tool returns skip message
+      - If upload_youtube_video=false AND upload_cc=true  → CC/MD-only mode: updates CC
+        and metadata localizations on the existing YouTube video (topic IS the video ID)
+      - If upload_youtube_video=true                      → full video + CC upload
 
     CRITICAL — call the YouTube Upload Tool with EXACTLY these values:
       topic: "{topic}"
@@ -365,15 +371,17 @@ upload_to_youtube:
       privacy_status: "{upload_privacy}"
       category_id: "{upload_category_id}"
       upload_cc: {upload_cc}
+      upload_cc_lang: "{upload_cc_lang}"
+      upload_md_lang: "{upload_md_lang}"
       notify_subscribers: {upload_notify_subscribers}
       client_secrets_file: "{upload_client_secrets_file}"
       token_file: "{upload_token_file}"
 
     The tool will (per format in video_formats):
-      1. Locate {channel}_{topic_slug}_[fmt].mp4 in {output_dir}
-      2. Read metadata from {output_dir}/YT/[fmt]/MD/en.json
-      3. Upload video → returns video_id
-      4. Upload all CC files from {output_dir}/YT/[fmt]/CC/
+      1. If upload_youtube_video=true: locate and upload {channel}_{topic_slug}_[fmt].mp4
+      2. If upload_youtube_video=false and upload_cc=true: use topic as YouTube video ID directly
+      3. Upload CC files from {output_dir}/YT/yt_id/[fmt]/CC/ (or YT/[fmt]/CC/ fallback)
+      4. Upload MD localizations from {output_dir}/YT/yt_id/[fmt]/MD/ (up to upload_md_lang limit)
       5. Save upload log to {output_dir}/YT/[fmt]/upload_log.json
 
     Smart skip: If an upload_log.json already contains a video_id for a format, that format is skipped.
@@ -381,9 +389,8 @@ upload_to_youtube:
 
   expected_output: >
     Upload confirmation per format with YouTube video URLs:
-      ✅ Shorts: https://youtu.be/abc123 (CC: 31 uploaded, 0 skipped)
-      ✅ HD: https://youtu.be/xyz456 (CC: 31 uploaded, 0 skipped)
-    OR skip/already-uploaded message.
+      ✅ HD: https://youtu.be/bFVFCTSBLSQ (CC: 4 uploaded, 0 skipped | MD: 5 uploaded)
+    OR CC/MD-only update confirmation when upload_youtube_video=false.
   agent: youtube_upload_specialist
   context:
     - generate_youtube_metadata
