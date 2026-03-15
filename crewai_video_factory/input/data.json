@@ -1,11 +1,10 @@
 {
-  "topic": "AI Customer Support Agent vs AI WebChatBot — Which Win?",
+  "topic": "WnS4zE4wOtQ",
   "start": null,
   "end": null,
   "granularity": "yearly",
-  "video_formats": [
-    "HD"
-  ],
+  "video_formats": [ "HD" ],
+  "video_style": ["ytid" ],
   "use_label_mappings": false,
   "fps": 4.9,
   "video_fps": 30,
@@ -46,14 +45,13 @@
     "llm_video": "ollama/llama3.1:8b",
     "llm_audio": "ollama/deepseek-r1:1.5b"
   },
-  
-  "debate": true,
+  "debate": false,
   "debate_config": {
     "intro_slug": "One of the biggest debates in Ai tech right now",
     "debate_definition_enabled": true,
     "debate_max_chars": 2000,
     "llm_debate": "dashscope/qwen-plus",
-    "intro_enabled": true,
+    "intro_enabled": false,
     "debate_video_enabled": true,
     "debate_secs_per_line": 3.5,
     "debate_background_enabled": true,
@@ -61,7 +59,7 @@
     "debate_background_prompt": "futuristic digital debate arena, dark navy deep purple, abstract geometric circuit patterns, soft volumetric light beams, blurred bokeh background, cinematic, no text, no people, no faces",
     "image_gen_backend": "auto",
 
-    "debate_merge_enabled": true,
+    "debate_merge_enabled": false,
     "piper_voices": {
       "propose": {
         "model": "models/joe_medium.onnx",
@@ -95,22 +93,20 @@
 
   "metadata_prep": true,
   "metadata_prep_config": {
-    "video_style": [
-      "debate"
-    ],
     "generate_youtube_metadata": true,
-    "generate_thumbnail": true,
-    "yt_metadata_lang": "30",
-    "yt_cc_lang": "4",
+    "generate_thumbnail": false,
+    "yt_metadata_lang": "35",
+    "yt_cc_lang": "3",
     "llm_youtube": "ollama/qwen2.5:latest"
   },
+
   "publisher": true,
   "publisher_config": {
       "llm_upload": "ollama/qwen2.5-coder:3b",
       "llm_embed": "ollama/nomic-embed-text:latest",
       "yt_upload": true,
       "yt_upload_config": {
-          "upload_youtube_video": true,
+          "upload_youtube_video": false,
           "upload_dry_run": false,
           "upload_privacy": "private",
           "upload_category_id": "28",
@@ -122,7 +118,7 @@
           "upload_client_secrets_file": "input/client_secrets.json",
           "upload_token_file": "input/token.json"
       },
-      "fb_upload": true,
+      "fb_upload": false,
       "fb_upload_config": {
           "upload_facebook_video": true,
           "privacy_status": "SELF",
@@ -130,7 +126,7 @@
       }
   },
 
-  "social": true,
+  "social": false,
   "social_config": {
     "social_share_enabled": true,
     "social_share_dry_run": false,

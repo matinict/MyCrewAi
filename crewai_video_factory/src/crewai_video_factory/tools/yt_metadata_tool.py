@@ -23,7 +23,7 @@ def _load_lang_config():
     """
     import pathlib
     # Resolve relative to this file so it works from any CWD
-    _here    = pathlib.Path(__file__).parent
+    _here = pathlib.Path(__file__).parent
     _candidates = [
         _here / "data" / "lang.json",
         pathlib.Path("data/lang.json"),
@@ -34,13 +34,13 @@ def _load_lang_config():
                 with open(_p, encoding="utf-8") as _f:
                     _cfg = json.load(_f)
                     _langs = sorted(_cfg["languages"], key=lambda x: x["rank"])
-                    _codes     = [l["code"] for l in _langs]
-                    _names     = {l["code"]: l["name"] for l in _langs}
-                    _yt_map    = {l["code"]: l["yt_code"] for l in _langs}
+                    _codes = [l["code"] for l in _langs]
+                    _names = {l["code"]: l["name"] for l in _langs}
+                    _yt_map = {l["code"]: l["yt_code"] for l in _langs}
                     # aliases: zh → zh-hans, etc.
                     for alias, target in _cfg.get("aliases", {}).items():
                         if alias not in _names:
-                            _names[alias]  = _names.get(target, target)
+                            _names[alias] = _names.get(target, target)
                         if alias not in _yt_map:
                             _yt_map[alias] = _yt_map.get(target, target)
                     print(f"[LangConfig] Loaded {len(_codes)} languages from {_p}")
@@ -52,9 +52,9 @@ def _load_lang_config():
     print("[LangConfig] data/lang.json not found — using built-in fallback (top 10)")
     _codes = ['es', 'ar', 'pt', 'id', 'tr', 'vi', 'fr', 'ru', 'hi', 'ko']
     _names = {
-        'es': 'Spanish', 'ar': 'Arabic',    'pt': 'Portuguese', 'id': 'Indonesian',
-        'tr': 'Turkish', 'vi': 'Vietnamese', 'fr': 'French',     'ru': 'Russian',
-        'hi': 'Hindi',   'ko': 'Korean',
+        'es': 'Spanish', 'ar': 'Arabic', 'pt': 'Portuguese', 'id': 'Indonesian',
+        'tr': 'Turkish', 'vi': 'Vietnamese', 'fr': 'French', 'ru': 'Russian',
+        'hi': 'Hindi', 'ko': 'Korean',
     }
     _yt_map = {c: c for c in _codes}
     return _codes, _names, _yt_map
@@ -62,7 +62,6 @@ def _load_lang_config():
 LANGUAGES, LANG_NAMES, _LANG_YT_MAP = _load_lang_config()
 
 # ── Translation helper ────────────────────────────────────────────────────────
-
 def _google_translate(text: str, dest: str, retries: int = 3) -> str:
     if not text or not text.strip():
         return text
@@ -80,7 +79,7 @@ def _google_translate(text: str, dest: str, retries: int = 3) -> str:
             try:
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
-                    return " ".join(part[0] for part in data[0] if part[0])
+                    return "  ".join(part[0] for part in data[0] if part[0])
             except Exception as e:
                 if attempt < retries - 1:
                     time.sleep(1.5)
@@ -91,57 +90,230 @@ def _google_translate(text: str, dest: str, retries: int = 3) -> str:
         print(f"[YTMetadata] Translation error ({dest}): {e}")
         return text
 
-# ── Schema ────────────────────────────────────────────────────────────────────
+# ── YouTube API Scraper (For YouTube ID Mode) ────────────────────────────────
+def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
+    """Fetch metadata + real CC transcript for a YouTube video ID.
 
+    Method priority (no API key required for 1-4):
+      1. yt-dlp  — title, description, tags, chapters, real transcript/CC
+      2. noembed.com — title + author (no key)
+      3. YouTube oEmbed — title + author (no key)
+      4. YouTube Data API v3 — full metadata (YOUTUBE_API_KEY required)
+    """
+    import os, tempfile, glob as _glob
+
+    api_key = api_key or os.environ.get('YOUTUBE_API_KEY', '')
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    # ── Method 1: yt-dlp (best — gets real title, desc, tags, chapters, CC) ──
+    try:
+        import yt_dlp
+
+        # ── 1a: Extract info (no download) ────────────────────────────────────
+        ydl_opts = {'quiet': True, 'no_warnings': True, 'skip_download': True}
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        title        = info.get('title', f"YouTube Video {video_id}")
+        description  = info.get('description', '')
+        tags         = info.get('tags', []) or []
+        chapters_raw = info.get('chapters', []) or []
+        chapters_str = "\n".join(
+            f"{int(c.get('start_time', 0) // 60):02d}:{int(c.get('start_time', 0) % 60):02d} {c.get('title', '')}"
+            for c in chapters_raw
+        ) if chapters_raw else "0:00 Introduction"
+
+        # ── 1b: Download real transcript/CC into a temp dir ───────────────────
+        transcript_text = ""
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sub_opts = {
+                    'quiet':          True,
+                    'no_warnings':    True,
+                    'skip_download':  True,
+                    'writesubtitles': True,       # manual/uploaded CC
+                    'writeautomaticsub': True,    # auto-generated CC fallback
+                    'subtitleslangs': ['en', 'en-US', 'en-GB'],
+                    'subtitlesformat':'vtt',
+                    'outtmpl':        os.path.join(tmpdir, '%(id)s.%(ext)s'),
+                }
+                with yt_dlp.YoutubeDL(sub_opts) as ydl_sub:
+                    ydl_sub.download([url])
+
+                # Find the downloaded .vtt file
+                vtt_files = _glob.glob(os.path.join(tmpdir, '*.vtt'))
+                if vtt_files:
+                    raw = open(vtt_files[0], encoding='utf-8').read()
+                    # Strip VTT markup → plain text
+                    import re as _re
+                    lines = raw.splitlines()
+                    seen, clean_lines = set(), []
+                    for line in lines:
+                        line = line.strip()
+                        if not line or line.startswith('WEBVTT') or line.startswith('NOTE') or line.startswith('STYLE'):
+                            continue
+                        # Skip VTT metadata headers: Kind: captions, Language: en, etc.
+                        if _re.match(r'^(Kind|Language|Position|Align|Line|Size)\s*:', line, _re.IGNORECASE):
+                            continue
+                        if _re.match(r'^\d{2}:\d{2}', line):    # timestamp line
+                            continue
+                        if _re.match(r'^\d+$', line):            # sequence number
+                            continue
+                        # Strip inline tags like <c>, </c>, <00:00:01.000>
+                        line = _re.sub(r'<[^>]+>', '', line).strip()
+                        if line and line not in seen:
+                            seen.add(line)
+                            clean_lines.append(line)
+                    transcript_text = ' '.join(clean_lines)
+                    print(f"[YTScrape] ✅ Real CC downloaded: {len(transcript_text)} chars")
+                else:
+                    print(f"[YTScrape] ℹ️  No CC/subtitle available for this video")
+        except Exception as e:
+            print(f"[YTScrape] ⚠️  CC download error: {e}")
+
+        print(f"[YTScrape] ✅ yt-dlp: '{title[:80]}' | tags={len(tags)} | chapters={len(chapters_raw)}")
+        return {
+            'title':             title,
+            'description':       description,
+            'tags':              tags,
+            'chapters':          chapters_str,
+            'transcript':        transcript_text,   # real CC if available, else ""
+            'existing_captions': [],
+            'source':            'yt-dlp',
+        }
+    except ImportError:
+        print(f"[YTScrape] ℹ️  yt-dlp not installed — run: pip install yt-dlp --break-system-packages")
+    except Exception as e:
+        print(f"[YTScrape] ⚠️  yt-dlp error: {e} — trying noembed.com")
+
+    # ── Method 2: noembed.com (free, no key, title only) ─────────────────────
+    try:
+        noembed_url = f"https://noembed.com/embed?url={urllib.parse.quote(url)}"
+        req = urllib.request.Request(noembed_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        title  = data.get('title', f"YouTube Video {video_id}")
+        author = data.get('author_name', '')
+        print(f"[YTScrape] ✅ noembed: '{title[:80]}'")
+        return {
+            'title':             title,
+            'description':       f"Video by {author}. Watch: {url}",
+            'tags':              ['youtube', 'video', author.lower().replace(' ', '')] if author else ['youtube', 'video'],
+            'chapters':          "0:00 Introduction",
+            'transcript':        '',
+            'existing_captions': [],
+            'source':            'noembed',
+        }
+    except Exception as e:
+        print(f"[YTScrape] ⚠️  noembed error: {e} — trying YouTube oEmbed")
+
+    # ── Method 3: YouTube oEmbed (free, no key, title only) ──────────────────
+    try:
+        oembed_url = f"https://www.youtube.com/oembed?url={urllib.parse.quote(url)}&format=json"
+        req = urllib.request.Request(oembed_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        title  = data.get('title', f"YouTube Video {video_id}")
+        author = data.get('author_name', '')
+        print(f"[YTScrape] ✅ oEmbed: '{title[:80]}'")
+        return {
+            'title':             title,
+            'description':       f"Video by {author}. Watch: {url}",
+            'tags':              ['youtube', 'video'],
+            'chapters':          "0:00 Introduction",
+            'transcript':        '',
+            'existing_captions': [],
+            'source':            'oembed',
+        }
+    except Exception as e:
+        print(f"[YTScrape] ⚠️  oEmbed error: {e} — trying YouTube Data API")
+
+    # ── Method 4: YouTube Data API v3 (requires YOUTUBE_API_KEY) ─────────────
+    if api_key:
+        try:
+            from googleapiclient.discovery import build
+            youtube  = build('youtube', 'v3', developerKey=api_key)
+            resp     = youtube.videos().list(
+                part='snippet,contentDetails,status,localizations', id=video_id
+            ).execute()
+            if resp.get('items'):
+                item    = resp['items'][0]
+                snippet = item['snippet']
+                meta = {
+                    'title':             snippet.get('title', f"YouTube Video {video_id}"),
+                    'description':       snippet.get('description', ''),
+                    'tags':              snippet.get('tags', []),
+                    'chapters':          "0:00 Introduction",
+                    'transcript':        '',
+                    'category_id':       snippet.get('categoryId', '28'),
+                    'existing_captions': [],
+                    'source':            'youtube_api',
+                }
+                try:
+                    cap_resp   = youtube.captions().list(part='snippet', videoId=video_id).execute()
+                    meta['existing_captions'] = [
+                        {'language': c['snippet'].get('language','en'),
+                         'name': c['snippet'].get('name',''),
+                         'track_kind': c['snippet'].get('trackKind','standard'),
+                         'id': c['id']}
+                        for c in cap_resp.get('items', [])
+                    ]
+                    print(f"[YTScrape] ✅ API: '{meta['title'][:80]}' | CC tracks={len(meta['existing_captions'])}")
+                except Exception as e:
+                    print(f"[YTScrape] ⚠️  CC list error: {e}")
+                return meta
+            print(f"[YTScrape] ❌ Video not found or private: {video_id}")
+        except Exception as e:
+            print(f"[YTScrape] ⚠️  API error: {e}")
+    else:
+        print(f"[YTScrape] ℹ️  YOUTUBE_API_KEY not set — install yt-dlp for best results: pip install yt-dlp")
+
+    # ── Final fallback ────────────────────────────────────────────────────────
+    print(f"[YTScrape] ⚠️  All methods failed — stub metadata for {video_id}")
+    return {
+        'title':             f"YouTube Video {video_id}",
+        'description':       f"Watch: https://youtu.be/{video_id}",
+        'tags':              ['youtube', 'video'],
+        'chapters':          "0:00 Introduction",
+        'transcript':        '',
+        'existing_captions': [],
+        'source':            'fallback',
+    }
+
+# ── Schema ────────────────────────────────────────────────────────────────────
 class YouTubeMetadataToolInput(BaseModel):
-    topic: str                      = Field(...,           description="Topic/title for the video")
-    filename: str                   = Field(...,           description="Base filename slug")
-    output_dir: str                 = Field(...,           description="Output directory")     
-    start_year: Optional[int]       = Field(default=2015)
-    end_year: Optional[int]         = Field(default=2026)
-    video_duration: float           = Field(default=60.0,  description="Legacy field")
-    generate_narration: bool        = Field(default=True)
+    topic: str = Field(..., description="Topic/title for the video (or YouTube video ID for yt_id mode)")
+    filename: str = Field(..., description="Base filename slug")
+    output_dir: str = Field(..., description="Output directory")
+    start_year: Optional[int] = Field(default=2015)
+    end_year: Optional[int] = Field(default=2026)
+    video_duration: float = Field(default=60.0, description="Legacy field")
+    generate_narration: bool = Field(default=True)
     generate_youtube_metadata: bool = Field(default=True)
-    generate_thumbnail: bool        = Field(default=True)
-    channel: str                    = Field(default="PlayOwnAi")
-    channel_lower: str              = Field(default="playownai")
-    website: str                    = Field(default="youtube.com/@PlayOwnAi")
-    video_formats: list             = Field(default=[],    description="Pipeline tokens or real fmt names")
-    fps: float                      = Field(default=4.9)
-    fps_hd_offset: float            = Field(default=1.0)
-    n_periods: int                  = Field(default=0)
-    csv_path: str                   = Field(default="")
-    yt_metadata_lang: int           = Field(default=35)
-    yt_cc_lang: int                 = Field(default=20)
-    animation_video_formats: list   = Field(
-        default=[],
-        description=(
-            "Real format names (HD, Shorts, …) for the 'animation' branch  "
-            "AND for per-fmt debate CC/Th splitting."
-        ),
-    )
-    video_style: list = Field(
-        default=[],
-        description=(
-            "Pipeline style(s) to activate: 'debate', 'animation', or both. "
-            "Drives which metadata branch is used (YT/debate/{fmt}/ vs YT/{fmt}/). "
-            "Takes priority over pipeline tokens in video_formats."
-        ),
-    )
+    generate_thumbnail: bool = Field(default=True)
+    channel: str = Field(default="PlayOwnAi")
+    channel_lower: str = Field(default="playownai")
+    website: str = Field(default="youtube.com/@PlayOwnAi")
+    video_formats: list = Field(default=[], description="Pipeline tokens or real fmt names")
+    video_style: list = Field(default=[], description="Pipeline style(s): 'debate', 'yt_id', 'animation'")
+    fps: float = Field(default=4.9)
+    fps_hd_offset: float = Field(default=1.0)
+    n_periods: int = Field(default=0)
+    csv_path: str = Field(default="")
+    yt_metadata_lang: int = Field(default=35)
+    yt_cc_lang: int = Field(default=20)
+    animation_video_formats: list = Field(default=[], description="Real format names for per-fmt splits")
+    yt_source_video_id: str = Field(default="", description="YouTube video ID to scrape (yt_id mode)")
 
 # ── Tool ──────────────────────────────────────────────────────────────────────
-
 class YouTubeMetadataTool(BaseTool):
     name: str = "YouTube Metadata Generator"
     description: str = (
         "Generates narration text (cc_en.txt), YouTube metadata (title/desc/tags/chapters), "
-        "thumbnail images (PNG+JPG 1920x1080 in YT/{fmt}/Th/), and CC subtitle translations. "
-        "Supports 'debate' (YT/debate/{fmt}/) and 'animation' pipeline tokens in video_formats."
+        "thumbnail images (PNG+JPG 1920x1080 in YT/{style}/{fmt}/Th/), and CC subtitle translations. "
+        "Supports 'debate' (YT/debate/{fmt}/), 'yt_id' (YT/yt_id/{fmt}/), and 'animation' (YT/{fmt}/) modes."
     )
     args_schema: Type[BaseModel] = YouTubeMetadataToolInput
-
-    # ─────────────────────────────────────────────────────────────────────────
- 
 
     def _run(
         self,
@@ -158,6 +330,7 @@ class YouTubeMetadataTool(BaseTool):
         channel_lower: str = "playownai",
         website: str = "youtube.com/@PlayOwnAi",
         video_formats: list = None,
+        video_style: list = None,
         fps: float = 4.9,
         fps_hd_offset: float = 1.0,
         n_periods: int = 0,
@@ -165,42 +338,42 @@ class YouTubeMetadataTool(BaseTool):
         yt_metadata_lang: int = 35,
         yt_cc_lang: int = 20,
         animation_video_formats: list = None,
-        video_style: list = None,
+        yt_source_video_id: str = "",
     ) -> str:
         start_year = start_year or 2015
-        end_year   = end_year   or 2026
+        end_year = end_year or 2026
         import time as _time
         import re as _vre
         t0 = _time.time()
 
-        print(f"[YTMetadata] v2.0 — structured YT/{{fmt}}/MD|CC/ output + Thumbnails")
+        print(f"[YTMetadata] v2.0 — structured YT/{{style}}/{{fmt}}/MD|CC/ output + Thumbnails")
 
         # ── Format classification ─────────────────────────────────────────────
-        _pipeline = {"debate", "animation"}
-        _real     = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
-        _valid    = _pipeline | _real
+        _pipeline = {"debate", "animation", "yt_id", "ytid"}  # ytid = alias for yt_id
+        _real = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
+        _valid = _pipeline | _real
 
         if not video_formats:
             video_formats = ["HD"]
         elif isinstance(video_formats, str):
             video_formats = [v.strip() for v in _vre.findall(r"[A-Za-z0-9]+", video_formats)
                              if v not in ("true", "false", "null", "list")]
-        video_formats = [f for f in video_formats if f in _valid] or ["HD"]
+        # Normalise ytid → yt_id so all downstream checks use one token
+        video_formats = [("yt_id" if f == "ytid" else f) for f in video_formats if f in _valid] or ["HD"]
 
         # ── video_style injects pipeline tokens into video_formats ────────────
-        # data.json: metadata_prep_config.video_style: ["debate"] or ["animation"] or both
-        # This lets a pure-real-format run (e.g. video_formats=["Shorts"]) still
-        # activate the debate or animation metadata branch.
         if video_style:
             _style_list = [video_style] if isinstance(video_style, str) else list(video_style)
-            _style_tokens = [s.strip().lower() for s in _style_list if s.strip().lower() in _pipeline]
+            # Normalise ytid → yt_id in style list too
+            _style_tokens = [("yt_id" if s.strip().lower() == "ytid" else s.strip().lower())
+                             for s in _style_list if s.strip().lower() in _pipeline]
             for _tok in _style_tokens:
                 if _tok not in video_formats:
-                    video_formats = [_tok] + video_formats  # prepend so branch check fires first
+                    video_formats = [_tok] + video_formats
             if _style_tokens:
                 print(f"[YTMetadata]   video_style={_style_tokens} → injected into video_formats: {video_formats}")
 
-        # animation_video_formats = real formats used for animation branch AND debate per-fmt splits
+        # animation_video_formats = real formats used for all branches
         if not animation_video_formats:
             animation_video_formats = [f for f in video_formats if f in _real] or ["HD"]
         else:
@@ -209,7 +382,7 @@ class YouTubeMetadataTool(BaseTool):
         active_md_langs = LANGUAGES[:min(int(yt_metadata_lang), len(LANGUAGES))]
         active_cc_langs = LANGUAGES[:min(int(yt_cc_lang), len(LANGUAGES))]
 
-        clean = filename.strip().replace("/", " ").replace("\\", " ")
+        clean = filename.strip().replace("/", "  ").replace("\\", "  ")
 
         print(f"[YTMetadata]   lang config : metadata={len(active_md_langs)} | CC={len(active_cc_langs)}")
         print(f"[YTMetadata] Starting — topic='{topic}' filename='{clean}' channel='{channel}'")
@@ -227,11 +400,26 @@ class YouTubeMetadataTool(BaseTool):
 
         self._migrate_old_yt_structure(output_dir, video_formats)
 
-        # ── Step 1: Narration ────────────────────────────────────────────────
+        # ── YOUTUBE ID SCRAPE MODE ────────────────────────────────────────────
+        scraped_metadata = {}
+        has_yt_id = "yt_id" in video_formats
+        if has_yt_id:
+            video_id_to_scrape = yt_source_video_id if yt_source_video_id else topic
+            if re.match(r'^[a-zA-Z0-9_-]{11}$', video_id_to_scrape):
+                print(f"[YTMetadata] 🔄 YT_ID MODE: Scraping existing video {video_id_to_scrape}")
+                scraped_metadata = _scrape_youtube_video_data(video_id_to_scrape)
+                print(f"[YTMetadata]   Title: {scraped_metadata.get('title', 'N/A')[:80]}")
+                print(f"[YTMetadata]   Existing CC tracks: {len(scraped_metadata.get('existing_captions', []))}")
+            else:
+                print(f"[YTMetadata] ⚠️  Invalid YouTube ID format: {video_id_to_scrape} — using standard metadata")
+                has_yt_id = False
+
+        # ── Step 1: Narration ─────────────────────────────────────────────────
         if generate_narration:
             print(f"[YTMetadata] Step 1/3 — Generating narration text …")
             t1 = _time.time()
-            r = self._generate_narration_file(topic, start_year, end_year, output_dir, clean, channel=channel)
+            r = self._generate_narration_file(topic, start_year, end_year, output_dir, clean,
+                                               channel=channel, scraped_metadata=scraped_metadata if has_yt_id else None)
             print(f"[YTMetadata] Narration done in {_time.time()-t1:.1f}s → {r}")
             results.append(r)
 
@@ -240,74 +428,71 @@ class YouTubeMetadataTool(BaseTool):
             print(f"[YTMetadata] Step 2/3 — Generating YouTube metadata per format …")
             t2 = _time.time()
 
-            has_debate    = "debate" in video_formats
+            has_debate = "debate" in video_formats
             has_animation = "animation" in video_formats
-            #direct_fmts   = [f for f in video_formats if f not in _pipeline]
-            direct_fmts   = [] if (has_debate or has_animation) else [f for f in video_formats if f not in _pipeline]
-            fmt_results   = []
+            direct_fmts = [] if (has_debate or has_animation or has_yt_id) else [f for f in video_formats if f not in _pipeline]
+            fmt_results = []
 
-            # DEBATE → YT/debate/{real_fmt}/MD/  (separate content per format)
-            if has_debate:
-                print(f"[YTMetadata]   • [debate] real formats: {animation_video_formats}")
+            # ── YT_ID MODE → YT/yt_id/{real_fmt}/MD/ ─────────────────────────
+            if has_yt_id:
+                print(f"[YTMetadata]   • [yt_id] Processing formats: {animation_video_formats}")
                 for real_fmt in animation_video_formats:
-                    lbl      = f"debate/{real_fmt}"
- 
-                    # existing = os.path.join(output_dir, "YT", "debate", real_fmt, "MD", "en.json")
-                    # if os.path.exists(existing):
-                    #     print(f"[YTMetadata]   • [{lbl}] YT/{lbl}/MD/en.json already exists — skipping")
-                    #     fmt_results.append(f"[{lbl}] Skipped")
-                    #     continue
-                    existing = os.path.join(output_dir, "YT", "debate", real_fmt, "MD", "en.json")
-                    # always regenerate debate metadata — topic/content changes each run
+                    lbl = f"yt_id/{real_fmt}"
+                    scraped_title    = scraped_metadata.get('title', topic)[:255]
+                    scraped_desc     = scraped_metadata.get('description', f"Video ID: {topic}")
+                    scraped_tags     = scraped_metadata.get('tags', self._generate_youtube_tags(topic, channel=channel))
+                    scraped_chapters = scraped_metadata.get('chapters', "0:00 Introduction\n0:30 Content\n1:00 Conclusion")
 
+                    fmt_results.append(self._write_metadata_files(
+                        topic, scraped_title, scraped_desc, scraped_tags, scraped_chapters,
+                        output_dir, fmt=lbl, lang_list=active_md_langs, scraped_from_yt=True))
+
+            # ── DEBATE MODE → YT/debate/{real_fmt}/MD/ ───────────────────────
+            if has_debate:
+                print(f"[YTMetadata]   • [debate] Processing formats: {animation_video_formats}")
+                for real_fmt in animation_video_formats:
+                    lbl = f"debate/{real_fmt}"
                     meta = self._build_debate_metadata(
                         topic, output_dir, start_year, end_year,
-                        fmt=real_fmt,
-                        channel=channel, channel_lower=channel_lower, website=website)
+                        fmt=real_fmt, channel=channel, channel_lower=channel_lower, website=website)
                     fmt_results.append(self._write_metadata_files(
                         topic, meta["title"], meta["description"],
                         meta["tags"], meta["chapters"],
                         output_dir, fmt=lbl, lang_list=active_md_langs))
 
-            # ANIMATION → YT/{real_fmt}/MD/ per real format
+            # ── ANIMATION MODE → YT/{real_fmt}/MD/ ───────────────────────────
             if has_animation:
+                print(f"[YTMetadata]   • [animation] Processing formats: {animation_video_formats}")
                 periods = self._detect_periods(n_periods, clean, start_year, end_year)
-                title   = self._generate_youtube_title(topic, start_year, end_year, channel=channel)
-                tags    = self._generate_youtube_tags(topic, channel=channel)
-                print(f"[YTMetadata]   • [animation] real formats: {animation_video_formats}")
-                for fmt in animation_video_formats:
-                    existing = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
-                    if os.path.exists(existing):
-                        print(f"[YTMetadata]   • [{fmt}] YT/{fmt}/MD/en.json already exists")
-                        fmt_results.append(f"[{fmt}] Skipped")
-                        continue
-                    dur  = self._calc_duration(fmt, periods, fps, fps_hd_offset)
+                title = self._generate_youtube_title(topic, start_year, end_year, channel=channel)
+                tags = self._generate_youtube_tags(topic, channel=channel)
+
+                for real_fmt in animation_video_formats:
+                    lbl = real_fmt
+                    dur = self._calc_duration(real_fmt, periods, fps, fps_hd_offset)
                     desc = self._generate_youtube_description(
                         topic, start_year, end_year, dur,
                         channel=channel, channel_lower=channel_lower, website=website)
-                    ch   = self._generate_youtube_chapters(start_year, end_year, dur)
-                    print(f"[YTMetadata]   • [{fmt}] {periods} periods → {dur:.1f}s")
+                    ch = self._generate_youtube_chapters(start_year, end_year, dur)
+
                     fmt_results.append(self._write_metadata_files(
                         topic, title, desc, tags, ch,
-                        output_dir, fmt=fmt, lang_list=active_md_langs))
+                        output_dir, fmt=lbl, lang_list=active_md_langs))
 
-            # DIRECT real fmts → YT/{fmt}/MD/
+            # ── DIRECT MODE → YT/{fmt}/MD/ ───────────────────────────────────
             if direct_fmts:
+                print(f"[YTMetadata]   • [direct] Processing formats: {direct_fmts}")
                 periods = self._detect_periods(n_periods, clean, start_year, end_year)
-                title   = self._generate_youtube_title(topic, start_year, end_year, channel=channel)
-                tags    = self._generate_youtube_tags(topic, channel=channel)
-                print(f"[YTMetadata]   • Direct formats: {direct_fmts}")
+                title = self._generate_youtube_title(topic, start_year, end_year, channel=channel)
+                tags = self._generate_youtube_tags(topic, channel=channel)
+
                 for fmt in direct_fmts:
-                    existing = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
-                    if os.path.exists(existing):
-                        print(f"[YTMetadata]   • [{fmt}] YT/{fmt}/MD/en.json already exists")
-                        fmt_results.append(f"[{fmt}] Skipped")
-                        continue
-                    dur  = self._calc_duration(fmt, periods, fps, fps_hd_offset)
+                    dur = self._calc_duration(fmt, periods, fps, fps_hd_offset)
                     desc = self._generate_youtube_description(
                         topic, start_year, end_year, dur,
                         channel=channel, channel_lower=channel_lower, website=website)
-                    ch   = self._generate_youtube_chapters(start_year, end_year, dur)
+                    ch = self._generate_youtube_chapters(start_year, end_year, dur)
+
                     fmt_results.append(self._write_metadata_files(
                         topic, title, desc, tags, ch,
                         output_dir, fmt=fmt, lang_list=active_md_langs))
@@ -315,7 +500,7 @@ class YouTubeMetadataTool(BaseTool):
             print(f"[YTMetadata] Metadata done in {_time.time()-t2:.1f}s")
             results.append("\n".join(fmt_results))
 
-        # ── Step 3: Thumbnails → YT/debate/{fmt}/Th/ or YT/{fmt}/Th/ ─────────
+        # ── Step 3: Thumbnails ────────────────────────────────────────────────
         if generate_thumbnail:
             print(f"[YTMetadata] Step 3/3 — Generating thumbnail images …")
             t3 = _time.time()
@@ -324,18 +509,18 @@ class YouTubeMetadataTool(BaseTool):
                 video_formats=video_formats,
                 animation_video_formats=animation_video_formats,
                 csv_path=csv_path or f"output/{clean}.csv",
-                channel=channel)
+                channel=channel,
+                scraped_metadata=scraped_metadata if has_yt_id else None)
             print(f"[YTMetadata] Thumbnail done in {_time.time()-t3:.1f}s → {r}")
             results.append(r)
 
         # ── Step CC: Translate CC files ───────────────────────────────────────
-        # debate  → YT/debate/{real_fmt}/CC/   (per format, separate content)
-        # others  → YT/{fmt}/CC/
         print(f"[YTMetadata] Step CC — Translating CC narration files …")
         cc_result = self._translate_cc_files(
             output_dir, video_formats,
             lang_list=active_cc_langs,
-            animation_video_formats=animation_video_formats)
+            animation_video_formats=animation_video_formats,
+            video_style=video_style)
         results.append(cc_result)
 
         self._cleanup_and_rename(output_dir, video_formats, channel, topic)
@@ -381,30 +566,118 @@ class YouTubeMetadataTool(BaseTool):
     # ── Narration ─────────────────────────────────────────────────────────────
 
     def _generate_narration_file(self, topic, start_year, end_year,
-                                  output_dir, clean, channel="PlayOwnAi") -> str:
+                                  output_dir, clean, channel="PlayOwnAi", scraped_metadata=None) -> str:
         csv_path = f"output/{clean}.csv"
         print(f"[YTMetadata]   CSV path: {csv_path} (exists={os.path.exists(csv_path)})")
+
+        # ── YT_ID MODE ────────────────────────────────────────────────────────
+        if scraped_metadata and scraped_metadata.get('title'):
+            transcript = scraped_metadata.get('transcript', '').strip()
+            title      = scraped_metadata.get('title', topic)
+            desc       = scraped_metadata.get('description', '').strip()
+            tags       = scraped_metadata.get('tags', [])
+            chapters   = scraped_metadata.get('chapters', '')
+            src        = scraped_metadata.get('source', 'unknown')
+
+            # Build title slug for filename: first 5 words of real title
+            import re as _re2
+            _slug_words = _re2.findall(r'[A-Za-z0-9]+', title)[:5]
+            _title_slug = '_'.join(_slug_words) if _slug_words else clean
+            cc_filename = f"{_title_slug}_cc_en.txt"
+            out_path    = os.path.join(output_dir, cc_filename)
+
+            # ── Smart skip: don't overwrite existing slug-named cc file ──────────
+            if os.path.exists(out_path):
+                existing = open(out_path, encoding='utf-8').read().strip()
+                print(f"[YTMetadata]   {cc_filename} exists ({len(existing)} chars) — keeping, not overwriting")
+                cc_result = f"Narration kept: {cc_filename} (existing, not overwritten)"
+            else:
+                if transcript:
+                    cc_text  = transcript
+                    src_note = f"real YouTube CC/transcript (via {src})"
+                elif desc:
+                    cc_text  = f"{title}. {desc[:800].rsplit(' ', 1)[0]}"
+                    src_note = f"video description (no CC available)"
+                else:
+                    cc_text  = f"{title}. Watch: https://youtu.be/{topic}"
+                    src_note = "title only"
+
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(cc_text)
+                print(f"[YTMetadata]   {cc_filename} written ({len(cc_text)} chars) — source: {src_note}")
+                cc_result = f"Narration saved: {cc_filename} ({src_note})"
+
+            # ── Write metadata.md — scraped content as human-readable markdown ─
+            md_path = os.path.join(output_dir, "metadata.md")
+            if not os.path.exists(md_path):
+                md_lines = [
+                    f"# {title}",
+                    "",
+                    f"**Video ID:** `{topic}`  ",
+                    f"**Source:** {src}  ",
+                    f"**URL:** https://www.youtube.com/watch?v={topic}",
+                    "",
+                    "## Description",
+                    "",
+                    desc if desc else "_No description available._",
+                    "",
+                ]
+                if tags:
+                    md_lines += [
+                        "## Tags",
+                        "",
+                        ", ".join(f"`{t}`" for t in tags[:30]),
+                        "",
+                    ]
+                if chapters:
+                    md_lines += [
+                        "## Chapters",
+                        "",
+                        "```",
+                        chapters,
+                        "```",
+                        "",
+                    ]
+                if transcript:
+                    md_lines += [
+                        "## Transcript (CC)",
+                        "",
+                        transcript[:3000] + ("..." if len(transcript) > 3000 else ""),
+                        "",
+                    ]
+                with open(md_path, "w", encoding="utf-8") as f:
+                    f.write("\n".join(md_lines))
+                print(f"[YTMetadata]   metadata.md written ({os.path.getsize(md_path)//1024} KB)")
+            else:
+                print(f"[YTMetadata]   metadata.md exists — keeping, not overwriting")
+
+            return cc_result
+
         if os.path.exists(csv_path):
             try:
                 import pandas as pd
                 df = pd.read_csv(csv_path)
-                tc   = df.columns[0]; dc = df.columns[1:]
-                yrs  = df[tc].tolist()
+                tc = df.columns[0]; dc = df.columns[1:]
+                yrs = df[tc].tolist()
                 s, e = int(yrs[0]), int(yrs[-1])
                 parts = [
-                    f"Welcome to @{channel}.",
-                    f"Today, we're exploring {topic} from {s} to {e}.",
-                    "Only for basic idea about trending.",
-                    "Let's see how the landscape evolved.",
+                    f"Welcome to @{channel}. ",
+                    f"Today, we're exploring {topic} from {s} to {e}. ",
+                    "Only for basic idea about trending. ",
+                    "Let's see how the landscape evolved. ",
                 ]
                 for _, row in df.iterrows():
                     ldr = row[dc].idxmax(); val = row[ldr]; yr = int(row[tc])
-                    if val <= 20:   parts.append(f"{yr}. The market is forming.")
-                    elif val <= 40: parts.append(f"{yr}. {ldr} gains traction.")
-                    elif val <= 70: parts.append(f"{yr}. {ldr} shows strength.")
-                    else:           parts.append(f"{yr}. {ldr} leads the market.")
-                parts.append(f"Subscribe to @{channel} for more insights.")
-                narration = "  ".join(parts)
+                    if val <= 20:
+                        parts.append(f"{yr}. The market is forming. ")
+                    elif val <= 40:
+                        parts.append(f"{yr}. {ldr} gains traction. ")
+                    elif val <= 70:
+                        parts.append(f"{yr}. {ldr} shows strength. ")
+                    else:
+                        parts.append(f"{yr}. {ldr} leads the market. ")
+                parts.append(f"Subscribe to @{channel} for more insights. ")
+                narration = "   ".join(parts)
             except Exception as ex:
                 print(f"[YTMetadata]   CSV read failed: {ex}")
                 narration = self._fallback_narration(topic, start_year, end_year, channel)
@@ -416,63 +689,62 @@ class YouTubeMetadataTool(BaseTool):
         return "Narration text saved to: cc_en.txt"
 
     def _fallback_narration(self, topic, start_year, end_year, channel="PlayOwnAi") -> str:
-        return (f"Welcome to @{channel}. Today, we're exploring {topic} from {start_year} to {end_year}.  "
-                 "Only for basic idea about trending.  "
+        return (f"Welcome to @{channel}. Today, we're exploring {topic} from {start_year} to {end_year}.   "
+                "Only for basic idea about trending.   "
                 f"Subscribe to @{channel} for more insights.")
 
     # ── Debate metadata builder ───────────────────────────────────────────────
 
     def _build_debate_metadata(self, topic, output_dir, start_year, end_year,
-                                 fmt="HD",
-                                channel="PlayOwnAi", channel_lower="playownai",
+                                fmt="HD", channel="PlayOwnAi", channel_lower="playownai",
                                 website="youtube.com/@PlayOwnAi") -> dict:
         is_short = fmt in ("Shorts", "ShortsHD", "Shorts4K")
+
         def _read(name):
             for p in [os.path.join(output_dir, f"{name}_En.md"),
                       os.path.join(output_dir, f"{name}.md")]:
                 if os.path.exists(p):
-                    with open(p, "r", encoding="utf-8") as f: return f.read()
-            return ""
+                    with open(p, "r", encoding="utf-8") as f:
+                        return f.read()
+            return " "
 
         def _sentences(text, n=2):
-            text = re.sub(r"^#+\s.*$", "", text, flags=re.MULTILINE)
-            text = re.sub(r"^\s*[-*]\s+", "", text, flags=re.MULTILINE)
-            text = re.sub(r"\*+", "", text)
-            text = re.sub(r"\n{2,}", "  ", text).strip()
+            text = re.sub(r"^#+\s.*$", " ", text, flags=re.MULTILINE)
+            text = re.sub(r"^\s*[-*]\s+", " ", text, flags=re.MULTILINE)
+            text = re.sub(r"\*+", " ", text)
+            text = re.sub(r"\n{2,}", "   ", text).strip()
             sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if len(s.strip()) > 20]
-            return "  ".join(sents[:n])
+            return "   ".join(sents[:n])
 
-        pro_raw = _read("propose"); con_raw = _read("oppose"); dec_raw = _read("decide")
-        print(f"[YTMetadata]   • [debate] MD files:  "
-              f"propose={'Yes' if pro_raw else 'No'}  "
-              f"oppose={'Yes' if con_raw else 'No'}  "
+        pro_raw = _read("propose")
+        con_raw = _read("oppose")
+        dec_raw = _read("decide")
+        print(f"[YTMetadata]   • [debate] MD files:   "
+              f"propose={'Yes' if pro_raw else 'No'}   "
+              f"oppose={'Yes' if con_raw else 'No'}   "
               f"decide={'Yes' if dec_raw else 'No'}")
 
         if not (pro_raw or con_raw or dec_raw):
-            # Fallback to standard auto-generated metadata
             dur = 60.0 if is_short else 180.0
             return {
-                "title":    self._generate_youtube_title(topic, start_year, end_year, channel=channel),
+                "title": self._generate_youtube_title(topic, start_year, end_year, channel=channel),
                 "description": self._generate_youtube_description(
                     topic, start_year, end_year, dur,
                     channel=channel, channel_lower=channel_lower, website=website),
-                "tags":     self._generate_youtube_tags(topic, channel=channel), 
-
+                "tags": self._generate_youtube_tags(topic, channel=channel),
                 "chapters": ("0:00 Introduction\n0:10 Pro Argument\n0:35 Counter Argument\n0:50 Verdict"
                             if is_short else
-                             "0:00 Introduction\n0:30 Pro Argument\n1:30 Counter Argument\n2:30 Verdict & Conclusion"),
+                            "0:00 Introduction\n0:30 Pro Argument\n1:30 Counter Argument\n2:30 Verdict & Conclusion"),
             }
 
-        pro  = _sentences(pro_raw)  if pro_raw  else "Strong arguments support this position."
-        con  = _sentences(con_raw)  if con_raw  else "Significant counterarguments exist."
-        dec  = _sentences(dec_raw)  if dec_raw  else "The evidence suggests a nuanced conclusion."
+        pro = _sentences(pro_raw) if pro_raw else "Strong arguments support this position."
+        con = _sentences(con_raw) if con_raw else "Significant counterarguments exist."
+        dec = _sentences(dec_raw) if dec_raw else "The evidence suggests a nuanced conclusion."
 
-        # ── Format-specific content ───────────────────────────────────────────
         if is_short:
-            # Shorts: lead with the single strongest argument + verdict
             strongest_label = "PRO" if pro_raw else "CON"
-            strongest_arg   = pro if pro_raw else con
-            title       = f"{topic}: The Key Argument in 60s | @{channel} #Shorts"
+            strongest_arg = pro if pro_raw else con
+            title = f"{topic}: The Key Argument in 60s | @{channel} #Shorts"
             description = f"""{topic} — Quick Debate
 {strongest_label}
 {strongest_arg}
@@ -482,12 +754,9 @@ Subscribe @{channel} for full debates!
 #{topic.replace(' ', '')} #AIDebate #Shorts
 AI-generated for educational purposes.
 """.strip()
-           # chapters = "0:00 Introduction\n0:10 Key Argument\n0:50 Verdict"
             chapters = "0:00 Introduction\n0:10 Pro Argument\n0:35 Counter Argument\n0:50 Verdict"
-            
         else:
-            # HD / full format: include both sides
-            title       = f"{topic}: AI Debate & Analysis | @{channel}"
+            title = f"{topic}: AI Debate & Analysis | @{channel}"
             description = f"""{topic} — AI Debate & Analysis
 THE QUESTION
 Should {topic}? This debate explores both sides with evidence-based arguments.
@@ -505,9 +774,7 @@ FOLLOW US:
 #{topic.replace(' ', '')} #AIDebate #ArtificialIntelligence #TechDebate #FutureOfWork #AIAnalysis
 Disclaimer: Arguments generated by AI for educational purposes only.
 """.strip()
-            #chapters = "0:00 Introduction\n0:30 Pro Arguments\n2:00 Con Arguments\n3:30 Verdict & Conclusion"
             chapters = "0:00 Introduction\n0:30 Pro Argument\n1:30 Counter Argument\n2:30 Verdict & Conclusion"
-            
         print(f"[YTMetadata]   • [debate/{fmt}] Title: {title}")
 
         tags = [
@@ -518,19 +785,19 @@ Disclaimer: Arguments generated by AI for educational purposes only.
         ][:25]
 
         return {
-            "title":       title,
+            "title": title,
             "description": description,
-            "tags":        tags,
-            "chapters":    chapters,
+            "tags": tags,
+            "chapters": chapters,
         }
 
     # ── Metadata file writer ──────────────────────────────────────────────────
 
     def _write_metadata_files(self, topic, title, description, tags, chapters,
-                                output_dir, fmt="", lang_list=None) -> str:
+                              output_dir, fmt=" ", lang_list=None, scraped_from_yt: bool = False) -> str:
         if lang_list is None:
             lang_list = LANGUAGES[:35]
-        lbl    = fmt if fmt else "Video"
+        lbl = fmt if fmt else "Video"
         md_dir = os.path.join(output_dir, "YT", lbl, "MD")
         os.makedirs(md_dir, exist_ok=True)
 
@@ -538,8 +805,9 @@ Disclaimer: Arguments generated by AI for educational purposes only.
         if not os.path.exists(en_json):
             with open(en_json, "w", encoding="utf-8") as f:
                 json.dump({"title": title, "description": description, "tags": tags,
-                            "chapters": chapters, "category": "Science & Technology",
-                            "language": "en", "created_at": datetime.now().isoformat()},
+                           "chapters": chapters, "category": "Science & Technology",
+                           "language": "en", "created_at": datetime.now().isoformat(),
+                           "scraped_from_youtube": scraped_from_yt},
                           f, indent=2, ensure_ascii=False)
             print(f"[YTMetadata]   Saved: YT/{lbl}/MD/en.json")
         else:
@@ -560,16 +828,18 @@ Disclaimer: Arguments generated by AI for educational purposes only.
             p = os.path.join(md_dir, f"{lang}.txt")
             if os.path.exists(p):
                 print(f"[YTMetadata]     YT/{lbl}/MD/{lang}.txt exists")
-                ok += 1; continue
+                ok += 1
+                continue
             try:
-                t_t  = _google_translate(title, lang)
-                t_d  = _google_translate(description, lang)
+                t_t = _google_translate(title, lang)
+                t_d = _google_translate(description, lang)
                 t_tg = _google_translate(", ".join(tags), lang)
                 with open(p, "w", encoding="utf-8") as f:
                     f.write(f"TITLE:\n{t_t}\n\nDESCRIPTION:\n{t_d}\n\n"
                             f"TAGS:\n{t_tg}\n\nCHAPTERS:\n{chapters}\n")
                 print(f"[YTMetadata]     YT/{lbl}/MD/{lang}.txt ({LANG_NAMES.get(lang, lang)})")
-                ok += 1; time.sleep(0.2)
+                ok += 1
+                time.sleep(0.2)
             except Exception as e:
                 print(f"[YTMetadata]     {lang}: {e}")
 
@@ -587,8 +857,8 @@ Disclaimer: Arguments generated by AI for educational purposes only.
         return t[3] if len(topic) > 20 else (t[0] if len(topic) > 10 else t[1])
 
     def _generate_youtube_description(self, topic, start_year, end_year, video_duration,
-                                       channel="PlayOwnAi", channel_lower="playownai",
-                                       website="youtube.com/@PlayOwnAi") -> str:
+                                      channel="PlayOwnAi", channel_lower="playownai",
+                                      website="youtube.com/@PlayOwnAi") -> str:
         return f"""{topic} Race {start_year}-{end_year}: Complete Data Visualization
 We explore the evolution of {topic} from {start_year} to {end_year}. Watch how market leaders changed!
 Subscribe to @{channel} for more data-driven insights!
@@ -613,7 +883,7 @@ Disclaimer: Educational content. Data compiled from public sources.
 
     def _generate_youtube_chapters(self, start_year, end_year, video_duration) -> str:
         total = end_year - start_year + 1
-        secs  = video_duration / total if total > 0 else 5
+        secs = video_duration / total if total > 0 else 5
         lines = ["0:00 Introduction"]
         for yr in range(start_year, end_year + 1):
             ts = int((yr - start_year) * secs)
@@ -625,35 +895,62 @@ Disclaimer: Educational content. Data compiled from public sources.
     # ── Thumbnail generator ───────────────────────────────────────────────────
 
     def _generate_thumbnails(self, topic, start_year, end_year, output_dir, clean,
-                               video_formats, animation_video_formats,
-                              csv_path="", channel="PlayOwnAi") -> str:
+                             video_formats, animation_video_formats,
+                             csv_path="", channel="PlayOwnAi", video_style=None,
+                             scraped_metadata=None) -> str:
         """
         Save thumbnails to:
-          debate    → YT/debate/{real_fmt}/Th/{clean}.png|jpg  (no CSV needed)
+          yt_id     → YT/yt_id/{real_fmt}/Th/{title_slug}.png|jpg
+          debate    → YT/debate/{real_fmt}/Th/{clean}.png|jpg
           animation → YT/{real_fmt}/Th/{clean}.png|jpg
           direct    → YT/{fmt}/Th/{clean}.png|jpg
         """
+        if not video_style:
+            video_style = []
+
+        # In ytid mode — use real scraped title for display + slug for filename
+        _is_ytid = (scraped_metadata is not None)
+        if _is_ytid and scraped_metadata.get('title'):
+            display_topic = scraped_metadata['title']
+            # Build a clean slug from the first 5 words of the title
+            import re as _re
+            _words = _re.findall(r'[A-Za-z0-9]+', display_topic)[:5]
+            th_clean = '_'.join(_words) if _words else clean
+        else:
+            display_topic = topic
+            th_clean = clean
+
         try:
             from PIL import Image, ImageDraw, ImageFont
         except ImportError:
             return "Pillow not installed — thumbnails skipped"
 
-        # ── Build target lists ────────────────────────────────────────────────
-        # debate_targets: rendered from MD files — no CSV required
-        # bar_targets:    rendered from CSV data
-        debate_targets = []   # (th_dir, real_fmt)
-        bar_targets    = []   # th_dir
+        debate_targets = []
+        bar_targets = []
 
-        for fmt in video_formats:
-            if fmt == "debate":
-                for rf in animation_video_formats:
-                    debate_targets.append(
-                        (os.path.join(output_dir, "YT", "debate", rf, "Th"), rf)
-                    )
-            elif fmt == "animation":
-                for rf in animation_video_formats:
-                    bar_targets.append(os.path.join(output_dir, "YT", rf, "Th"))
-            else:
+        # ── YT_ID MODE ────────────────────────────────────────────────────────
+        if "yt_id" in video_formats or "yt_id" in video_style:
+            for rf in animation_video_formats:
+                debate_targets.append(
+                    (os.path.join(output_dir, "YT", "yt_id", rf, "Th"), rf)
+                )
+
+        # ── DEBATE MODE ───────────────────────────────────────────────────────
+        if "debate" in video_formats or "debate" in video_style:
+            for rf in animation_video_formats:
+                debate_targets.append(
+                    (os.path.join(output_dir, "YT", "debate", rf, "Th"), rf)
+                )
+
+        # ── ANIMATION MODE ────────────────────────────────────────────────────
+        if "animation" in video_formats or "animation" in video_style:
+            for rf in animation_video_formats:
+                bar_targets.append(os.path.join(output_dir, "YT", rf, "Th"))
+
+        # ── DIRECT MODE ───────────────────────────────────────────────────────
+        direct_fmts = [f for f in video_formats if f in {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}]
+        if direct_fmts and not (debate_targets or bar_targets):
+            for fmt in direct_fmts:
                 bar_targets.append(os.path.join(output_dir, "YT", fmt, "Th"))
 
         if not debate_targets and not bar_targets:
@@ -664,13 +961,13 @@ Disclaimer: Educational content. Data compiled from public sources.
         def _save_img(img, th_dir):
             os.makedirs(th_dir, exist_ok=True)
             for fname, fmt_name, kw in [
-                (f"{clean}.png", "PNG", {}),
-                (f"{clean}.jpg", "JPEG", {"quality": 95}),
+                (f"{th_clean}.png", "PNG", {}),
+                (f"{th_clean}.jpg", "JPEG", {"quality": 95}),
             ]:
                 fpath = os.path.join(th_dir, fname)
                 if not os.path.exists(fpath):
                     img.save(fpath, fmt_name, **kw)
-                    kb  = os.path.getsize(fpath) // 1024
+                    kb = os.path.getsize(fpath) // 1024
                     rel = os.path.relpath(fpath, output_dir)
                     print(f"[YTMetadata]   Saved: {rel} ({kb} KB)")
                 else:
@@ -678,15 +975,13 @@ Disclaimer: Educational content. Data compiled from public sources.
                     print(f"[YTMetadata]   Exists: {rel}")
             saved.append(os.path.relpath(th_dir, output_dir))
 
-        # ── Debate thumbnails (no CSV) ────────────────────────────────────────
+        # ── Render debate/yt_id thumbnails (no CSV) ───────────────────────────
         for th_dir, real_fmt in debate_targets:
             is_short = real_fmt in ("Shorts", "ShortsHD", "Shorts4K")
-            img = self._render_debate_thumbnail(
-                topic, output_dir, channel, is_short=is_short)
+            img = self._render_debate_thumbnail(display_topic, output_dir, channel, is_short=is_short)
             _save_img(img, th_dir)
-            print(f"[YTMetadata]   Debate thumbnail → {os.path.relpath(th_dir, output_dir)}")
 
-        # ── Bar-race thumbnails (need CSV) ────────────────────────────────────
+        # ── Render bar-race thumbnails (need CSV) ─────────────────────────────
         if bar_targets:
             csv_data = None
             for cp in [csv_path, f"output/{clean}.csv"]:
@@ -698,8 +993,7 @@ Disclaimer: Educational content. Data compiled from public sources.
                     except Exception:
                         pass
             if csv_data is None:
-                msg = f"CSV not found — bar-race thumbnails skipped for: {bar_targets}"
-                print(f"[YTMetadata]   {msg}")
+                print(f"[YTMetadata]   CSV not found — bar-race thumbnails skipped")
             else:
                 img = self._render_thumbnail(topic, start_year, end_year, csv_data, channel)
                 for th_dir in bar_targets:
@@ -709,52 +1003,24 @@ Disclaimer: Educational content. Data compiled from public sources.
             return "No thumbnails generated"
         return f"Thumbnails saved to: {', '.join(saved)}"
 
-    def _render_debate_thumbnail(self, topic, output_dir, channel,
-                                  is_short=False) -> "Image":
-        """
-        Render a 1920×1080 debate thumbnail.
-        Layout:
-          ┌─────────────────────────────────────────┐
-          │  [AI DEBATE]  badge        top-right fmt │
-          │                                           │
-          │    <TOPIC  (2 lines, large) >              │
-          │                                          │
-          │  ┌──────────┐  ┌──────────┐  ┌────────┐ │
-          │  │ PRO   │  │ CON  │  │ VRD │ │
-          │  │ snip pet  │  │ snippet  │  │ snippet│ │
-          │  └──────────┘  └──────────┘  └────────┘ │
-          │                                          │
-          │         @channel              footer      │
-          └─────────────────────────────────────────┘
-        For Shorts (is_short=True) only the strongest argument panel is shown.
-        """
+    def _render_debate_thumbnail(self, topic, output_dir, channel, is_short=False) -> "Image":
         from PIL import Image, ImageDraw, ImageFont
 
-        # ── Canvas: portrait for Shorts, landscape for HD ─────────────────────
         if is_short:
             W, H = 1080, 1920
         else:
             W, H = 1920, 1080
 
-        BG     = (10, 12, 24)
-        ACCENT = (60, 80, 200)
-        WHITE  = (255, 255, 255)
-        CYAN   = (80, 210, 255)
-        GREEN  = (60, 220, 120)
-        RED    = (255, 80, 80)
-        GOLD   = (255, 200, 60)
-        GREY   = (160, 165, 185)
+        BG = (10, 12, 24)
+        WHITE = (255, 255, 255)
+        CYAN = (80, 210, 255)
+        GREEN = (60, 220, 120)
+        RED = (255, 80, 80)
+        GOLD = (255, 200, 60)
+        GREY = (160, 165, 185)
 
-        img  = Image.new("RGB", (W, H), BG)
+        img = Image.new("RGB", (W, H), BG)
         draw = ImageDraw.Draw(img)
-
-        # ── subtle gradient overlay ───────────────────────────────────────────
-        for y in range(H):
-            alpha = int(30 * (1 - y / H))
-            r = min(255, BG[0] + alpha)
-            g = min(255, BG[1] + alpha + 5)
-            b = min(255, BG[2] + alpha + 20)
-            draw.line([(0, y), (W, y)], fill=(r, g, b))
 
         def _font(sz):
             for path in [
@@ -763,8 +1029,10 @@ Disclaimer: Educational content. Data compiled from public sources.
                 "/System/Library/Fonts/Helvetica.ttc",
             ]:
                 if os.path.exists(path):
-                    try: return ImageFont.truetype(path, sz)
-                    except Exception: pass
+                    try:
+                        return ImageFont.truetype(path, sz)
+                    except Exception:
+                        pass
             return ImageFont.load_default()
 
         def _font_reg(sz):
@@ -773,13 +1041,15 @@ Disclaimer: Educational content. Data compiled from public sources.
                 "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
             ]:
                 if os.path.exists(path):
-                    try: return ImageFont.truetype(path, sz)
-                    except Exception: pass
+                    try:
+                        return ImageFont.truetype(path, sz)
+                    except Exception:
+                        pass
             return ImageFont.load_default()
 
         def _center_text(text, y, font, color):
             bb = draw.textbbox((0, 0), text, font=font)
-            x  = (W - (bb[2] - bb[0])) // 2
+            x = (W - (bb[2] - bb[0])) // 2
             draw.text((x, y), text, fill=color, font=font)
             return bb[3] - bb[1]
 
@@ -787,160 +1057,147 @@ Disclaimer: Educational content. Data compiled from public sources.
             words = text.split()
             lines, cur = [], ""
             for w in words:
-                test = (cur + " " + w).strip()
-                bb   = draw.textbbox((0, 0), test, font=font)
+                test = (cur + "  " + w).strip()
+                bb = draw.textbbox((0, 0), test, font=font)
                 if bb[2] - bb[0] <= max_w:
                     cur = test
                 else:
-                    if cur: lines.append(cur)
+                    if cur:
+                        lines.append(cur)
                     cur = w
-                    if len(lines) >= max_lines - 1: break
-            if cur: lines.append(cur)
+                    if len(lines) >= max_lines - 1:
+                        break
+            if cur:
+                lines.append(cur)
             return lines[:max_lines]
 
-        # ── read debate MD snippets ───────────────────────────────────────────
         def _read_snippet(name, n_sent=2):
             for p in [os.path.join(output_dir, f"{name}_En.md"),
                       os.path.join(output_dir, f"{name}.md")]:
                 if os.path.exists(p):
                     try:
-                        with open(p, encoding="utf-8") as f: raw = f.read()
-                        raw = re.sub(r"^#+\s.*$", "", raw, flags=re.MULTILINE)
-                        raw = re.sub(r"^\s*[-*]\s+", "", raw, flags=re.MULTILINE)
-                        raw = re.sub(r"\*+", "", raw)
-                        # Strip ALL-CAPS section labels: "PROPOSITION: ", "VERDICT: ",
-                        # "SUMMARY OF PROPOSITION: ", "OPENING STATEMENT: ", etc.
-                        raw = re.sub(r"\b[A-Z][A-Z\s]{3,}:\s*", "", raw)
-                        raw = re.sub(r"\n{2,}", "  ", raw).strip()
+                        with open(p, encoding="utf-8") as f:
+                            raw = f.read()
+                        raw = re.sub(r"^#+\s.*$", " ", raw, flags=re.MULTILINE)
+                        raw = re.sub(r"^\s*[-*]\s+", " ", raw, flags=re.MULTILINE)
+                        raw = re.sub(r"\*+", " ", raw)
+                        raw = re.sub(r"\b[A-Z][A-Z\s]{3,}:\s*", " ", raw)
+                        raw = re.sub(r"\n{2,}", "   ", raw).strip()
                         sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", raw)
                                  if len(s.strip()) > 15]
-                        return "  ".join(sents[:n_sent])
+                        return "   ".join(sents[:n_sent])
                     except Exception:
                         pass
-            return ""
+            return " "
 
         pro_txt = _read_snippet("propose") or "AI automation increasingly handles routine coding tasks."
-        con_txt = _read_snippet("oppose")  or "Human creativity and problem-solving remain irreplaceable."
-        dec_txt = _read_snippet("decide")  or "A nuanced transition is underway — adapt or be left behind."
+        con_txt = _read_snippet("oppose") or "Human creativity and problem-solving remain irreplaceable."
+        dec_txt = _read_snippet("decide") or "A nuanced transition is underway — adapt or be left behind."
 
-        # ── BADGE: top-left ───────────────────────────────────────────────────
+        # BADGE: top-left
         badge_f = _font(38)
         badge_label = "AI DEBATE"
         bb = draw.textbbox((0, 0), badge_label, font=badge_f)
         bw, bh = bb[2] - bb[0] + 40, bb[3] - bb[1] + 20
-        draw.rounded_rectangle([(40, 38), (40 + bw, 38 + bh)],
-                                 radius=14, fill=(40, 60, 160))
+        draw.rounded_rectangle([(40, 38), (40 + bw, 38 + bh)], radius=14, fill=(40, 60, 160))
         draw.text((40 + 20, 38 + 10), badge_label, fill=WHITE, font=badge_f)
 
-        # ── fmt badge: top-right ────────────────────────────────────────────
+        # fmt badge: top-right
         fmt_label = "#SHORTS" if is_short else "HD"
-        fmt_col   = GOLD if is_short else CYAN
-        fmt_f     = _font(38)
+        fmt_col = GOLD if is_short else CYAN
+        fmt_f = _font(38)
         bb2 = draw.textbbox((0, 0), fmt_label, font=fmt_f)
         fw = bb2[2] - bb2[0] + 40
         fh = bb2[3] - bb2[1] + 20
-        draw.rounded_rectangle([(W - 40 - fw, 38), (W - 40, 38 + fh)],
-                                radius=14, fill=(30, 30, 60))
+        draw.rounded_rectangle([(W - 40 - fw, 38), (W - 40, 38 + fh)], radius=14, fill=(30, 30, 60))
         draw.text((W - 40 - fw + 20, 38 + 10), fmt_label, fill=fmt_col, font=fmt_f)
 
-        # ── TOPIC title (2 lines) ─────────────────────────────────────────────
+        # TOPIC title
         title_f = _font(72)
-        ty      = 120
+        ty = 120
         title_lines = _wrap_text(topic, title_f, W - 80, max_lines=3)
         for line in title_lines:
-            if not line: continue
+            if not line:
+                continue
             h = _center_text(line, ty, title_f, WHITE)
             ty += h + 10
-        ty += 18  # gap after title
+        ty += 18
 
-        # ── horizontal rule ───────────────────────────────────────────────────
+        # horizontal rule
         draw.line([(80, ty), (W - 80, ty)], fill=(60, 65, 100), width=2)
         ty += 24
 
-        # ── argument panels ───────────────────────────────────────────────────
         panel_y = ty
 
         if is_short:
-            # Portrait layout: 3 panels stacked vertically, full width
-            panel_pad  = 30
-            panel_r    = 22
-            label_f    = _font(44)
-            body_f     = _font_reg(34)
+            panel_pad = 30
+            panel_r = 22
+            label_f = _font(44)
+            body_f = _font_reg(34)
             panels = [
                 ("PRO ARGUMENT", GREEN, (30, 55, 35), pro_txt),
-                ("CON ARGUMENT", RED,   (55, 25, 25), con_txt),
-                ("VERDICT",      GOLD,  (55, 45, 20), dec_txt),
+                ("CON ARGUMENT", RED, (55, 25, 25), con_txt),
+                ("VERDICT", GOLD, (55, 45, 20), dec_txt),
             ]
-            gap      = 20
-            pw       = W - 160
-            panel_h  = (H - panel_y - 160 - gap * 2) // 3
-            px, py   = 80, panel_y
+            gap = 20
+            pw = W - 160
+            panel_h = (H - panel_y - 160 - gap * 2) // 3
+            px, py = 80, panel_y
 
             for label, label_col, bg_col, body in panels:
-                draw.rounded_rectangle(
-                    [(px, py), (px + pw, py + panel_h)],
-                    radius=panel_r, fill=bg_col)
-                draw.text((px + panel_pad, py + panel_pad),
-                          label, fill=label_col, font=label_f)
+                draw.rounded_rectangle([(px, py), (px + pw, py + panel_h)], radius=panel_r, fill=bg_col)
+                draw.text((px + panel_pad, py + panel_pad), label, fill=label_col, font=label_f)
                 body_lines = _wrap_text(body, body_f, pw - panel_pad * 2, max_lines=5)
                 by = py + panel_pad + 54
                 for bl in body_lines:
                     draw.text((px + panel_pad, by), bl, fill=WHITE, font=body_f)
                     by += 42
                 py += panel_h + gap
-
             foot_y = py + 20
         else:
-            # Landscape layout: panels side by side
-            panel_h    = 420
-            panel_pad  = 28
-            panel_r    = 18
-            label_f    = _font(44)
-            body_f     = _font_reg(34)
+            panel_h = 420
+            panel_pad = 28
+            panel_r = 18
+            label_f = _font(44)
+            body_f = _font_reg(34)
             panels = [
-                ("PRO",     GREEN, (30, 55, 35), pro_txt),
-                ("CON",     RED,   (55, 25, 25), con_txt),
-                ("VERDICT", GOLD,  (55, 45, 20), dec_txt),
+                ("PRO", GREEN, (30, 55, 35), pro_txt),
+                ("CON", RED, (55, 25, 25), con_txt),
+                ("VERDICT", GOLD, (55, 45, 20), dec_txt),
             ]
-            n_panels  = 3
-            gap       = 30
-            pw        = (W - 160 - gap * (n_panels - 1)) // n_panels
-            px        = 80
+            n_panels = 3
+            gap = 30
+            pw = (W - 160 - gap * (n_panels - 1)) // n_panels
+            px = 80
 
             for label, label_col, bg_col, body in panels:
-                draw.rounded_rectangle(
-                    [(px, panel_y), (px + pw, panel_y + panel_h)],
-                    radius=panel_r, fill=bg_col)
-                draw.text((px + panel_pad, panel_y + panel_pad),
-                          label, fill=label_col, font=label_f)
+                draw.rounded_rectangle([(px, panel_y), (px + pw, panel_y + panel_h)], radius=panel_r, fill=bg_col)
+                draw.text((px + panel_pad, panel_y + panel_pad), label, fill=label_col, font=label_f)
                 body_lines = _wrap_text(body, body_f, pw - panel_pad * 2, max_lines=6)
                 by = panel_y + panel_pad + 56
                 for bl in body_lines:
                     draw.text((px + panel_pad, by), bl, fill=WHITE, font=body_f)
                     by += 42
                 px += pw + gap
-
             foot_y = panel_y + panel_h + 28
 
-        # ── footer ────────────────────────────────────────────────────────────
-        chan_f  = _font(40)
-        foot_f  = _font_reg(34)
+        chan_f = _font(40)
+        foot_f = _font_reg(34)
         _center_text(f"@{channel}", foot_y, chan_f, CYAN)
-        _center_text("Debate for AI Educational Purposes Only",
-                     foot_y + 52, foot_f, GREY)
+        _center_text("Debate for AI Educational Purposes Only", foot_y + 52, foot_f, GREY)
 
         return img
 
     def _render_thumbnail(self, topic, start_year, end_year, csv_data, channel) -> "Image":
         from PIL import Image, ImageDraw, ImageFont
-        W, H     = 1920, 1080
-        bg       = (15, 15, 25)
-        colors   = [(255,82,82),(82,255,166),(82,166,255),(255,200,82),
-                     (200,82,255),(82,255,255),(255,128,0),(128,255,0)]
-        txt_col  = (255, 255, 255)
-        pri_col  = (100, 200, 255)
+        W, H = 1920, 1080
+        bg = (15, 15, 25)
+        colors = [(255, 82, 82), (82, 255, 166), (82, 166, 255), (255, 200, 82),
+                  (200, 82, 255), (82, 255, 255), (255, 128, 0), (128, 255, 0)]
+        txt_col = (255, 255, 255)
+        pri_col = (100, 200, 255)
 
-        img  = Image.new("RGB", (W, H), bg)
+        img = Image.new("RGB", (W, H), bg)
         draw = ImageDraw.Draw(img)
 
         def _font(sz):
@@ -950,51 +1207,59 @@ Disclaimer: Educational content. Data compiled from public sources.
                 "/System/Library/Fonts/Helvetica.ttc",
             ]:
                 if os.path.exists(path):
-                    try: return ImageFont.truetype(path, sz)
-                    except Exception: pass
+                    try:
+                        return ImageFont.truetype(path, sz)
+                    except Exception:
+                        pass
             return ImageFont.load_default()
 
         lf, mf, sf = _font(80), _font(55), _font(36)
         ty = 60
         words = topic.split()
-        for line in ["  ".join(words[:4]), "  ".join(words[4:])]:
-            if not line: continue
-            bb = draw.textbbox((0,0), line, font=lf)
-            draw.text(((W-(bb[2]-bb[0]))//2, ty), line, fill=txt_col, font=lf)
+        for line in ["   ".join(words[:4]), "   ".join(words[4:])]:
+            if not line:
+                continue
+            bb = draw.textbbox((0, 0), line, font=lf)
+            draw.text(((W - (bb[2] - bb[0])) // 2, ty), line, fill=txt_col, font=lf)
             ty += 100
 
         yr_txt = f"{start_year} – {end_year}"
-        bb = draw.textbbox((0,0), yr_txt, font=mf)
-        draw.text(((W-(bb[2]-bb[0]))//2, ty+10), yr_txt, fill=pri_col, font=mf)
+        bb = draw.textbbox((0, 0), yr_txt, font=mf)
+        draw.text(((W - (bb[2] - bb[0])) // 2, ty + 10), yr_txt, fill=pri_col, font=mf)
 
-        latest   = csv_data.iloc[-1]
-        dc       = csv_data.columns[1:]
-        vals     = [float(latest.get(c, 0)) for c in dc]
-        max_val  = max(vals) if vals else 100
-        if max_val == 0: max_val = 100
-        cx, cw   = 150, W-300
+        latest = csv_data.iloc[-1]
+        dc = csv_data.columns[1:]
+        vals = [float(latest.get(c, 0)) for c in dc]
+        max_val = max(vals) if vals else 100
+        if max_val == 0:
+            max_val = 100
+        cx, cw = 150, W - 300
         cy, bh, bs = 620, 60, 20
 
         for i, (col, val) in enumerate(zip(dc, vals)):
             bw = (val / max_val) * cw
             by = cy + i * (bh + bs)
-            draw.rectangle([(cx, by), (cx+bw, by+bh)], fill=colors[i % len(colors)])
-            draw.text((cx+15, by+10), f"{col}: {int(val)}", fill=txt_col, font=sf)
+            draw.rectangle([(cx, by), (cx + bw, by + bh)], fill=colors[i % len(colors)])
+            draw.text((cx + 15, by + 10), f"{col}: {int(val)}", fill=txt_col, font=sf)
 
         footer = f"Bar Race {start_year}–{end_year}"
-        bb = draw.textbbox((0,0), footer, font=sf)
-        draw.text(((W-(bb[2]-bb[0]))//2, H-60), footer, fill=pri_col, font=sf)
+        bb = draw.textbbox((0, 0), footer, font=sf)
+        draw.text(((W - (bb[2] - bb[0])) // 2, H - 60), footer, fill=pri_col, font=sf)
         return img
 
     # ── CC translator ─────────────────────────────────────────────────────────
 
     def _translate_cc_files(self, output_dir, video_formats,
-                             lang_list=None, animation_video_formats=None) -> str:
+                            lang_list=None, animation_video_formats=None, video_style=None) -> str:
         """
         Translate CC source files.
-        debate  → YT/debate/{real_fmt}/CC/   (separate file per real format)
-        animation/direct → YT/{fmt}/CC/
+        yt_id   → YT/yt_id/{real_fmt}/CC/
+        debate  → YT/debate/{real_fmt}/CC/
+        animation → YT/{real_fmt}/CC/
+        direct  → YT/{fmt}/CC/
         """
+        if not video_style:
+            video_style = []
         if lang_list is None:
             lang_list = LANGUAGES[:20]
         if not animation_video_formats:
@@ -1004,138 +1269,152 @@ Disclaimer: Educational content. Data compiled from public sources.
         _real = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
 
         translated_total = 0
-        skipped_total    = 0
-        report           = []
-        # cc_sources: (src_path, cc_dir_path, display_label)
-        cc_sources       = []
+        skipped_total = 0
+        report = []
+        cc_sources = []
 
-        for fmt in video_formats:
-
-            # ── DEBATE: per real format ───────────────────────────────────────
-            if fmt == "debate":
+        # ── YT_ID MODE ────────────────────────────────────────────────────────
+        # Read directly from {title_slug}_cc_en.txt — avoids duplicate YT/Shorts/CC/ folder.
+        # en.txt + translated langs all go into YT/yt_id/{fmt}/CC/ only.
+        if "yt_id" in video_formats or "yt_id" in video_style:
+            # Find the slug-named cc file: {anything}_cc_en.txt or fallback cc_en.txt
+            import glob as _cc_glob
+            _cc_candidates = (
+                sorted(_cc_glob.glob(os.path.join(output_dir, "*_cc_en.txt"))) +
+                [os.path.join(output_dir, "cc_en.txt")]
+            )
+            _cc_src = next((p for p in _cc_candidates if os.path.exists(p)), None)
+            if _cc_src:
                 for real_fmt in animation_video_formats:
-                    # File naming: PlayOwnAi_Debate_*_{real_fmt}_*_cc.txt
-                    patterns = [
-                        os.path.join(output_dir, f"*_{real_fmt}_*_cc.txt"),
-                        os.path.join(output_dir, f"*_{real_fmt}_*cc_en.txt"),
-                        os.path.join(output_dir, f"*_{real_fmt}_En_cc.txt"),
-                        os.path.join(output_dir, f"*_{real_fmt}_cc.txt"),
-                    ]
-                    found = []; seen = set()
-                    for pat in patterns:
-                        for p in _glob.glob(pat):
-                            if p not in seen: seen.add(p); found.append(p)
-                    if found:
-                        cc_dir  = os.path.join(output_dir, "YT", "debate", real_fmt, "CC")
-                        display = f"debate/{real_fmt}"
-                        cc_sources.append((found[0], cc_dir, display))
-                        print(f"[YTMetadata] Found debate CC [{real_fmt}]: {os.path.basename(found[0])}")
-                    else:
-                        print(f"[YTMetadata] No CC file for debate/{real_fmt} (optional)")
-                continue
+                    cc_dir  = os.path.join(output_dir, "YT", "yt_id", real_fmt, "CC")
+                    display = f"yt_id/{real_fmt}"
+                    cc_sources.append((_cc_src, cc_dir, display))
+                    print(f"[YTMetadata] yt_id CC source: {os.path.basename(_cc_src)} → {display}")
+            else:
+                print(f"[YTMetadata] ⚠️  No CC source file found — yt_id CC translations skipped")
 
-            # ── ANIMATION: expand to real fmt names ───────────────────────────
-            #real_fmts = animation_video_formats if fmt == "animation" else [fmt]
-            
+        # ── DEBATE MODE ───────────────────────────────────────────────────────
+        if "debate" in video_formats or "debate" in video_style:
+            for real_fmt in animation_video_formats:
+                patterns = [
+                    os.path.join(output_dir, f"*_{real_fmt}_*_cc.txt"),
+                    os.path.join(output_dir, f"*_{real_fmt}_*cc_en.txt"),
+                    os.path.join(output_dir, f"*_{real_fmt}_En_cc.txt"),
+                    os.path.join(output_dir, f"*_{real_fmt}_cc.txt"),
+                ]
+                found = []
+                seen = set()
+                for pat in patterns:
+                    for p in _glob.glob(pat):
+                        if p not in seen:
+                            seen.add(p)
+                            found.append(p)
+                if found:
+                    cc_dir = os.path.join(output_dir, "YT", "debate", real_fmt, "CC")
+                    display = f"debate/{real_fmt}"
+                    cc_sources.append((found[0], cc_dir, display))
+                    print(f"[YTMetadata] Found debate CC [{real_fmt}]: {os.path.basename(found[0])}")
+                else:
+                    print(f"[YTMetadata] No CC file for debate/{real_fmt} (optional)")
 
-            if "debate" in video_formats and fmt in _real: continue
-            real_fmts = animation_video_formats if fmt == "animation" else [fmt]
-
-            for real_fmt in real_fmts:
-                merged = []; seen = set()
+        # ── ANIMATION/DIRECT MODE ─────────────────────────────────────────────
+        if "animation" in video_formats or "animation" in video_style:
+            for real_fmt in animation_video_formats:
+                merged = []
+                seen = set()
                 for pat in [
                     os.path.join(output_dir, f"*_{real_fmt}_*cc*.txt"),
-                    os.path.join(output_dir, f"*_{real_fmt}_cc_en.txt"),
-                    os.path.join(output_dir, f"*_{real_fmt}_En_cc.txt"),
+                    os.path.join(output_dir, f"bar_race_{real_fmt}_cc_en.txt"),
                 ]:
                     for p in _glob.glob(pat):
                         bn = os.path.basename(p)
-                        if p not in seen and not bn.startswith("intro_") \
-                                and not bn.startswith("definition_video_"):
-                            seen.add(p); merged.append(p)
-                if not merged:
-                    bar_cc = os.path.join(output_dir, f"bar_race_{real_fmt}_cc_en.txt")
-                    if os.path.exists(bar_cc): merged.append(bar_cc)
+                        if p not in seen and not bn.startswith("intro_") and not bn.startswith("definition_video_"):
+                            seen.add(p)
+                            merged.append(p)
                 if merged:
-                    cc_dir  = os.path.join(output_dir, "YT", real_fmt, "CC")
+                    cc_dir = os.path.join(output_dir, "YT", real_fmt, "CC")
                     display = real_fmt
                     cc_sources.append((merged[0], cc_dir, display))
                     print(f"[YTMetadata] Found CC [{real_fmt}]: {os.path.basename(merged[0])}")
-                else:
-                    print(f"[YTMetadata] No CC file for fmt={real_fmt}")
 
-        # Standard cc_en.txt fallback — only when non-debate formats are active.
-        # debate-only pipeline already has per-fmt CC; cc_en.txt must not spill
-        # into YT/HD/CC/ when video_formats = ['debate'] only.
-        #has_non_debate = any(f != "debate" for f in video_formats)
-        #has_non_debate = any(f != "debate" for f in video_formats) and not has_debate
-        has_non_debate = any(f != "debate" for f in video_formats) and "debate" not in video_formats
+        # Standard cc_en.txt fallback — only for animation/direct pipelines.
+        # Skip when video_style contains yt_id/ytid/debate — those pipelines
+        # already wrote cc_en.txt to their own YT/{pipeline}/{fmt}/CC/ path above.
+        _active_styles = set(
+            ("yt_id" if s in ("ytid", "yt_id") else s)
+            for s in (video_style or [])
+        )
+        _is_pipeline_only = bool(_active_styles & {"yt_id", "debate"})
+        has_non_pipeline = not _is_pipeline_only
         std_cc = os.path.join(output_dir, "cc_en.txt")
-        if has_non_debate and os.path.exists(std_cc):
+        if has_non_pipeline and os.path.exists(std_cc):
             first_rf = animation_video_formats[0] if animation_video_formats else "standard"
-            cc_dir   = os.path.join(output_dir, "YT", first_rf, "CC")
-            display  = first_rf
+            cc_dir = os.path.join(output_dir, "YT", first_rf, "CC")
+            display = first_rf
             if not any(s[1] == cc_dir for s in cc_sources):
                 cc_sources.append((std_cc, cc_dir, display))
                 print(f"[YTMetadata] Found standard CC: cc_en.txt → {display}")
-        elif not has_non_debate:
-            print(f"[YTMetadata] Skipping cc_en.txt fallback — debate-only pipeline")
 
         if not cc_sources:
-            msg = "No CC source files found (optional for debate)"
+            msg = "No CC source files found"
             print(f"[YTMetadata] {msg}")
             return msg
+
+        # Normalise tuples — all entries have 3 elements
+        cc_sources = [(s[0], s[1], s[2]) for s in cc_sources]
 
         for src_path, cc_dir, display in cc_sources:
             with open(src_path, "r", encoding="utf-8") as f:
                 en_text = f.read().strip()
             if not en_text:
-                print(f"[YTMetadata]   {os.path.basename(src_path)} empty — skipping")
                 continue
             os.makedirs(cc_dir, exist_ok=True)
 
             en_out = os.path.join(cc_dir, "en.txt")
             if not os.path.exists(en_out):
-                with open(en_out, "w", encoding="utf-8") as f: f.write(en_text)
+                with open(en_out, "w", encoding="utf-8") as f:
+                    f.write(en_text)
                 print(f"[YTMetadata]   Saved: YT/{display}/CC/en.txt")
             else:
                 print(f"[YTMetadata]   Exists: YT/{display}/CC/en.txt")
 
-            print(f"[YTMetadata]   Translating YT/{display}/CC/ → {len(lang_list)} languages …")
             ok = 1
             for lang in lang_list:
                 out = os.path.join(cc_dir, f"{lang}.txt")
                 if os.path.exists(out):
-                    skipped_total += 1; ok += 1; continue
+                    skipped_total += 1
+                    ok += 1
+                    continue
                 try:
                     translated = _google_translate(en_text, lang)
-                    with open(out, "w", encoding="utf-8") as f: f.write(translated)
-                    print(f"[YTMetadata]     YT/{display}/CC/{lang}.txt ({LANG_NAMES.get(lang, lang)})")
-                    ok += 1; translated_total += 1
-                    import time as _t; _t.sleep(0.2)
+                    with open(out, "w", encoding="utf-8") as f:
+                        f.write(translated)
+                    print(f"[YTMetadata]     YT/{display}/CC/{lang}.txt")
+                    ok += 1
+                    translated_total += 1
+                    time.sleep(0.2)
                 except Exception as e:
                     print(f"[YTMetadata]     {display}/CC/{lang}: {e}")
 
             total = len(lang_list) + 1
             report.append(f"[{display}] {ok}/{total} CC files in YT/{display}/CC/")
 
-        summary = (f"CC translations: {translated_total} new, {skipped_total} skipped\n"
-                   + "\n".join(report))
+        summary = f"CC translations: {translated_total} new, {skipped_total} skipped\n" + "\n".join(report)
         print(f"[YTMetadata] {summary}")
         return summary
 
     # ── Legacy helper ─────────────────────────────────────────────────────────
 
     def _generate_youtube_metadata(self, topic, start_year, end_year, video_duration,
-                                    output_dir, clean_filename,
-                                    channel="PlayOwnAi", channel_lower="playownai",
-                                    website="youtube.com/@PlayOwnAi") -> str:
+                                   output_dir, clean_filename,
+                                   channel="PlayOwnAi", channel_lower="playownai",
+                                   website="youtube.com/@PlayOwnAi") -> str:
         title = self._generate_youtube_title(topic, start_year, end_year, channel=channel)
-        desc  = self._generate_youtube_description(
+        desc = self._generate_youtube_description(
             topic, start_year, end_year, video_duration,
             channel=channel, channel_lower=channel_lower, website=website)
-        tags  = self._generate_youtube_tags(topic, channel=channel)
-        ch    = self._generate_youtube_chapters(start_year, end_year, video_duration)
+        tags = self._generate_youtube_tags(topic, channel=channel)
+        ch = self._generate_youtube_chapters(start_year, end_year, video_duration)
         return self._write_metadata_files(topic, title, desc, tags, ch, output_dir)
 
     # ── Migration ─────────────────────────────────────────────────────────────
@@ -1143,7 +1422,8 @@ Disclaimer: Educational content. Data compiled from public sources.
     def _migrate_old_yt_structure(self, output_dir, video_formats):
         import glob as _glob, re as _re
         yt_dir = os.path.join(output_dir, "YT")
-        if not os.path.exists(yt_dir): return
+        if not os.path.exists(yt_dir):
+            return
         moved = 0
 
         for old in (_glob.glob(os.path.join(yt_dir, "Metadata_*.json")) +
@@ -1151,29 +1431,40 @@ Disclaimer: Educational content. Data compiled from public sources.
             name = os.path.basename(old)
             m = (_re.match(r"Metadata_([^_]+(?:HD|4K|8K|2K)?)_([A-Za-z-]+)\.(json|txt)$", name) or
                  _re.match(r"Metadata_([A-Za-z0-9]+)_([A-Za-z-]+)\.(json|txt)$", name))
-            if not m: continue
+            if not m:
+                continue
             fp, lp, ext = m.group(1), m.group(2), m.group(3)
-            nn   = "en.json" if lp.lower() == "en" and ext == "json" else f"{lp.lower()}.txt"
-            ddir = os.path.join(yt_dir, fp, "MD"); os.makedirs(ddir, exist_ok=True)
-            np   = os.path.join(ddir, nn)
-            if not os.path.exists(np): os.rename(old, np); moved += 1
-            else: os.remove(old)
+            nn = "en.json" if lp.lower() == "en" and ext == "json" else f"{lp.lower()}.txt"
+            ddir = os.path.join(yt_dir, fp, "MD")
+            os.makedirs(ddir, exist_ok=True)
+            np = os.path.join(ddir, nn)
+            if not os.path.exists(np):
+                os.rename(old, np)
+                moved += 1
+            else:
+                os.remove(old)
 
         for old in _glob.glob(os.path.join(yt_dir, "cc_*.txt")):
             name = os.path.basename(old)
-            m    = _re.match(r"cc_([A-Za-z0-9]+)_([A-Za-z-]+)\.txt$", name)
-            if not m: continue
+            m = _re.match(r"cc_([A-Za-z0-9]+)_([A-Za-z-]+)\.txt$", name)
+            if not m:
+                continue
             p1, lang = m.group(1), m.group(2)
             known = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
-            fp    = p1 if p1 in known else "standard"
-            ddir  = os.path.join(yt_dir, fp, "CC"); os.makedirs(ddir, exist_ok=True)
-            np    = os.path.join(ddir, f"{lang}.txt")
-            if not os.path.exists(np): os.rename(old, np); moved += 1
-            else: os.remove(old)
+            fp = p1 if p1 in known else "standard"
+            ddir = os.path.join(yt_dir, fp, "CC")
+            os.makedirs(ddir, exist_ok=True)
+            np = os.path.join(ddir, f"{lang}.txt")
+            if not os.path.exists(np):
+                os.rename(old, np)
+                moved += 1
+            else:
+                os.remove(old)
 
-        if moved: print(f"[YTMetadata] Migration: {moved} files moved")
+        if moved:
+            print(f"[YTMetadata] Migration: {moved} files moved")
 
-        # ── Rename stale YT/Debate/ → YT/debate/ (Linux case-sensitive fix) ──────
+        # Rename stale YT/Debate/ → YT/debate/
         import shutil as _sh
         old_cap = os.path.join(yt_dir, "Debate")
         new_low = os.path.join(yt_dir, "debate")
@@ -1183,9 +1474,8 @@ Disclaimer: Educational content. Data compiled from public sources.
                 _sh.rmtree(old_cap)
                 print(f"[YTMetadata] Renamed: YT/Debate/ → YT/debate/")
             else:
-                # Both exist — merge missing files then remove old
                 for root, dirs, files in os.walk(old_cap):
-                    rel      = os.path.relpath(root, old_cap)
+                    rel = os.path.relpath(root, old_cap)
                     dst_root = os.path.join(new_low, rel)
                     os.makedirs(dst_root, exist_ok=True)
                     for fname in files:
@@ -1196,23 +1486,34 @@ Disclaimer: Educational content. Data compiled from public sources.
                 _sh.rmtree(old_cap)
                 print(f"[YTMetadata] Merged YT/Debate/ into YT/debate/")
 
-        # ── Rename stale TH/ → Th/ under YT/debate/{fmt}/ ───────────────────────
+        # Rename stale YT/YT_ID/ → YT/yt_id/
+        old_ytid_cap = os.path.join(yt_dir, "YT_ID")
+        new_ytid_low = os.path.join(yt_dir, "yt_id")
+        if os.path.exists(old_ytid_cap):
+            if not os.path.exists(new_ytid_low):
+                _sh.copytree(old_ytid_cap, new_ytid_low)
+                _sh.rmtree(old_ytid_cap)
+                print(f"[YTMetadata] Renamed: YT/YT_ID/ → YT/yt_id/")
+
+        # Rename stale TH/ → Th/
         if os.path.exists(new_low):
             for fmt_entry in os.scandir(new_low):
-                if not fmt_entry.is_dir(): continue
+                if not fmt_entry.is_dir():
+                    continue
                 old_th = os.path.join(fmt_entry.path, "TH")
                 new_th = os.path.join(fmt_entry.path, "Th")
                 if os.path.exists(old_th) and not os.path.exists(new_th):
                     _sh.move(old_th, new_th)
                     print(f"[YTMetadata] Renamed: YT/debate/{fmt_entry.name}/TH → Th")
 
-        # ── Migrate old flat YT/debate/MD/ → YT/debate/{fmt}/MD/ ────────────────
+        # Migrate old flat YT/debate/MD/ → YT/debate/{fmt}/MD/
         old_debate_md = os.path.join(yt_dir, "debate", "MD")
         if os.path.exists(old_debate_md):
             real_fmts = [f for f in video_formats if f in {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}] or ["HD"]
             for fname in os.listdir(old_debate_md):
                 src = os.path.join(old_debate_md, fname)
-                if not os.path.isfile(src): continue
+                if not os.path.isfile(src):
+                    continue
                 for rf in real_fmts:
                     dst_dir = os.path.join(yt_dir, "debate", rf, "MD")
                     os.makedirs(dst_dir, exist_ok=True)
@@ -1227,8 +1528,10 @@ Disclaimer: Educational content. Data compiled from public sources.
                 if not remaining:
                     _sh.rmtree(old_debate_md)
                     print(f"[YTMetadata] Removed old: YT/debate/MD/")
-            except Exception: pass
-        if moved: print(f"[YTMetadata] Migration total: {moved} files moved")
+            except Exception:
+                pass
+        if moved:
+            print(f"[YTMetadata] Migration total: {moved} files moved")
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
 
@@ -1241,17 +1544,19 @@ Disclaimer: Educational content. Data compiled from public sources.
         for pat in ["Final_*.mp4", "Merge_bar_race_*.mp4"]:
             for p in _glob.glob(os.path.join(output_dir, pat)):
                 m = re.search(r"(?:Final_|Merge_bar_race_)(.+)\.mp4$", os.path.basename(p))
-                if m: glob_fmts.add(m.group(1))
+                if m:
+                    glob_fmts.add(m.group(1))
 
-        _real  = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
-        base   = [f for f in video_formats if f in _real]
+        _real = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
+        base = [f for f in video_formats if f in _real]
         all_fmts = list(dict.fromkeys(base + sorted(glob_fmts)))
         print(f"[YTMetadata]   Rename targets: {all_fmts} (inputs={video_formats} glob={sorted(glob_fmts)})")
 
         for fmt in all_fmts:
             dst = os.path.join(output_dir, f"{channel}_{topic_slug}_{fmt}.mp4")
             if os.path.exists(dst):
-                print(f"[YTMetadata] Already exists: {os.path.basename(dst)}"); continue
+                print(f"[YTMetadata] Already exists: {os.path.basename(dst)}")
+                continue
             src = next((p for p in [
                 os.path.join(output_dir, f"Final_{fmt}.mp4"),
                 os.path.join(output_dir, f"Merge_bar_race_{fmt}.mp4"),
@@ -1264,8 +1569,10 @@ Disclaimer: Educational content. Data compiled from public sources.
 
         for fname in os.listdir(output_dir):
             fpath = os.path.join(output_dir, fname)
-            if not os.path.isfile(fpath): continue
-            if not any(fname.endswith(e) for e in (".mp4", ".mp3")): continue
+            if not os.path.isfile(fpath):
+                continue
+            if not any(fname.endswith(e) for e in (".mp4", ".mp3")):
+                continue
             if any(fname.startswith(p) for p in
                    ["intro_", "bar_race_", "definition_video_", "Merge_bar_race_", "Final_"]):
                 os.remove(fpath)

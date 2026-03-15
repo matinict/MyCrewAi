@@ -18,21 +18,24 @@ import re
 import warnings
 import logging
 from crewai_video_factory.crew import CrewaiVideoFactory
+
 # Silence Pydantic warnings
 warnings.filterwarnings("ignore", message=".*skip_file_prefixes.*")
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
+
 # Silence LiteLLM proxy server import errors (fastapi/uvicorn not needed for client use)
 logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", message=".*fastapi.*")
 warnings.filterwarnings("ignore", message=".*litellm.*proxy.*")
+
 import os
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"  # prevents proxy server import
+
+
 def load_config():
     """Load configuration from input/data.json, with optional override file.
-
     Override file specified via INPUT_CONFIG env var:
-        INPUT_CONFIG=input/dataBn.json crewai run
-
+    INPUT_CONFIG=input/dataBn.json crewai run
     Override keys are merged on top of data.json — only specify what changes.
     """
     base_path     = "input/data.json"
@@ -134,10 +137,9 @@ def load_config():
             # Only hoist when publisher=true; discard silently when false
             if _pub_on:
                 config.update(_pub_cfg)
-
-        # If publisher=false, force legacy gate flag off (does NOT affect sub-blocks)
-        if not config.get('publisher', False):
-            config.setdefault('upload_youtube_video', False)
+            # If publisher=false, force legacy gate flag off (does NOT affect sub-blocks)
+            if not config.get('publisher', False):
+                config.setdefault('upload_youtube_video', False)
 
         # ── Step 2: Standard block_map for non-publisher blocks ───────────────
         # intro_enabled / intro_duration / intro_duration_hd are special:
@@ -147,7 +149,6 @@ def load_config():
         _intro_enabled    = False
         _intro_duration   = None
         _intro_duration_hd = None
-
         _block_map = [
             ("animation",     "animation_config",     "bar_race_video_enabled"),
             ("debate",        "debate_config",        "debate_video_enabled"),
@@ -175,9 +176,10 @@ def load_config():
                         _key = 'video_style' if 'video_style' in _nested else 'video_formats'
                         _nested['metadata_video_formats'] = _nested[_key]
                         _nested['video_style'] = _nested.pop(_key) if _key == 'video_style' else []
+
                     config.update(_nested)
-            else:
-                config[_flag] = False  # guarantee gate flag is off
+                else:
+                    config[_flag] = False  # guarantee gate flag is off
 
         # Apply collected intro values — OR logic: any active block with intro_enabled=true wins
         config['intro_enabled']     = _intro_enabled
@@ -243,13 +245,13 @@ def load_config():
             'bar_race_audio_enabled':     False,
             # metadata_prep_config
             'generate_youtube_metadata':  False,
-            'generate_yt_thumbnail':      False,  # generate_yt_thumbnail from metadata_prep_config
+            'generate_yt_thumbnail':      False,
             'yt_metadata_lang':           35,
             'yt_cc_lang':                 20,
-            #'metadata_video_formats':     [],   # video_formats from metadata_prep_config
-            'metadata_video_formats':     [], 'video_style':                [],
-            '_metadata_video_formats':    [],   # resolved at run() — passed to task
-            'animation_video_formats':    [],   # = main video_formats, used by metadata tool for animation branch
+            'metadata_video_formats':     [],
+            'video_style':                [],
+            '_metadata_video_formats':    [],
+            'animation_video_formats':    [],
             # publisher_config
             'upload_youtube_video':       False,
             'upload_privacy':             'private',
@@ -284,7 +286,7 @@ def load_config():
             'fps_hd_offset':              1.0,
             'audio_speed':                1.0,
             'audio_speed_hd':             1.0,
-            'tts_engine':                 'gtts',    # 'gtts' or 'edge-tts'
+            'tts_engine':                 'gtts',
             'channel_lower':              '',
             'website':                    '',
             'use_label_mappings':         False,
@@ -293,14 +295,14 @@ def load_config():
             'debate_video_enabled':       False,
             'debate_secs_per_line':       3.5,
             'debate_max_chars':           10000,
-            'debate_merge_enabled':       False,      # ✅ ADDED
-            'debate_background_enabled':    False,
+            'debate_merge_enabled':       False,
+            'debate_background_enabled':  False,
             'debate_bg_opacity':          255,
-            'debate_background_prompt':    '',
-            'image_gen_backend':           'auto',
+            'debate_background_prompt':   '',
+            'image_gen_backend':          'auto',
             'tts_voices':                 {},
-            'intro_context':              'bar_race',  # bar_race | debate | definition
-            'intro_slug':                 '',          # custom narration line 2
+            'intro_context':              'bar_race',
+            'intro_slug':                 '',
             # computed at run() — must exist for tasks.yaml interpolation
             'topic_slug':                 '',
             'filename':                   '',
@@ -323,32 +325,30 @@ def load_config():
         print(f"❌ Error loading config: {e}")
         sys.exit(1)
 
+
 # ── Lang flag: crewai run -bn  →  INPUT_CONFIG=input/dataBn.json ─────────
-# Scans sys.argv for -xx flags (2-letter ISO code). Sets INPUT_CONFIG env var
-# so load_config() picks it up. Default (no flag) = input/data.json (English).
 _lang_flag = next((a for a in sys.argv[1:] if re.match(r'^-[a-z]{2}$', a)), None)
 if _lang_flag:
-    _lang_code   = _lang_flag[1:]          # e.g. "bn"
-    _config_file = f"input/data{_lang_code.upper()}.json"   # e.g. input/dataBN.json
-    # Also try camelCase: dataBn.json
+    _lang_code   = _lang_flag[1:]
+    _config_file = f"input/data{_lang_code.upper()}.json"
     import glob as _glob
-    _candidates = _glob.glob(f"input/data{_lang_code}*.json", ) +                   _glob.glob(f"input/data{_lang_code.upper()}*.json")
+    _candidates = _glob.glob(f"input/data{_lang_code}*.json") + \
+                  _glob.glob(f"input/data{_lang_code.upper()}*.json")
     _candidates = [c for c in _candidates if c != "input/data.json"]
     if _candidates:
         _config_file = sorted(_candidates)[0]
     os.environ["INPUT_CONFIG"] = _config_file
     print(f"🌐 Lang flag: {_lang_flag}  →  {_config_file}")
-    # Remove flag from argv so crewai doesn't choke on it
     sys.argv = [a for a in sys.argv if a != _lang_flag]
 
-_LANG_SUFFIX = _lang_flag[1:].capitalize() if _lang_flag else "En"  # e.g. "Bn", "Fr", "En"
+_LANG_SUFFIX = _lang_flag[1:].capitalize() if _lang_flag else "En"
 
-# Load configuration from input/data.json (+ optional INPUT_CONFIG override)
 DEFAULT_INPUTS = load_config()
+
 
 def run():
     inputs = DEFAULT_INPUTS.copy()
-    inputs['lang_suffix'] = _LANG_SUFFIX   # e.g. "En" | "Bn" | "Fr"
+    inputs['lang_suffix'] = _LANG_SUFFIX
 
     # Parse CLI arguments (override input/data.json if provided)
     if len(sys.argv) > 1:
@@ -357,7 +357,7 @@ def run():
             inputs.update(custom_inputs)
             print("✅ CLI arguments override applied")
         except json.JSONDecodeError:
-            pass  # not JSON — already handled as lang flag above
+            pass
 
     # Generate filename from topic
     words = re.findall(r'\w+', inputs['topic'])[:3]
@@ -379,10 +379,8 @@ def run():
         elif inputs.get('animation', False):
             inputs['intro_context'] = 'bar_race'
         else:
-            inputs['intro_context'] = 'bar_race'  # safe default
+            inputs['intro_context'] = 'bar_race'
 
-    # intro_slug already flattened from active _config block by _block_map.update()
-    # — no extra work needed; setdefault ensures empty string if not in any config
     inputs.setdefault('fmt', 'HD')
 
     # FPS validation
@@ -405,9 +403,6 @@ def run():
     print(f"⏱️  Speed: {fps} seconds per period")
 
     if not inputs.get('animation', False):
-        # Animation is OFF — research & CSV are ONLY needed by animation tasks.
-        # debate / metadata_prep / publisher / social never need a CSV.
-        # Always skip — regardless of whether a CSV file exists on disk.
         print("⭐️  Animation OFF — research & CSV generation skipped")
         inputs['_skip_research'] = True
         inputs['_skip_csv']      = True
@@ -454,7 +449,7 @@ def run():
     meta_on = inputs.get('metadata_prep', False)
     print(f"📺 Metadata Prep:    {meta_on}")
     if meta_on:
-        print(f"   📋 YouTube Metadata:{inputs.get('generate_youtube_metadata', False)}")
+        print(f"   📋 YouTube Meta{inputs.get('generate_youtube_metadata', False)}")
         print(f"   🖼️  Thumbnail:       {inputs.get('generate_yt_thumbnail', False)}")
         _meta_fmts = inputs.get('metadata_video_formats') or inputs.get('video_formats', [])
         print(f"   🎬 Meta Formats:    {_meta_fmts}")
@@ -473,9 +468,9 @@ def run():
         if cc_only_on:
             print(f"   📝 CC/MD Update:    True  "
                   f"[cc_limit={inputs.get('upload_cc_limit',0)}, md_limit={inputs.get('upload_md_limit',0)}]")
-    if fb_on:
-        print(f"   📘 Facebook Upload: {inputs.get('upload_facebook_video', False)}" +
-              (f"  [{inputs.get('fb_privacy_status','SELF')}]" if inputs.get('upload_facebook_video') else ""))
+        if fb_on:
+            print(f"   📘 Facebook Upload: {inputs.get('upload_facebook_video', False)}" +
+                  (f"  [{inputs.get('fb_privacy_status','SELF')}]" if inputs.get('upload_facebook_video') else ""))
 
     # ── Social block ─────────────────────────────────────────
     soc_on = inputs.get('social', False)
@@ -504,8 +499,8 @@ def run():
                 print(f"   🎙️  PRO voice:  {_v.get('propose', {}).get('edge_voice', 'default')}")
                 print(f"   🎙️  CON voice:  {_v.get('oppose',  {}).get('edge_voice', 'default')}")
                 print(f"   🎙️  MOD voice:  {_v.get('decide',  {}).get('edge_voice', 'default')}")
-        else:
-            print(f"   🎙️  Voices:        (engine defaults)")
+            else:
+                print(f"   🎙️  Voices:        (engine defaults)")
         print(f"   🎬 Debate Video:    {inputs.get('debate_video_enabled', False)}" +
               (f"  [secs/line={inputs.get('debate_secs_per_line', 3.5)}]"
                if inputs.get('debate_video_enabled') else ""))
@@ -525,6 +520,34 @@ def run():
 
     print("="*60 + "\n")
 
+    # ── YOUTUBE ID MODE AUTO-DETECTION (NEW) ──────────────────────────────────
+    topic_val = inputs.get('topic', '')
+    is_youtube_id = bool(re.match(r'^[a-zA-Z0-9_-]{11}$', topic_val.strip()))
+
+    if is_youtube_id and inputs.get('metadata_prep', False):
+        print("🔄 MODE: YouTube ID detected — CC/Metadata scrape + update only")
+        print(f"   🎬 Video ID: {topic_val}")
+
+        # Force video_style to yt_id mode
+        inputs.setdefault('metadata_prep_config', {})['video_style'] = ['yt_id']
+        inputs['metadata_video_formats'] = ['yt_id']
+        inputs['video_style'] = ['yt_id']
+
+        # Skip video generation tasks (video already exists on YouTube)
+        for key in ['animation', 'debate', 'video_enabled', 'audio_enabled',
+                    'bar_race_video_enabled', 'definition_video', 'merge_audio_video',
+                    'debate_video_enabled', 'debate_merge_enabled', 'debate_definition_enabled']:
+            inputs[key] = False
+
+        # Configure for CC/MD update only (no video re-upload)
+        inputs['upload_youtube_video'] = False  # Update CC/MD only
+        inputs['upload_cc'] = True
+        inputs['generate_youtube_metadata'] = True
+        inputs['generate_thumbnail'] = False  # Skip thumbnail (use existing)
+
+        print("   📝 Active Units: metadata_prep → publisher (CC+MD only)")
+        print("   ⏭️  Skipped: animation, debate, video generation")
+
     try:
         crew_instance = CrewaiVideoFactory()
         full_crew = crew_instance.crew(inputs=inputs)
@@ -532,24 +555,26 @@ def run():
         # ===== CONDITIONAL TASK EXECUTION =====
         final_tasks = []
 
-        if not inputs.get('_skip_research', False):
-            final_tasks.append(full_crew.tasks[0])  # research_data
-        if not inputs.get('_skip_csv', False):
-            final_tasks.append(full_crew.tasks[1])  # generate_csv
-        if inputs.get('video_enabled', True):
-            final_tasks.append(full_crew.tasks[4])  # create_video
-
         # crew.py task index map:
         # [0] research_data           [1] generate_csv             [2] define_topic
         # [3] create_definition_video [4] create_video             [5] create_bar_race_video
         # [6] create_intro_clip       [7] bar_merge                [8] add_audio
         # [9] merge_audio_video       [10] generate_youtube_metadata [11] upload_to_youtube
-        # [12] upload_to_facebook     [13] share_to_social
-        # [14] debate_propose  [15] debate_oppose  [16] debate_decide
-        # [17] create_debate_video    [18] debate_merge
+        # [12] share_to_social        [13] debate_propose          [14] debate_oppose
+        # [15] debate_decide          [16] create_debate_video     [17] debate_merge
+
+        if not inputs.get('_skip_research', False):
+            final_tasks.append(full_crew.tasks[0])  # research_data
+
+        if not inputs.get('_skip_csv', False):
+            final_tasks.append(full_crew.tasks[1])  # generate_csv
+
+        if inputs.get('video_enabled', True):
+            final_tasks.append(full_crew.tasks[4])  # create_video
 
         if inputs.get('bar_race_video_enabled', False):
             final_tasks.append(full_crew.tasks[5])  # create_bar_race_video
+
         if inputs.get('intro_enabled', False):
             final_tasks.append(full_crew.tasks[6])  # create_intro_clip
 
@@ -567,6 +592,7 @@ def run():
 
         if inputs.get('audio_enabled', False):
             final_tasks.append(full_crew.tasks[8])  # add_audio
+
         if inputs.get('definition_video', False):
             final_tasks.append(full_crew.tasks[3])  # create_definition_video
 
@@ -580,37 +606,39 @@ def run():
 
         # ── Debate pipeline ───────────────────────────────────────────────
         # Must run BEFORE generate_youtube_metadata so merged CC files exist
-        if inputs.get('debate_definition_enabled', False):
+        if inputs.get('debate_definition_enabled', False) and not is_youtube_id:
             # Check for existing lang-suffixed debate files
             _debate_dir = output_dir
             _lang = inputs.get('lang_suffix', 'En')
             _propose_exists = os.path.exists(os.path.join(_debate_dir, f'propose_{_lang}.md'))
             _oppose_exists  = os.path.exists(os.path.join(_debate_dir, f'oppose_{_lang}.md'))
             _decide_exists  = os.path.exists(os.path.join(_debate_dir, f'decide_{_lang}.md'))
+
             # Fallback: check plain .md for backward compat
             if not (_propose_exists and _oppose_exists and _decide_exists):
                 _propose_exists = _propose_exists or os.path.exists(os.path.join(_debate_dir, 'propose.md'))
                 _oppose_exists  = _oppose_exists  or os.path.exists(os.path.join(_debate_dir, 'oppose.md'))
                 _decide_exists  = _decide_exists  or os.path.exists(os.path.join(_debate_dir, 'decide.md'))
+
             if _propose_exists and _oppose_exists and _decide_exists:
                 print(f"⭐️  Debate files exist ({_lang}) — skipping LLM generation (using existing)")
             else:
-                final_tasks.append(full_crew.tasks[14])  # debate_propose
-                final_tasks.append(full_crew.tasks[15])  # debate_oppose
-                final_tasks.append(full_crew.tasks[16])  # debate_decide
+                final_tasks.append(full_crew.tasks[13])  # debate_propose
+                final_tasks.append(full_crew.tasks[14])  # debate_oppose
+                final_tasks.append(full_crew.tasks[15])  # debate_decide
 
-        if inputs.get('debate_video_enabled', False):
-            final_tasks.append(full_crew.tasks[17])  # create_debate_video
+            if inputs.get('debate_video_enabled', False):
+                final_tasks.append(full_crew.tasks[16])  # create_debate_video
 
-        # ✅ Debate merge AFTER debate video (needs debate_video_with_audio ready)
-        if inputs.get('debate_merge_enabled', False):
-            final_tasks.append(full_crew.tasks[18])  # debate_merge
+            # ✅ Debate merge AFTER debate video (needs debate_video_with_audio ready)
+            if inputs.get('debate_merge_enabled', False):
+                final_tasks.append(full_crew.tasks[17])  # debate_merge
 
         # ── generate_youtube_metadata runs LAST (after all video/merge tasks) ──
         if inputs.get('generate_youtube_metadata', False):
             # Resolve which video_formats the metadata tool should use.
             # metadata_video_formats (from metadata_prep_config.video_formats) takes
-            # precedence — "debate" / "animation" tokens drive branching inside the tool.
+            # precedence — "debate" / "animation" / "yt_id" tokens drive branching inside the tool.
             # Falls back to main video_formats if not set.
             _meta_fmts = inputs.get('metadata_video_formats') or inputs.get('video_formats', ['HD'])
             inputs['_metadata_video_formats'] = _meta_fmts
@@ -619,10 +647,14 @@ def run():
         # Run upload task if uploading video OR if CC/MD update needed for existing video
         if inputs.get('upload_youtube_video', False) or inputs.get('upload_cc', False):
             final_tasks.append(full_crew.tasks[11])  # upload_to_youtube
-        if inputs.get('upload_facebook_video', False):
-            final_tasks.append(full_crew.tasks[12])  # upload_to_facebook (independent of social share)
+
+        # Social share (reads upload_log independently)
         if inputs.get('social_share_enabled', False):
-            final_tasks.append(full_crew.tasks[13])  # share_to_social (reads upload_log independently)
+            # For yt_id mode, social share can run without upload_to_youtube
+            if is_youtube_id:
+                print("📢 Social Share: Will use existing YouTube video URL")
+                inputs['social_video_url'] = f"https://youtu.be/{topic_val}"
+            final_tasks.append(full_crew.tasks[12])  # share_to_social
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
@@ -660,12 +692,10 @@ def run():
         if inputs.get('definition_enabled', False) and not inputs.get('use_existing_definition', False):
             try:
                 filename_clean = inputs.get('filename', '')
-                # Use __file__ to anchor path — CWD unreliable in crewai
                 _main_dir     = os.path.dirname(os.path.abspath(__file__))
                 _project_root = os.path.dirname(os.path.dirname(_main_dir))
                 _output_root  = os.path.join(_project_root, 'output')
                 txt_path      = os.path.join(_output_root, f"{filename_clean}.txt")
-
                 def_text = str(result.raw if hasattr(result, 'raw') else result).strip()
                 if def_text and ("WHAT IS" in def_text or "WHY DOES IT MATTER" in def_text):
                     channel = inputs.get('channel', 'PlayOwnAi')
@@ -676,7 +706,6 @@ def run():
                     header  = f"{sep}\n📖 TOPIC: {inputs['topic']}\nChannel: @{channel}" + (f"  |  Period: {_period}" if _period else "") + f"\n{sep}\n"
                     footer  = f"\n{sep}\nSubscribe to @{channel} for more data-driven insights.\n{sep}\n"
                     full    = header + def_text + footer
-
                     os.makedirs(_output_root, exist_ok=True)
                     with open(txt_path, 'w', encoding='utf-8') as _df:
                         _df.write(full)
@@ -756,13 +785,11 @@ def run():
                     if os.path.exists(merged_file):
                         print(f"      ✅ {merged_file}")
 
-        # bar race merged already reported in the bar_race_video_enabled block above
         if inputs.get('bar_merge_enabled', False):
             print(f"   Bar Merged (Final):")
             import re as _re
             topic_slug = "_".join(_re.findall(r"\w+", inputs["topic"])[:4])
             for fmt in inputs['video_formats']:
-                # Check renamed file first, then Final_ fallback
                 renamed   = f"{output_dir}/{inputs['channel']}_{topic_slug}_{fmt}.mp4"
                 final_raw = f"{output_dir}/Final_{fmt}.mp4"
                 if os.path.exists(renamed):
@@ -775,7 +802,7 @@ def run():
                     print(f"      ❌ Not found: {renamed}")
 
         if inputs.get('generate_youtube_metadata', False):
-            print(f"   YouTube Metadata:")
+            print(f"   YouTube Meta")
             metadata_files = [
                 f"{output_dir}/cc_en.txt",
                 f"{output_dir}/YT_Metadata.json",
@@ -833,7 +860,6 @@ def run():
                     kb = os.path.getsize(fpath) // 1024
                     print(f"      ✅ {fpath} ({kb} KB) [{label}]")
 
-        # ✅ NEW: Debate Merge Output Summary (ADDED)
         if inputs.get('debate_merge_enabled', False):
             print(f"   Debate Merged (Final):")
             import re as _re
@@ -853,7 +879,7 @@ def run():
         sys.exit(0)
 
     except SystemExit:
-        raise  # preserve sys.exit(0) success and sys.exit(1) errors
+        raise
     except Exception as e:
         print("\n" + "="*60)
         print("❌ VIDEO FACTORY FAILED")
@@ -862,6 +888,7 @@ def run():
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
 
 if __name__ == "__main__":
     run()

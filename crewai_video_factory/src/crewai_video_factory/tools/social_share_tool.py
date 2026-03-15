@@ -59,10 +59,14 @@ class SocialShareInput(BaseModel):
     channel: str = Field(default="PlayOwnAi", description="Channel name for post text")
     website: str = Field(default="", description="Website URL for post footer")
     image_path: str = Field(default="", description="Path to thumbnail image for social posts")
-    start_year: int = Field(default=2015, description="Start year for bar race")
-    end_year: int = Field(default=2026, description="End year for bar race")
+    start_year: Optional[int] = Field(default=2015, description="Start year for bar race. null/None falls back to 2015.")
+    end_year: Optional[int] = Field(default=2026, description="End year for bar race. null/None falls back to 2026.")
     video_url: str = Field(default="", description="Manual video URL override")
     dry_run: bool = Field(default=False, description="If true: generate & log post texts without posting live. Use for testing.")
+    # ── Scheduling ─────────────────────────────────────────────────────────────
+    schedule_post: bool = Field(default=False, description="If true, wait until schedule_datetime before posting")
+    schedule_datetime: str = Field(default="", description="Target post datetime e.g. '2026-03-20 18:00:00'")
+    schedule_timezone: str = Field(default="UTC", description="Timezone for schedule_datetime e.g. 'Asia/Dhaka'")
 
 # Platform character limits for definition section
 # (total post budget minus ~400 chars for header/footer boilerplate)
@@ -97,11 +101,20 @@ class SocialShareTool(BaseTool):
         channel: str = "PlayOwnAi",
         website: str = "",
         image_path: str = "",
-        start_year: int = 2015,
-        end_year: int = 2026,
+        start_year: Optional[int] = 2015,
+        end_year: Optional[int] = 2026,
         video_url: str = "",
         dry_run: bool = False,
+        schedule_post: bool = False,
+        schedule_datetime: str = "",
+        schedule_timezone: str = "UTC",
     ) -> str:
+        # Coerce None → defaults (start/end are null in data.json when no date range is set)
+        if start_year is None:
+            start_year = 2015
+        if end_year is None:
+            end_year = 2026
+
         # Strip trailing/leading spaces from all string inputs
         topic = topic.strip()
         filename = filename.strip()
@@ -248,6 +261,41 @@ class SocialShareTool(BaseTool):
         print(f"[SocialShare] 📺 Channel: @{channel}")
         print(f"[SocialShare] 📅 Year Range: {start_year}–{end_year}")
         print(f"[SocialShare] 🌐 Website: {website}")
+
+        # ── Scheduling: wait until schedule_datetime before posting ──────────
+        # schedule_post=true → hold until the target time, then post.
+        # If the scheduled time has already passed, post immediately.
+        # Sleeps in 60-second chunks so the process stays alive and logs progress.
+        if schedule_post and schedule_datetime and schedule_datetime.strip():
+            import datetime as _dt
+            try:
+                try:
+                    from zoneinfo import ZoneInfo          # Python 3.9+
+                except ImportError:
+                    from backports.zoneinfo import ZoneInfo
+                tz        = ZoneInfo(schedule_timezone.strip() or "UTC")
+                target_dt = _dt.datetime.strptime(schedule_datetime.strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=tz)
+                now_dt    = _dt.datetime.now(tz)
+                wait_secs = (target_dt - now_dt).total_seconds()
+                if wait_secs > 0:
+                    print(f"[SocialShare] ⏰ Scheduled post — target: {target_dt.isoformat()}")
+                    print(f"[SocialShare] ⏰ Waiting {wait_secs:.0f}s ({wait_secs/60:.1f} min) ...")
+                    _chunk  = 60.0
+                    _waited = 0.0
+                    while _waited < wait_secs:
+                        _sleep = min(_chunk, wait_secs - _waited)
+                        time.sleep(_sleep)
+                        _waited += _sleep
+                        _remaining = wait_secs - _waited
+                        if _remaining > 0:
+                            print(f"[SocialShare] ⏳ {_remaining:.0f}s remaining until scheduled post ...")
+                    print(f"[SocialShare] ✅ Schedule reached — posting now")
+                else:
+                    print(f"[SocialShare] ⚡ Scheduled time already passed ({target_dt.isoformat()}) — posting immediately")
+            except Exception as _sch_err:
+                print(f"[SocialShare] ⚠️  Schedule error: {_sch_err} — posting immediately")
+        elif schedule_post and not (schedule_datetime and schedule_datetime.strip()):
+            print(f"[SocialShare] ⚠️  schedule_post=True but schedule_datetime is empty — posting immediately")
 
         # ── Load credentials ─────────────────────────────────────────────
         creds = self._load_credentials()
@@ -442,7 +490,7 @@ class SocialShareTool(BaseTool):
         """Wrapper — converts raw cc_en.txt narration to viral post copy via _narration_to_viral."""
         return self._narration_to_viral(full_text, topic, fmt, platform)
 
-     
+
     def _build_post_text(self, topic, url, channel, website, short=False,
                      start_year=2015, end_year=2026, fmt="HD", definition="",
                      platform="LinkedIn"):
@@ -453,7 +501,7 @@ class SocialShareTool(BaseTool):
         is_shorts   = fmt in ("Shorts", "ShortsHD", "Shorts4K")
         is_debate   = fmt == "debate"
         txt_body    = self._smart_trim_definition(definition, platform, fmt, topic)
-        
+
         # Channel hashtag - lowercase, no @ symbol
         channel_hashtag = f"#{channel.lower().replace('@', '')}"
 
@@ -877,7 +925,7 @@ class SocialShareTool(BaseTool):
         YT/{fmt}/share_log_dryrun.json — dry run   (machine-readable)
         YT/{fmt}/share_log.txt         — live run  (human-readable with full post bodies)
         YT/{fmt}/share_log_dryrun.txt  — dry run   (human-readable with full post bodies)
-        
+
         MERGES with existing log to preserve ALL platforms (not just current run).
         """
         import datetime
@@ -922,7 +970,7 @@ class SocialShareTool(BaseTool):
         # ── Merge: new results override existing for same platform ─
         merged_shares = []
         processed_platforms = set()
-        
+
         # Add existing shares first
         for _share in existing_shares:
             _plat = _share.get("platform", "")
@@ -930,10 +978,10 @@ class SocialShareTool(BaseTool):
             if any(_plat == p.get("platform") for p in parsed_results):
                 continue
             merged_shares.append(_share)
-        
+
         # Add new/updated shares
         merged_shares.extend(parsed_results)
-        
+
         # Count success/failed
         _success = sum(1 for s in merged_shares if s.get("status") == "success")
         _failed = sum(1 for s in merged_shares if s.get("status") == "failed")

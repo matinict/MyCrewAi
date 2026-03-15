@@ -230,10 +230,25 @@ class YTUploadTool(BaseTool):
                                     break
                         except Exception: pass
                 if not log_path or not os.path.exists(log_path):
-                    errors.append(f"❌ {fmt}: upload_log.json not found — upload video first")
-                    print(f"[YTUpload] ❌ {fmt}: no upload log found in any location")
-                    print(f"[YTUpload]   Searched: {_log_candidates}")
-                    continue
+                    # ── ytid mode: topic IS the video ID ──────────────────────
+                    # If topic looks like a YouTube video ID (11 chars alphanumeric),
+                    # use it directly — no upload_log.json needed.
+                    import re as _re_id
+                    if _re_id.match(r'^[a-zA-Z0-9_-]{11}$', topic.strip()):
+                        vid_id = topic.strip()
+                        print(f"[YTUpload] ℹ️  {fmt}: no upload_log.json — topic looks like YouTube ID, using directly: {vid_id}")
+                        # Write a minimal upload_log.json so future runs can find it
+                        _auto_log = _log_candidates[0]
+                        os.makedirs(os.path.dirname(_auto_log), exist_ok=True)
+                        with open(_auto_log, "w") as _alf:
+                            json.dump({"video_id": vid_id, "video_url": f"https://youtu.be/{vid_id}", "format": fmt, "source": "ytid_topic"}, _alf, indent=2)
+                        print(f"[YTUpload]   💾 Auto-created upload_log.json: {_auto_log}")
+                        log_path = _auto_log
+                    else:
+                        errors.append(f"❌ {fmt}: upload_log.json not found — upload video first or set topic to YouTube video ID")
+                        print(f"[YTUpload] ❌ {fmt}: no upload log found in any location")
+                        print(f"[YTUpload]   Searched: {_log_candidates}")
+                        continue
                 try:
                     with open(log_path) as _lf:
                         _log = json.load(_lf)
@@ -270,9 +285,15 @@ class YTUploadTool(BaseTool):
                         _cc_on_yt_norm = set()
 
                     # Count pending CC files not yet on YouTube
-                    _cc_dir_d = os.path.join(output_dir, "YT", "debate", fmt, "CC")
-                    _cc_dir_s = os.path.join(output_dir, "YT", fmt, "CC")
-                    _cc_dir   = _cc_dir_d if os.path.exists(_cc_dir_d) else _cc_dir_s
+                    _cc_dir_ytid = os.path.join(output_dir, "YT", "yt_id", fmt, "CC")
+                    _cc_dir_d    = os.path.join(output_dir, "YT", "debate", fmt, "CC")
+                    _cc_dir_s    = os.path.join(output_dir, "YT", fmt, "CC")
+                    if os.path.exists(_cc_dir_ytid):
+                        _cc_dir = _cc_dir_ytid
+                    elif os.path.exists(_cc_dir_d):
+                        _cc_dir = _cc_dir_d
+                    else:
+                        _cc_dir = _cc_dir_s
                     _cc_pending_count = 0
                     if os.path.exists(_cc_dir):
                         for _cf in os.listdir(_cc_dir):
@@ -309,9 +330,15 @@ class YTUploadTool(BaseTool):
                         _md_on_yt_norm = set()
 
                     # Count pending MD files not yet on YouTube
-                    _md_dir_d = os.path.join(output_dir, "YT", "debate", fmt, "MD")
-                    _md_dir_s = os.path.join(output_dir, "YT", fmt, "MD")
-                    _md_dir   = _md_dir_d if os.path.exists(_md_dir_d) else _md_dir_s
+                    _md_dir_ytid = os.path.join(output_dir, "YT", "yt_id", fmt, "MD")
+                    _md_dir_d    = os.path.join(output_dir, "YT", "debate", fmt, "MD")
+                    _md_dir_s    = os.path.join(output_dir, "YT", fmt, "MD")
+                    if os.path.exists(_md_dir_ytid):
+                        _md_dir = _md_dir_ytid
+                    elif os.path.exists(_md_dir_d):
+                        _md_dir = _md_dir_d
+                    else:
+                        _md_dir = _md_dir_s
                     _md_pending_count = 0
                     if os.path.exists(_md_dir):
                         for _mf in os.listdir(_md_dir):
@@ -463,11 +490,16 @@ class YTUploadTool(BaseTool):
                     print(f"[YTUpload] ❌ {fmt}: No video file — skipping")
                     continue
 
-            # ── Load metadata — check debate subfolder first ───────────────
-            # Debate videos store metadata under YT/debate/{fmt}/MD/en.json
-            debate_md = os.path.join(output_dir, "YT", "debate", fmt, "MD", "en.json")
+            # ── Load metadata — check yt_id, then debate, then standard ──
+            ytid_md    = os.path.join(output_dir, "YT", "yt_id", fmt, "MD", "en.json")
+            debate_md  = os.path.join(output_dir, "YT", "debate", fmt, "MD", "en.json")
             standard_md = os.path.join(output_dir, "YT", fmt, "MD", "en.json")
-            metadata_path = debate_md if os.path.exists(debate_md) else standard_md
+            if os.path.exists(ytid_md):
+                metadata_path = ytid_md
+            elif os.path.exists(debate_md):
+                metadata_path = debate_md
+            else:
+                metadata_path = standard_md
             metadata = self._load_metadata(metadata_path, topic)
             size_mb = os.path.getsize(video_path) / (1024 * 1024)
             print(f"[YTUpload]   📤 {os.path.basename(video_path)} ({size_mb:.1f} MB) → {privacy_status}")
@@ -850,9 +882,15 @@ class YTUploadTool(BaseTool):
             except Exception:
                 return "", ""
 
-        # Check debate subfolder first (debate videos use YT/debate/{fmt}/MD/)
+        # Check yt_id subfolder first, then debate, then standard
+        ytid_md  = os.path.join(output_dir, "YT", "yt_id", fmt, "MD")
         debate_md = os.path.join(output_dir, "YT", "debate", fmt, "MD")
-        md_dir = debate_md if os.path.exists(debate_md) else os.path.join(output_dir, "YT", fmt, "MD")
+        if os.path.exists(ytid_md):
+            md_dir = ytid_md
+        elif os.path.exists(debate_md):
+            md_dir = debate_md
+        else:
+            md_dir = os.path.join(output_dir, "YT", fmt, "MD")
         if not os.path.exists(md_dir):
             print(f"[YTUpload]   ⚠️  No MD dir: {md_dir}")
             return {"uploaded": 0, "failed": 0}
@@ -944,9 +982,15 @@ class YTUploadTool(BaseTool):
         from googleapiclient.http import MediaInMemoryUpload
         from googleapiclient.errors import HttpError
 
-        # Check debate subfolder first (debate videos use YT/debate/{fmt}/CC/)
+        # Check yt_id subfolder first, then debate, then standard
+        ytid_cc  = os.path.join(output_dir, "YT", "yt_id", fmt, "CC")
         debate_cc = os.path.join(output_dir, "YT", "debate", fmt, "CC")
-        cc_dir = debate_cc if os.path.exists(debate_cc) else os.path.join(output_dir, "YT", fmt, "CC")
+        if os.path.exists(ytid_cc):
+            cc_dir = ytid_cc
+        elif os.path.exists(debate_cc):
+            cc_dir = debate_cc
+        else:
+            cc_dir = os.path.join(output_dir, "YT", fmt, "CC")
         stats  = {"uploaded": 0, "skipped": 0, "failed": 0, "quota_hit": False}
         _lang_filter = [l.strip().lower() for l in (languages or []) if l.strip()]
 

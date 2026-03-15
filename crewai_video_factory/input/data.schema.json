@@ -2,8 +2,9 @@
   "_comment": "Video Factory configuration schema. All nested *_config blocks are only read when the parent switch is true.",
   "topic": {
     "type": "string",
-    "description": "Topic for video (e.g., 'Programming Language', 'AI Frameworks'). Can be a debate motion when debate=true.",
-    "example": "Programming Language"
+    "description": "Topic for video (e.g., 'Programming Language', 'AI Frameworks'). Can be a debate motion when debate=true. When metadata_prep_config.video_style=[\"ytid\"], set this to a YouTube video ID (e.g. 'WnS4zE4wOtQ') — the metadata tool fetches title/description/tags from that existing video.",
+    "example": "Programming Language",
+    "example_ytid": "WnS4zE4wOtQ"
   },
   "start": {
     "type": "integer",
@@ -223,19 +224,19 @@
       },
       "intro_enabled": {
         "type": "boolean",
-        "description": "Generate branded intro clip per format. Output: intro_{fmt}_with_audio.mp4.",
+        "description": "Generate branded intro clip for the animation pipeline. Output: intro_{fmt}_with_audio.mp4. Controlled independently per pipeline block — does not affect debate intro.",
         "example": true
       },
       "intro_duration": {
         "type": "integer",
-        "description": "Intro clip duration in seconds for Shorts/portrait formats.",
+        "description": "Intro clip duration in seconds for Shorts/portrait formats (animation pipeline).",
         "minimum": 1,
         "maximum": 60,
         "example": 7
       },
       "intro_duration_hd": {
         "type": "integer",
-        "description": "Intro clip duration in seconds for HD/landscape formats. Set 0 to use intro_duration for all.",
+        "description": "Intro clip duration in seconds for HD/landscape formats (animation pipeline). Set 0 to use intro_duration for all.",
         "minimum": 0,
         "maximum": 60,
         "example": 10
@@ -349,6 +350,26 @@
         "type": "string",
         "description": "Custom subtitle line shown in the debate intro clip (if intro_enabled=true). Replaces the default second line.",
         "example": "One of the biggest debates in tech right now"
+      },
+      "intro_enabled": {
+        "type": "boolean",
+        "description": "Generate branded intro clip for the debate pipeline. Output: intro_{fmt}_with_audio.mp4. Controlled independently per pipeline block — does not affect animation intro.",
+        "default": false,
+        "example": true
+      },
+      "intro_duration": {
+        "type": "integer",
+        "description": "Intro clip duration in seconds for Shorts/portrait formats (debate pipeline).",
+        "minimum": 1,
+        "maximum": 60,
+        "example": 7
+      },
+      "intro_duration_hd": {
+        "type": "integer",
+        "description": "Intro clip duration in seconds for HD/landscape formats (debate pipeline). Set 0 to use intro_duration for all.",
+        "minimum": 0,
+        "maximum": 60,
+        "example": 10
       },
       "debate_secs_per_line": {
         "type": "number",
@@ -633,14 +654,31 @@
     "type": "object",
     "description": "Metadata preparation settings. Only read when metadata_prep=true.",
     "properties": {
+      "video_style": {
+        "type": "array",
+        "description": "Pipeline type to generate metadata for. Controls which branch the metadata tool takes.",
+        "enum": ["debate", "bar_race", "animation", "ytid"],
+        "example": ["debate"],
+        "enum_notes": {
+          "debate": "Generates metadata from debate pipeline output files",
+          "bar_race": "Generates metadata from bar race animation output",
+          "animation": "Generates metadata from standard animation pipeline",
+          "ytid": "Fetches metadata from an existing YouTube video — set topic to the video ID (e.g. 'WnS4zE4wOtQ')"
+        }
+      },
       "generate_youtube_metadata": {
         "type": "boolean",
         "description": "Generate YouTube metadata (title, description, tags, chapters) and translate to 31 languages. Output: YT/{fmt}/MD/ and YT/{fmt}/CC/.",
         "example": true
       },
+      "generate_thumbnail": {
+        "type": "boolean",
+        "description": "Generate AI thumbnail image for YouTube. Output: {topic_slug}.jpg and {topic_slug}.png in output/{slug}/YT/{fmt}/Th/. Alias: generate_yt_thumbnail also accepted.",
+        "example": true
+      },
       "generate_yt_thumbnail": {
         "type": "boolean",
-        "description": "Generate AI thumbnail image for YouTube. Output: {topic_slug}.jpg and {topic_slug}.png in output/{slug}/YT/{fmt}/Th/.",
+        "description": "Alias for generate_thumbnail. Use generate_thumbnail instead.",
         "example": true
       },
       "yt_metadata_lang": {
@@ -908,19 +946,19 @@
   },
   "intro_enabled": {
     "type": "boolean",
-    "description": "Generate branded intro clip per format at top level. When true, intro_clip_tool runs for each video_format.",
+    "description": "DEPRECATED at top level. Set inside animation_config and/or debate_config instead. Each pipeline block controls its own intro independently — intro_enabled=true in an active block triggers the intro clip for that pipeline only. OR logic: if any active block has intro_enabled=true, the intro runs.",
     "example": false
   },
   "intro_duration": {
     "type": "integer",
-    "description": "Intro clip duration in seconds for Shorts/portrait formats (top-level, applies outside animation pipeline).",
+    "description": "DEPRECATED at top level. Set inside animation_config and/or debate_config instead.",
     "minimum": 0,
     "maximum": 60,
     "example": 7
   },
   "intro_duration_hd": {
     "type": "integer",
-    "description": "Intro clip duration in seconds for HD/landscape formats. Set 0 to use intro_duration for all.",
+    "description": "DEPRECATED at top level. Set inside animation_config and/or debate_config instead. Set 0 to use intro_duration for all formats.",
     "minimum": 0,
     "maximum": 60,
     "example": 10
