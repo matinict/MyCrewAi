@@ -79,6 +79,9 @@ class DebateVideoInput(BaseModel):
     tts_voices:           dict  = Field(default_factory=dict, description="Per-section voice overrides from data.json")
     lang_suffix:          str   = Field(default="En", description="Language suffix for output filenames. e.g. 'En', 'Bn', 'Fr'")
     bg_opacity:           int   = Field(default=255, description="Background opacity: 0=fully transparent, 255=pure black. e.g. 180=semi-transparent dark")
+    debate_background_enabled: bool = Field(default=False, description="Composite debate_bg_{fmt}.mp4 behind debate text")
+    debate_background_prompt:  str  = Field(default="",    description="Prompt used to generate background (info only)")
+    image_gen_backend:         str  = Field(default="auto", description="Backend used for background generation")
 
 class DebateVideoTool(BaseTool):
     """
@@ -115,6 +118,9 @@ class DebateVideoTool(BaseTool):
         tts_voices: dict = None,
         lang_suffix: str = "En",
         bg_opacity: int = 255,
+        debate_background_enabled: bool = False,
+        debate_background_prompt: str = "",
+        image_gen_backend: str = "auto",
     ) -> str:
 
         if not debate_video_enabled:
@@ -251,11 +257,39 @@ class DebateVideoTool(BaseTool):
                              channel, watermark_enabled, watermark_text,
                              video_fps, topic=topic, bg_opacity=bg_opacity, bg_color=_bg_color)
 
+                # ── Composite background video if available ───────────────
+                if debate_background_enabled:
+                    _bg_vid = os.path.join(output_dir, f"debate_bg_{fmt}.mp4")
+                    if os.path.exists(_bg_vid):
+                        _comp = out_path.replace('.mp4', '_comp.mp4')
+                        _op   = max(0.0, min(1.0, bg_opacity / 255.0))
+                        _cmd_comp = [
+                            "ffmpeg", "-y",
+                            "-i", _bg_vid,
+                            "-i", out_path,
+                            "-filter_complex",
+                            f"[0:v]scale={w}:{h},setpts=PTS-STARTPTS[bg];"
+                            f"[1:v]setpts=PTS-STARTPTS[fg];"
+                            f"[bg][fg]blend=all_mode=overlay:all_opacity={_op:.2f}[out]",
+                            "-map", "[out]",
+                            "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                            "-pix_fmt", "yuv420p", "-r", str(video_fps),
+                            "-t", str(self._get_duration(out_path)),
+                            _comp
+                        ]
+                        _cr = subprocess.run(_cmd_comp, capture_output=True)
+                        if _cr.returncode == 0 and os.path.exists(_comp):
+                            os.replace(_comp, out_path)
+                            print(f"[DebateVideo] ✅ Background composited: {fmt}  opacity={_op:.2f}")
+                        else:
+                            print(f"[DebateVideo] ⚠️ Background composite failed: {_cr.stderr.decode()[:150]}")
+                    else:
+                        print(f"[DebateVideo] ⚠️ debate_background_enabled=true but {os.path.basename(_bg_vid)} not found — skipping composite")
+
                 if not os.path.exists(out_path):
                     errors.append(f"❌ {fmt}: video missing after render")
                     continue
 
-                # ── TTS audio ─────────────────────────────────────────────
                 audio_path = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_audio.mp3")
                 video_dur  = self._get_duration(out_path)
 
@@ -291,7 +325,7 @@ class DebateVideoTool(BaseTool):
 
                 # 2. Generate disclaimer clip via gTTS (independent temp file)
                 #self._generate_tts(_disclaimer_spoken, _disclaimer_audio, 0, tts_engine, voices=_voices)
-                self._tts_single(_disclaimer_spoken, _disclaimer_audio, tts_engine, _voices, role="decide")                
+                self._tts_single(_disclaimer_spoken, _disclaimer_audio, tts_engine, _voices, role="decide")
                 print(f"[DebateVideo] 🎤 Disclaimer: {'✅' if os.path.exists(_disclaimer_audio) else '⚠️ failed'}")
 
                 # 3. Generate subscribe clip via gTTS (independent temp file)
@@ -352,7 +386,7 @@ class DebateVideoTool(BaseTool):
                     #     print(f"[DebateVideo] ✅ Audio trimmed/padded to {video_dur:.1f}s")
                     # self._merge_audio_video(out_path, audio_path, final_merged, video_dur)
 
-                    
+
 
                     # ── Use full audio duration as final length ──
                     # disclaimer+subscribe audio appended AFTER main — don't trim them off

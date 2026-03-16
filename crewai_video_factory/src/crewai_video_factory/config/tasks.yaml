@@ -467,6 +467,10 @@ create_debate_video:
       video_fps: {video_fps}
       tts_engine: "{tts_engine}"
       tts_voices: {tts_voices}
+      bg_opacity: {debate_bg_opacity}
+      debate_background_enabled: {debate_background_enabled}
+      debate_background_prompt: "{debate_background_prompt}"
+      image_gen_backend: "{image_gen_backend}"
 
     Output files per format in {output_dir}/:
       debate_video_[format].mp4              (silent video)

@@ -625,14 +625,13 @@ def run():
             else:
                 final_tasks.append(full_crew.tasks[13])  # debate_propose
                 final_tasks.append(full_crew.tasks[14])  # debate_oppose
-                final_tasks.append(full_crew.tasks[15])  # debate_decide
+                final_tasks.append(full_crew.tasks[15])  # debate_decide   
 
-            if inputs.get('debate_video_enabled', False):
-                final_tasks.append(full_crew.tasks[16])  # create_debate_video
+        if inputs.get("debate_video_enabled", False) and not is_youtube_id:
+            final_tasks.append(full_crew.tasks[17])  # create_debate_video
 
-            # ✅ Debate merge AFTER debate video (needs debate_video_with_audio ready)
-            if inputs.get('debate_merge_enabled', False):
-                final_tasks.append(full_crew.tasks[17])  # debate_merge
+        if inputs.get("debate_merge_enabled", False) and not is_youtube_id:
+            final_tasks.append(full_crew.tasks[18])  # debate_merge
 
         # ── generate_youtube_metadata runs LAST (after all video/merge tasks) ──
         if inputs.get('generate_youtube_metadata', False):

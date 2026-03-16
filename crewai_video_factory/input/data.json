@@ -1,10 +1,10 @@
 {
-  "topic": "WnS4zE4wOtQ",
+  "topic": "Is AI Actually Intelligent or Just a Very Good Parrot?",
   "start": null,
   "end": null,
   "granularity": "yearly",
-  "video_formats": [ "HD" ],
-  "video_style": ["ytid" ],
+  "video_formats": [ "Shorts" ],
+  "video_style": ["true" ],
   "use_label_mappings": false,
   "fps": 4.9,
   "video_fps": 30,
@@ -45,21 +45,22 @@
     "llm_video": "ollama/llama3.1:8b",
     "llm_audio": "ollama/deepseek-r1:1.5b"
   },
-  "debate": false,
+  "debate": true,
   "debate_config": {
     "intro_slug": "One of the biggest debates in Ai tech right now",
     "debate_definition_enabled": true,
     "debate_max_chars": 2000,
     "llm_debate": "dashscope/qwen-plus",
-    "intro_enabled": false,
+    "intro_enabled": true,
     "debate_video_enabled": true,
     "debate_secs_per_line": 3.5,
-    "debate_background_enabled": true,
+    "debate_background_enabled": false,
     "debate_bg_opacity": 150,
     "debate_background_prompt": "futuristic digital debate arena, dark navy deep purple, abstract geometric circuit patterns, soft volumetric light beams, blurred bokeh background, cinematic, no text, no people, no faces",
+     "debate_bg_opacity": 150,
     "image_gen_backend": "auto",
 
-    "debate_merge_enabled": false,
+    "debate_merge_enabled": true,
     "piper_voices": {
       "propose": {
         "model": "models/joe_medium.onnx",
@@ -91,7 +92,7 @@
 
   },
 
-  "metadata_prep": true,
+  "metadata_prep": false,
   "metadata_prep_config": {
     "generate_youtube_metadata": true,
     "generate_thumbnail": false,
@@ -100,19 +101,19 @@
     "llm_youtube": "ollama/qwen2.5:latest"
   },
 
-  "publisher": true,
+  "publisher": false,
   "publisher_config": {
       "llm_upload": "ollama/qwen2.5-coder:3b",
       "llm_embed": "ollama/nomic-embed-text:latest",
-      "yt_upload": true,
+      "yt_upload": false,
       "yt_upload_config": {
           "upload_youtube_video": false,
           "upload_dry_run": false,
           "upload_privacy": "private",
           "upload_category_id": "28",
-          "upload_cc": true,
+          "upload_cc": false,
           "upload_cc_lang": "1",
-          "upload_md_lang": "5",
+          "upload_md_lang": "35",
           "yt_pin_comment_gen": false,
           "upload_notify_subscribers": false,
           "upload_client_secrets_file": "input/client_secrets.json",
@@ -120,7 +121,7 @@
       },
       "fb_upload": false,
       "fb_upload_config": {
-          "upload_facebook_video": true,
+          "upload_facebook_video": false,
           "privacy_status": "SELF",
           "credentials_file": "input/fb_credentials.json"
       }
@@ -128,10 +129,10 @@
 
   "social": false,
   "social_config": {
-    "social_share_enabled": true,
+    "social_share_enabled": false,
     "social_share_dry_run": false,
     "social_platforms": ["LinkedIn", "Instagram", "Facebook"],
-    "schedule_post": true,
+    "schedule_post": false,
     "schedule_datetime": "2026-03-20 18:00:00",
     "schedule_timezone": "Asia/Dhaka",
     "llm_social": "ollama/nomic-embed-text:latest"
