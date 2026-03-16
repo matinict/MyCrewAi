@@ -186,6 +186,11 @@ def load_config():
         config['intro_duration']    = _intro_duration    if _intro_duration    is not None else 7
         config['intro_duration_hd'] = _intro_duration_hd if _intro_duration_hd is not None else 10
 
+        # If "social": false, force social_share_enabled off regardless of inner config values.
+        # This mirrors the publisher=false → upload_youtube_video=False pattern (line ~142).
+        if not config.get('social', False):
+            config['social_share_enabled'] = False
+
         # ── Step 3: Flatten yt_upload_config and fb_upload_config ─────────────
         # yt_upload
         if config.get('yt_upload', False):
@@ -555,13 +560,14 @@ def run():
         # ===== CONDITIONAL TASK EXECUTION =====
         final_tasks = []
 
-        # crew.py task index map:
-        # [0] research_data           [1] generate_csv             [2] define_topic
-        # [3] create_definition_video [4] create_video             [5] create_bar_race_video
-        # [6] create_intro_clip       [7] bar_merge                [8] add_audio
-        # [9] merge_audio_video       [10] generate_youtube_metadata [11] upload_to_youtube
-        # [12] share_to_social        [13] debate_propose          [14] debate_oppose
-        # [15] debate_decide          [16] create_debate_video     [17] debate_merge
+        # crew.py task index map (matches @task declaration order in crew.py):
+        # [0]  research_data           [1]  generate_csv            [2]  define_topic
+        # [3]  create_definition_video [4]  create_video            [5]  create_bar_race_video
+        # [6]  create_intro_clip       [7]  bar_merge               [8]  add_audio
+        # [9]  merge_audio_video       [10] debate_propose          [11] debate_oppose
+        # [12] debate_decide           [13] create_debate_video     [14] debate_merge
+        # [15] generate_youtube_metadata [16] upload_to_youtube     [17] upload_to_facebook
+        # [18] share_to_social  ← always last
 
         if not inputs.get('_skip_research', False):
             final_tasks.append(full_crew.tasks[0])  # research_data
@@ -623,17 +629,17 @@ def run():
             if _propose_exists and _oppose_exists and _decide_exists:
                 print(f"⭐️  Debate files exist ({_lang}) — skipping LLM generation (using existing)")
             else:
-                final_tasks.append(full_crew.tasks[13])  # debate_propose
-                final_tasks.append(full_crew.tasks[14])  # debate_oppose
-                final_tasks.append(full_crew.tasks[15])  # debate_decide   
+                final_tasks.append(full_crew.tasks[10])  # debate_propose
+                final_tasks.append(full_crew.tasks[11])  # debate_oppose
+                final_tasks.append(full_crew.tasks[12])  # debate_decide
 
         if inputs.get("debate_video_enabled", False) and not is_youtube_id:
-            final_tasks.append(full_crew.tasks[17])  # create_debate_video
+            final_tasks.append(full_crew.tasks[13])  # create_debate_video
 
         if inputs.get("debate_merge_enabled", False) and not is_youtube_id:
-            final_tasks.append(full_crew.tasks[18])  # debate_merge
+            final_tasks.append(full_crew.tasks[14])  # debate_merge
 
-        # ── generate_youtube_metadata runs LAST (after all video/merge tasks) ──
+        # ── generate_youtube_metadata runs after all video/merge tasks ──
         if inputs.get('generate_youtube_metadata', False):
             # Resolve which video_formats the metadata tool should use.
             # metadata_video_formats (from metadata_prep_config.video_formats) takes
@@ -641,19 +647,21 @@ def run():
             # Falls back to main video_formats if not set.
             _meta_fmts = inputs.get('metadata_video_formats') or inputs.get('video_formats', ['HD'])
             inputs['_metadata_video_formats'] = _meta_fmts
-            final_tasks.append(full_crew.tasks[10])  # generate_youtube_metadata
+            final_tasks.append(full_crew.tasks[15])  # generate_youtube_metadata
 
         # Run upload task if uploading video OR if CC/MD update needed for existing video
         if inputs.get('upload_youtube_video', False) or inputs.get('upload_cc', False):
-            final_tasks.append(full_crew.tasks[11])  # upload_to_youtube
+            final_tasks.append(full_crew.tasks[16])  # upload_to_youtube
 
-        # Social share (reads upload_log independently)
-        if inputs.get('social_share_enabled', False):
+        # Social share — LAST unit always.
+        # Parent switch "social" MUST be true AND social_share_enabled must be true.
+        # "social": false hard-blocks the task regardless of any inner flag value.
+        if inputs.get('social', False) and inputs.get('social_share_enabled', False):
             # For yt_id mode, social share can run without upload_to_youtube
             if is_youtube_id:
                 print("📢 Social Share: Will use existing YouTube video URL")
                 inputs['social_video_url'] = f"https://youtu.be/{topic_val}"
-            final_tasks.append(full_crew.tasks[12])  # share_to_social
+            final_tasks.append(full_crew.tasks[18])  # share_to_social  ← always last
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")

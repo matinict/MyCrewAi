@@ -415,6 +415,7 @@ share_to_social:
       start_year: {start}
       end_year: {end}
       video_url: ""
+      dry_run: {social_share_dry_run}
       schedule_post: {schedule_post}
       schedule_datetime: "{schedule_datetime}"
       schedule_timezone: "{schedule_timezone}"

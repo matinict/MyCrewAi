@@ -103,12 +103,7 @@ class CrewaiVideoFactory:
             verbose=True
         )
 
-    @agent
-    def youtube_metadata_specialist(self) -> Agent:
-        kwargs = dict(config=self.agents_config['youtube_metadata_specialist'], tools=[YouTubeMetadataTool()], verbose=True)
-        if self._llm('llm_youtube'):
-            kwargs['llm'] = self._llm('llm_youtube')
-        return Agent(**kwargs)
+
 
     @agent
     def definition_specialist(self) -> Agent:
@@ -124,28 +119,6 @@ class CrewaiVideoFactory:
             tools=[DefinitionVideoTool()],
             verbose=True
         )
-
-    @agent
-    def youtube_upload_specialist(self) -> Agent:
-        kwargs = dict(config=self.agents_config['youtube_upload_specialist'], tools=[YTUploadTool()], verbose=True)
-        if self._llm('llm_upload'):
-            kwargs['llm'] = self._llm('llm_upload')
-        return Agent(**kwargs)
-    
-    @agent
-    def facebook_upload_specialist(self) -> Agent:
-        return Agent(
-            config=self.agents_config['facebook_upload_specialist'],
-            tools=[FBUploadTool()],
-            verbose=True
-        )
-
-    @agent
-    def social_share_specialist(self) -> Agent:
-        kwargs = dict(config=self.agents_config['social_share_specialist'], tools=[SocialShareTool()], verbose=True)
-        if self._llm('llm_social'):
-            kwargs['llm'] = self._llm('llm_social')
-        return Agent(**kwargs)
 
     @agent
     def debater(self) -> Agent:
@@ -174,6 +147,33 @@ class CrewaiVideoFactory:
             tools=[DebateMergeTool()],
             verbose=True
     )
+    @agent
+    def youtube_metadata_specialist(self) -> Agent:
+        kwargs = dict(config=self.agents_config['youtube_metadata_specialist'], tools=[YouTubeMetadataTool()], verbose=True)
+        if self._llm('llm_youtube'):
+            kwargs['llm'] = self._llm('llm_youtube')
+        return Agent(**kwargs)
+    @agent
+    def youtube_upload_specialist(self) -> Agent:
+        kwargs = dict(config=self.agents_config['youtube_upload_specialist'], tools=[YTUploadTool()], verbose=True)
+        if self._llm('llm_upload'):
+            kwargs['llm'] = self._llm('llm_upload')
+        return Agent(**kwargs)
+
+    @agent
+    def facebook_upload_specialist(self) -> Agent:
+        return Agent(
+            config=self.agents_config['facebook_upload_specialist'],
+            tools=[FBUploadTool()],
+            verbose=True
+        )
+
+    @agent
+    def social_share_specialist(self) -> Agent:
+        kwargs = dict(config=self.agents_config['social_share_specialist'], tools=[SocialShareTool()], verbose=True)
+        if self._llm('llm_social'):
+            kwargs['llm'] = self._llm('llm_social')
+        return Agent(**kwargs)
 
     @task
     def research_data(self) -> Task:
@@ -216,24 +216,6 @@ class CrewaiVideoFactory:
         return Task(config=self.tasks_config['merge_audio_video'])
 
     @task
-    def generate_youtube_metadata(self) -> Task:
-        return Task(config=self.tasks_config['generate_youtube_metadata'])
-
-    @task
-    def upload_to_youtube(self) -> Task:
-        return Task(config=self.tasks_config['upload_to_youtube'])
-    
-    @task
-    def upload_to_facebook(self) -> Task:
-        return Task(
-            config=self.tasks_config['upload_to_facebook'],
-        )
-
-    @task
-    def share_to_social(self) -> Task:
-        return Task(config=self.tasks_config['share_to_social'])
-
-    @task
     def debate_propose(self) -> Task:
         return Task(config=self.tasks_config['debate_propose'])
 
@@ -252,6 +234,23 @@ class CrewaiVideoFactory:
     @task
     def debate_merge(self) -> Task:
         return Task(config=self.tasks_config['debate_merge'])
+    @task
+    def generate_youtube_metadata(self) -> Task:
+        return Task(config=self.tasks_config['generate_youtube_metadata'])
+
+    @task
+    def upload_to_youtube(self) -> Task:
+        return Task(config=self.tasks_config['upload_to_youtube'])
+
+    @task
+    def upload_to_facebook(self) -> Task:
+        return Task(
+            config=self.tasks_config['upload_to_facebook'],
+        )
+
+    @task
+    def share_to_social(self) -> Task:
+        return Task(config=self.tasks_config['share_to_social'])
 
     @crew
     def crew(self, inputs: dict = None) -> Crew:
