@@ -484,6 +484,155 @@ create_debate_video:
     Example: "✅ Shorts: debate_video_Shorts_with_audio.mp4 (4500 KB)  Duration: 120.0s"
   agent: debate_video_producer
 
+# ─────────────────────────────────────────────────────────────
+# MINI DEBATE TASKS  (-m.md)
+# Target audio duration: 1–1.30 min per section (≈ 120–180 words each)
+# Output files: propose-m.md / oppose-m.md / decide-m.md
+# ─────────────────────────────────────────────────────────────
+debate_propose_m:
+  description: >
+    You are proposing the motion: "{topic}".
+    Write SHORT, punchy arguments IN FAVOR for the @{channel} channel.
+    Target: 120–180 words total so TTS audio runs 1–1.5 minutes.
+    This task runs only when debate_mini_enabled=true. If false, respond with just: SKIP
+
+    Format your response EXACTLY like this (no extra blank lines between items):
+
+    PROPOSITION: {topic} ({start}–{end})
+
+    OPENING STATEMENT
+    [1-2 sentences establishing your position clearly]
+
+    Argument 1: [Title]
+    [1-2 sentences with evidence and reasoning]
+
+    Argument 2: [Title]
+    [1-2 sentences with evidence and reasoning]
+
+    Argument 3: [Title]
+    [1-2 sentences with evidence and reasoning]
+
+    CONCLUSION
+    [1-2 sentences summarizing why the motion should be upheld]
+
+    Keep total response under {debate_mini_max_chars} characters.
+    Write ONLY the argument text — no tool calls, no JSON, no code.
+  expected_output: >
+    Full proposition argument as plain text, starting with "PROPOSITION: {topic} ({start}–{end})".
+    Must be under {debate_mini_max_chars} characters. 120–180 words total. No tool calls or JSON.
+  agent: debater_m
+  output_file: output/{filename}/propose-m.md
+
+debate_oppose_m:
+  description: >
+    You are opposing the motion: "{topic}".
+    Write SHORT, punchy arguments AGAINST for the @{channel} channel.
+    Target: 120–180 words total so TTS audio runs 1–1.5 minutes.
+    This task runs only when debate_mini_enabled=true. If false, respond with just: SKIP
+
+    Format your response EXACTLY like this (no extra blank lines between items):
+
+    OPPOSITION: {topic} ({start}–{end})
+
+    OPENING STATEMENT
+    [1-2 sentences establishing your counter-position clearly]
+
+    Counter-Argument 1: [Title]
+    [1-2 sentences with evidence and reasoning]
+
+    Counter-Argument 2: [Title]
+    [1-2 sentences with evidence and reasoning]
+
+    Counter-Argument 3: [Title]
+    [1-2 sentences with evidence and reasoning]
+
+    CONCLUSION
+    [1-2 sentences summarizing why the motion should be rejected]
+
+    Keep total response under {debate_mini_max_chars} characters.
+    Write ONLY the argument text — no tool calls, no JSON, no code.
+  expected_output: >
+    Full opposition argument as plain text, starting with "OPPOSITION: {topic} ({start}–{end})".
+    Must be under {debate_mini_max_chars} characters. 120–180 words total. No tool calls or JSON.
+  agent: debater_m
+  context:
+    - debate_propose_m
+  output_file: output/{filename}/oppose-m.md
+
+debate_decide_m:
+  description: >
+    You are the judge. Review both sides of the debate on: "{topic}".
+    Deliver a SHORT, balanced verdict for the @{channel} channel.
+    Target: 120–180 words total so TTS audio runs 1–1.5 minutes.
+    This task runs only when debate_mini_enabled=true. If false, respond with just: SKIP
+
+    Format your response EXACTLY like this (no extra blank lines between items):
+
+    VERDICT: {topic} ({start}–{end})
+
+    SUMMARY OF PROPOSITION
+    [1-2 sentences summarizing the PRO arguments]
+
+    SUMMARY OF OPPOSITION
+    [1-2 sentences summarizing the CON arguments]
+
+    ANALYSIS
+    [1-2 sentences comparing the strength of both sides]
+
+    DECISION
+    [1-2 sentences with your final verdict and reasoning]
+
+    Keep total response under {debate_mini_max_chars} characters.
+    Write ONLY the verdict text — no tool calls, no JSON, no code.
+  expected_output: >
+    Full moderator verdict as plain text, starting with "VERDICT: {topic} ({start}–{end})".
+    Must be under {debate_mini_max_chars} characters. 120–180 words total. No tool calls or JSON.
+  agent: judge_m
+  context:
+    - debate_propose_m
+    - debate_oppose_m
+  output_file: output/{filename}/decide-m.md
+
+debate_merge_m:
+  description: >
+    Concatenate intro + MINI debate video segments WITH AUDIO into a single final MP4 per format.
+    This task will automatically skip if debate_mini_merge_enabled is false in inputs.
+    Pipeline per format (where [format] is each entry in {video_formats}):
+
+      intro_[format]_with_audio.mp4
+        +
+      debate_video_m_[format]_with_audio.mp4
+          → ffmpeg concat (with -reset_timestamps 1 for perfect sync)
+          → {channel}_{topic_slug}_m_[format].mp4
+
+    Also merges CC text files:
+      intro_[format]_cc_en.txt
+        +
+      debate_video_m_[format]_cc_en.txt
+          → {channel}_{topic_slug}_m_[format]_cc_en.txt
+
+    CRITICAL — call the Debate Merge Tool with EXACTLY these values:
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      debate_merge_enabled: {debate_mini_merge_enabled}
+      video_prefix: "debate_video_m"
+      output_suffix: "_m"
+      channel: "{channel}"
+      topic: "{topic}"
+
+    Output files per format:
+      • {channel}_{topic_slug}_m_[format].mp4
+      • {channel}_{topic_slug}_m_[format]_cc_en.txt
+
+  expected_output: >
+    A message starting with "✅ SUCCESS" listing the final mini merged files created.
+    Once you receive output from the tool containing "completed" or "skipped", return it as your Final Answer immediately.
+    Do NOT call the tool again.
+  agent: debate_merge_specialist
+
+# ─────────────────────────────────────────────────────────────
+# FULL-LENGTH DEBATE TASKS  (standard .md)
+# ─────────────────────────────────────────────────────────────
 debate_propose:
   description: >
     You are proposing the motion: "{topic}".
@@ -497,13 +646,13 @@ debate_propose:
     OPENING STATEMENT
     [2-3 sentences establishing your position clearly]
 
-    ARGUMENT 1: [Title]
+    Argument 1: [Title]
     [3-4 sentences with evidence and reasoning]
 
-    ARGUMENT 2: [Title]
+    Argument 2: [Title]
     [3-4 sentences with evidence and reasoning]
 
-    ARGUMENT 3: [Title]
+    Argument 3: [Title]
     [3-4 sentences with evidence and reasoning]
 
     CONCLUSION
@@ -530,13 +679,13 @@ debate_oppose:
     OPENING STATEMENT
     [2-3 sentences establishing your counter-position clearly]
 
-    COUNTER-ARGUMENT 1: [Title]
+    Counter-Argument 1: [Title]
     [3-4 sentences with evidence and reasoning]
 
-    COUNTER-ARGUMENT 2: [Title]
+    Counter-Argument 2: [Title]
     [3-4 sentences with evidence and reasoning]
 
-    COUNTER-ARGUMENT 3: [Title]
+    Counter-Argument 3: [Title]
     [3-4 sentences with evidence and reasoning]
 
     CONCLUSION

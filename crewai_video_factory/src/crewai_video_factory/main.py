@@ -186,11 +186,6 @@ def load_config():
         config['intro_duration']    = _intro_duration    if _intro_duration    is not None else 7
         config['intro_duration_hd'] = _intro_duration_hd if _intro_duration_hd is not None else 10
 
-        # If "social": false, force social_share_enabled off regardless of inner config values.
-        # This mirrors the publisher=false → upload_youtube_video=False pattern (line ~142).
-        if not config.get('social', False):
-            config['social_share_enabled'] = False
-
         # ── Step 3: Flatten yt_upload_config and fb_upload_config ─────────────
         # yt_upload
         if config.get('yt_upload', False):
@@ -297,6 +292,10 @@ def load_config():
             'use_label_mappings':         False,
             # debate_config
             'debate_definition_enabled':  False,
+            'debate_mini_enabled':        False,
+            'debate_mini_max_chars':      1200,
+            'debate_mini_merge_enabled':  False,
+            'video_fps':                  24,
             'debate_video_enabled':       False,
             'debate_secs_per_line':       3.5,
             'debate_max_chars':           10000,
@@ -492,6 +491,10 @@ def run():
         print(f"   ✍️  Debate Text:     {inputs.get('debate_definition_enabled', False)}" +
               (f"  [max={inputs.get('debate_max_chars',10000)}ch]"
                if inputs.get('debate_definition_enabled') else ""))
+        print(f"   ✍️  Mini Debate:     {inputs.get('debate_mini_enabled', False)}" +
+              (f"  [max={inputs.get('debate_mini_max_chars',1200)}ch, ~1-1.5min TTS]"
+               if inputs.get('debate_mini_enabled') else ""))
+        print(f"   🔀 Mini Merge:       {inputs.get('debate_mini_merge_enabled', False)}")
         _eng = inputs.get('tts_engine', 'gtts')
         print(f"   🎤 TTS Engine:      {_eng}")
         if inputs.get('tts_voices'):
@@ -541,7 +544,8 @@ def run():
         # Skip video generation tasks (video already exists on YouTube)
         for key in ['animation', 'debate', 'video_enabled', 'audio_enabled',
                     'bar_race_video_enabled', 'definition_video', 'merge_audio_video',
-                    'debate_video_enabled', 'debate_merge_enabled', 'debate_definition_enabled']:
+                    'debate_video_enabled', 'debate_merge_enabled', 'debate_definition_enabled',
+                    'debate_mini_enabled', 'debate_mini_merge_enabled']:
             inputs[key] = False
 
         # Configure for CC/MD update only (no video re-upload)
@@ -564,10 +568,12 @@ def run():
         # [0]  research_data           [1]  generate_csv            [2]  define_topic
         # [3]  create_definition_video [4]  create_video            [5]  create_bar_race_video
         # [6]  create_intro_clip       [7]  bar_merge               [8]  add_audio
-        # [9]  merge_audio_video       [10] debate_propose          [11] debate_oppose
-        # [12] debate_decide           [13] create_debate_video     [14] debate_merge
-        # [15] generate_youtube_metadata [16] upload_to_youtube     [17] upload_to_facebook
-        # [18] share_to_social  ← always last
+        # [9]  merge_audio_video       [10] debate_propose_m        [11] debate_oppose_m
+        # [12] debate_decide_m         [13] debate_merge_m
+        # [14] debate_propose          [15] debate_oppose           [16] debate_decide
+        # [17] create_debate_video     [18] debate_merge
+        # [19] generate_youtube_metadata [20] upload_to_youtube     [21] upload_to_facebook
+        # [22] share_to_social   ← always last
 
         if not inputs.get('_skip_research', False):
             final_tasks.append(full_crew.tasks[0])  # research_data
@@ -610,7 +616,35 @@ def run():
         if inputs.get('merge_audio_video', False):
             final_tasks.append(full_crew.tasks[9])  # merge_audio_video
 
-        # ── Debate pipeline ───────────────────────────────────────────────
+        # ── Mini Debate pipeline (-m.md) ──────────────────────────────────────
+        # Short version: ~120-180 words per file → 1–1.5 min TTS audio each
+        # Outputs: propose-m.md / oppose-m.md / decide-m.md
+        if inputs.get('debate_mini_enabled', False) and not is_youtube_id:
+            _debate_dir = output_dir
+            _lang = inputs.get('lang_suffix', 'En')
+            _propose_m_exists = (
+                os.path.exists(os.path.join(_debate_dir, f'propose-m_{_lang}.md')) or
+                os.path.exists(os.path.join(_debate_dir, 'propose-m.md'))
+            )
+            _oppose_m_exists = (
+                os.path.exists(os.path.join(_debate_dir, f'oppose-m_{_lang}.md')) or
+                os.path.exists(os.path.join(_debate_dir, 'oppose-m.md'))
+            )
+            _decide_m_exists = (
+                os.path.exists(os.path.join(_debate_dir, f'decide-m_{_lang}.md')) or
+                os.path.exists(os.path.join(_debate_dir, 'decide-m.md'))
+            )
+            if _propose_m_exists and _oppose_m_exists and _decide_m_exists:
+                print(f"⭐️  Mini debate files exist ({_lang}) — skipping LLM generation (using existing)")
+            else:
+                final_tasks.append(full_crew.tasks[10])  # debate_propose_m
+                final_tasks.append(full_crew.tasks[11])  # debate_oppose_m
+                final_tasks.append(full_crew.tasks[12])  # debate_decide_m
+
+        if inputs.get('debate_mini_merge_enabled', False) and not is_youtube_id:
+            final_tasks.append(full_crew.tasks[13])  # debate_merge_m
+
+        # ── Full Debate pipeline ───────────────────────────────────────────────
         # Must run BEFORE generate_youtube_metadata so merged CC files exist
         if inputs.get('debate_definition_enabled', False) and not is_youtube_id:
             # Check for existing lang-suffixed debate files
@@ -629,15 +663,15 @@ def run():
             if _propose_exists and _oppose_exists and _decide_exists:
                 print(f"⭐️  Debate files exist ({_lang}) — skipping LLM generation (using existing)")
             else:
-                final_tasks.append(full_crew.tasks[10])  # debate_propose
-                final_tasks.append(full_crew.tasks[11])  # debate_oppose
-                final_tasks.append(full_crew.tasks[12])  # debate_decide
+                final_tasks.append(full_crew.tasks[14])  # debate_propose
+                final_tasks.append(full_crew.tasks[15])  # debate_oppose
+                final_tasks.append(full_crew.tasks[16])  # debate_decide
 
         if inputs.get("debate_video_enabled", False) and not is_youtube_id:
-            final_tasks.append(full_crew.tasks[13])  # create_debate_video
+            final_tasks.append(full_crew.tasks[17])  # create_debate_video
 
         if inputs.get("debate_merge_enabled", False) and not is_youtube_id:
-            final_tasks.append(full_crew.tasks[14])  # debate_merge
+            final_tasks.append(full_crew.tasks[18])  # debate_merge
 
         # ── generate_youtube_metadata runs after all video/merge tasks ──
         if inputs.get('generate_youtube_metadata', False):
@@ -647,11 +681,11 @@ def run():
             # Falls back to main video_formats if not set.
             _meta_fmts = inputs.get('metadata_video_formats') or inputs.get('video_formats', ['HD'])
             inputs['_metadata_video_formats'] = _meta_fmts
-            final_tasks.append(full_crew.tasks[15])  # generate_youtube_metadata
+            final_tasks.append(full_crew.tasks[19])  # generate_youtube_metadata
 
         # Run upload task if uploading video OR if CC/MD update needed for existing video
         if inputs.get('upload_youtube_video', False) or inputs.get('upload_cc', False):
-            final_tasks.append(full_crew.tasks[16])  # upload_to_youtube
+            final_tasks.append(full_crew.tasks[20])  # upload_to_youtube
 
         # Social share — LAST unit always.
         # Parent switch "social" MUST be true AND social_share_enabled must be true.
@@ -661,7 +695,7 @@ def run():
             if is_youtube_id:
                 print("📢 Social Share: Will use existing YouTube video URL")
                 inputs['social_video_url'] = f"https://youtu.be/{topic_val}"
-            final_tasks.append(full_crew.tasks[18])  # share_to_social  ← always last
+            final_tasks.append(full_crew.tasks[22])  # share_to_social  ← always last
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
@@ -694,6 +728,152 @@ def run():
         finally:
             _crew_done.set()
             _hb.join(timeout=1)
+
+
+        # ── Generate Shorts mobile debate files (-m.md) ──────────────────────
+        # CrewAI output_file writes propose.md / oppose.md / decide.md directly.
+        # Post-process them here to produce Shorts-optimised -m.md versions.
+        if inputs.get('debate_definition_enabled', False) and not is_youtube_id:
+            _mobile_caps = {'propose': 500, 'oppose': 500, 'decide': 400}
+            _d_dir = output_dir  # e.g. output/IsAIActually
+
+            def _debate_mobile(text, max_chars):
+                """Inline Shorts compression: abbreviate + strip aux + smart trim."""
+
+                def _abbrev(t):
+                    # Headers → short forms
+                    t = re.sub(r'\bCOUNTER[\s\-]?ARGUMENT\s*(\d+)\s*[:\-]?', r'C-Arg \1:', t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bARGUMENT\s*(\d+)\s*[:\-]?',                r'ARG \1:',   t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bOPENING\s+STATEMENT\s*[:\-]?',  'Opening:',     t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bCLOSING\s+STATEMENT\s*[:\-]?',  'Closing:',     t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bSUMMARY\s+OF\s+PROPOSITION\s*[:\-]?', 'Sum Of Prop:', t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bSUMMARY\s+OF\s+OPPOSITION\s*[:\-]?',  'Sum Of Opp:',  t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bSUMMARY\s+OF\s+VERDICT\s*[:\-]?',     'Sum Verdict:', t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bCONCLUSION\s*[:\-]?',  'Concl:',   t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bPROPOSITION\s*[:\-]?', 'Prop:',    t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bOPPOSITION\s*[:\-]?',  'Opp:',     t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bANALYSIS\s*[:\-]?',    'Anal.:',   t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bDECISION\s*[:\-]?',    'Decis.:',  t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bVERDICT\s*[:\-]?',     'Verdict:', t, flags=re.IGNORECASE)
+                    # Symbols
+                    t = re.sub(r'\band\b',       '&',    t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bwith\b',      'w/',   t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bwithout\b',   'w/o',  t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bbecause\b',   'b/c',  t, flags=re.IGNORECASE)
+                    t = re.sub(r'\btherefore\b', '\u2192', t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bthrough\b',   'thru', t, flags=re.IGNORECASE)
+                    # Phrases
+                    for s, d in [
+                        ('For instance, ', ''), ('For example, ', ''), ('thereby ', ''),
+                        ('rather than', 'not'), ('In conclusion', 'Concl.'), ('In summary', 'In sum'),
+                        ('highlights', 'shows'), ('emphasizes', 'stresses'),
+                        ('invaluable', 'key'), ('crucial', 'key'), ('essential', 'vital'),
+                    ]:
+                        t = t.replace(s, d)
+                    # Word abbreviations
+                    for p, r2 in [
+                        (r'\bcapabilities\b', 'ability'),  (r'\binformation\b', 'info'),
+                        (r'\bdevelopment\b', 'dev'),        (r'\bmanagement\b', 'mgmt'),
+                        (r'\btechnology\b', 'tech'),        (r'\btechnologies\b', 'tech'),
+                        (r'\bartificial intelligence\b', 'AI'),
+                        (r'\bmachine learning\b', 'ML'),
+                        (r'\bnatural language processing\b', 'NLP'),
+                        (r'\balgorithm\b', 'algo'),         (r'\balgorithms\b', 'algos'),
+                        (r'\bdemonstrates\b', 'shows'),     (r'\bdemonstrate\b', 'show'),
+                        (r'\bsignificant\b', 'key'),        (r'\bimportant\b', 'key'),
+                        (r'\bunderstanding\b', 'grasp'),    (r'\bintelligence\b', 'intellect'),
+                        (r'\bintelligent\b', 'smart'),      (r'\bprofessional\b', 'prof'),
+                        (r'\borganizations\b', 'orgs'),     (r'\borganization\b', 'org'),
+                    ]:
+                        t = re.sub(p, r2, t, flags=re.IGNORECASE)
+                    t = re.sub(r'\[.*?\]', '', t)
+                    return t
+
+                def _strip_aux(t):
+                    for a in [
+                        r'\bam\b', r'\bis\b', r'\bare\b', r'\bwas\b', r'\bwere\b',
+                        r'\bbe\b', r'\bbeing\b', r'\bbeen\b',
+                        r'\bhave\b', r'\bhas\b', r'\bhad\b',
+                        r'\bdo\b', r'\bdoes\b', r'\bdid\b',
+                        r'\bshall\b', r'\bshould\b', r'\bwill\b', r'\bwould\b',
+                        r'\bmay\b', r'\bmight\b', r'\bmust\b',
+                        r'\bcan\b', r'\bcould\b', r'\bought\b',
+                    ]:
+                        t = re.sub(a + r'\s+', '', t, flags=re.IGNORECASE)
+                    t = re.sub(r'\bthe\s+', '', t, flags=re.IGNORECASE)
+                    t = re.sub(r'\ban\s+',  '', t, flags=re.IGNORECASE)
+                    t = re.sub(r'\ba\s+',   '', t, flags=re.IGNORECASE)
+                    t = re.sub(r'(?<=\s)to\s+', '', t, flags=re.IGNORECASE)
+                    return t
+
+                def _collapse(t):
+                    t = re.sub(r'[ \t]+', ' ', t)
+                    t = re.sub(r'\n{3,}', '\n\n', t)
+                    return t.strip()
+
+                def _hard_cap(t, n):
+                    if len(t) <= n:
+                        return t
+                    c = t[:n]
+                    cut = max(c.rfind('.'), c.rfind('\n'))
+                    return (c[:cut + 1] if cut > int(n * 0.67) else c).strip()
+
+                text = _abbrev(text)
+                text = _strip_aux(text)
+                text = _collapse(text)
+                if len(text) <= max_chars:
+                    return text
+
+                # Smart trim: drop trailing sentences from longest block iteratively
+                # Preserves all headers & opening sentences — only trims tail content
+                blocks = re.split(r'(\n{2,})', text)
+                pairs = []
+                i = 0
+                while i < len(blocks):
+                    blk = blocks[i]
+                    sep = blocks[i + 1] if i + 1 < len(blocks) and not blocks[i + 1].strip() else '\n'
+                    pairs.append([blk, sep])
+                    i += 2 if (i + 1 < len(blocks) and not blocks[i + 1].strip()) else 1
+
+                hdr = re.compile(
+                    r'^(Prop|Opp|ARG|C-Arg|Opening|Closing|Concl|Sum Of|Anal\.|Decis\.|Verdict)',
+                    re.IGNORECASE
+                )
+
+                def joined(p):
+                    return ''.join(b + s for b, s in p).strip()
+
+                for _ in range(200):
+                    if len(joined(pairs)) <= max_chars:
+                        break
+                    li, ll = -1, 0
+                    for idx, (blk, _s) in enumerate(pairs):
+                        if not hdr.match(blk.strip()) and len(blk) > ll:
+                            ll = len(blk)
+                            li = idx
+                    if li == -1:
+                        break
+                    nb = re.sub(r'[^.!?\n]*[.!?]["\']?\s*$', '', pairs[li][0], flags=re.DOTALL).strip()
+                    if nb == pairs[li][0] or not nb:
+                        pairs.pop(li)
+                    else:
+                        pairs[li][0] = nb
+
+                return _hard_cap(joined(pairs), max_chars)
+
+            # Write -m.md for each role
+            for _role, _cap_chars in _mobile_caps.items():
+                _src = os.path.join(_d_dir, f'{_role}.md')
+                _dst = os.path.join(_d_dir, f'{_role}-m.md')
+                if os.path.exists(_src) and os.path.getsize(_src) > 0:
+                    with open(_src, 'r', encoding='utf-8') as _f:
+                        _raw = _f.read()
+                    _mob = _debate_mobile(_raw, _cap_chars)
+                    with open(_dst, 'w', encoding='utf-8') as _f:
+                        _f.write(_mob)
+                    print(f"[DebateMobile] 📱 {_role}-m.md  {len(_mob)} chars  (cap={_cap_chars})")
+                else:
+                    print(f"[DebateMobile] ⚠️  {_src} not found — skipping {_role}-m.md")
 
         # Save definition from result.raw (define_topic agent writes pure text, no tool)
         if inputs.get('definition_enabled', False) and not inputs.get('use_existing_definition', False):

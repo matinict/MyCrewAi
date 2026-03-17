@@ -135,6 +135,20 @@ class CrewaiVideoFactory:
         return Agent(**kwargs)
 
     @agent
+    def debater_m(self) -> Agent:
+        kwargs = dict(config=self.agents_config['debater_m'], verbose=True)
+        if self._llm('llm_debate'):
+            kwargs['llm'] = self._llm('llm_debate')
+        return Agent(**kwargs)
+
+    @agent
+    def judge_m(self) -> Agent:
+        kwargs = dict(config=self.agents_config['judge_m'], verbose=True)
+        if self._llm('llm_debate'):
+            kwargs['llm'] = self._llm('llm_debate')
+        return Agent(**kwargs)
+
+    @agent
     def debate_video_producer(self) -> Agent:
         kwargs = dict(config=self.agents_config['debate_video_producer'], tools=[DebateVideoTool()], verbose=True)
         if self._llm('llm_debate'):
@@ -214,6 +228,22 @@ class CrewaiVideoFactory:
     @task
     def merge_audio_video(self) -> Task:
         return Task(config=self.tasks_config['merge_audio_video'])
+
+    @task
+    def debate_propose_m(self) -> Task:
+        return Task(config=self.tasks_config['debate_propose_m'])
+
+    @task
+    def debate_oppose_m(self) -> Task:
+        return Task(config=self.tasks_config['debate_oppose_m'])
+
+    @task
+    def debate_decide_m(self) -> Task:
+        return Task(config=self.tasks_config['debate_decide_m'])
+
+    @task
+    def debate_merge_m(self) -> Task:
+        return Task(config=self.tasks_config['debate_merge_m'])
 
     @task
     def debate_propose(self) -> Task:
