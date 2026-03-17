@@ -230,7 +230,7 @@ def load_config():
             'use_existing_csv':           False,
             'definition_enabled':         False,
             'use_existing_definition':    False,
-            'definition_max_chars':       1500,
+            'definition_max_chars':       5000,
             'definition_video':           False,
             'intro_enabled':              False,
             'intro_duration':             7,
@@ -293,7 +293,7 @@ def load_config():
             # debate_config
             'debate_definition_enabled':  False,
             'debate_mini_enabled':        False,
-            'debate_mini_max_chars':      1200,
+            'debate_mini_max_chars':      5000,
             'debate_mini_merge_enabled':  False,
             'video_fps':                  24,
             'debate_video_enabled':       False,
@@ -435,7 +435,7 @@ def run():
         print(f"   🎨 Styles:          {styles}")
         print(f"   📊 Use Existing CSV:{inputs.get('use_existing_csv', False)}")
         print(f"   📖 Definition:      {inputs.get('definition_enabled', False)}" +
-              (f"  [existing={inputs.get('use_existing_definition',False)}, max={inputs.get('definition_max_chars',1500)}ch]"
+              (f"  [existing={inputs.get('use_existing_definition',False)}, max={inputs.get('definition_max_chars',15000)}ch]"
                if inputs.get('definition_enabled') else ""))
         print(f"   🎞️  Definition Video:{inputs.get('definition_video', False)}")
         print(f"   🎬 Bar Race Video:  {inputs.get('bar_race_video_enabled', False)}")
@@ -492,7 +492,7 @@ def run():
               (f"  [max={inputs.get('debate_max_chars',10000)}ch]"
                if inputs.get('debate_definition_enabled') else ""))
         print(f"   ✍️  Mini Debate:     {inputs.get('debate_mini_enabled', False)}" +
-              (f"  [max={inputs.get('debate_mini_max_chars',1200)}ch, ~1-1.5min TTS]"
+              (f"  [max={inputs.get('debate_mini_max_chars',5200)}ch, ~1-1.5min TTS]"
                if inputs.get('debate_mini_enabled') else ""))
         print(f"   🔀 Mini Merge:       {inputs.get('debate_mini_merge_enabled', False)}")
         _eng = inputs.get('tts_engine', 'gtts')
@@ -734,7 +734,7 @@ def run():
         # CrewAI output_file writes propose.md / oppose.md / decide.md directly.
         # Post-process them here to produce Shorts-optimised -m.md versions.
         if inputs.get('debate_definition_enabled', False) and not is_youtube_id:
-            _mobile_caps = {'propose': 500, 'oppose': 500, 'decide': 400}
+            _mobile_caps = {'propose': 2000, 'oppose': 2000, 'decide': 1000}
             _d_dir = output_dir  # e.g. output/IsAIActually
 
             def _debate_mobile(text, max_chars):

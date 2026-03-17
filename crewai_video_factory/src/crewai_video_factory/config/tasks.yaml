@@ -493,7 +493,7 @@ debate_propose_m:
   description: >
     You are proposing the motion: "{topic}".
     Write SHORT, punchy arguments IN FAVOR for the @{channel} channel.
-    Target: 120–180 words total so TTS audio runs 1–1.5 minutes.
+    Target: 220–380 words total so TTS audio runs 1–1.5 minutes.
     This task runs only when debate_mini_enabled=true. If false, respond with just: SKIP
 
     Format your response EXACTLY like this (no extra blank lines between items):
@@ -501,19 +501,19 @@ debate_propose_m:
     PROPOSITION: {topic} ({start}–{end})
 
     OPENING STATEMENT
-    [1-2 sentences establishing your position clearly]
+    [1 sentences establishing your position clearly]
 
     Argument 1: [Title]
-    [1-2 sentences with evidence and reasoning]
+    [1 sentences with evidence and reasoning]
 
     Argument 2: [Title]
-    [1-2 sentences with evidence and reasoning]
+    [1 sentences with evidence and reasoning]
 
     Argument 3: [Title]
-    [1-2 sentences with evidence and reasoning]
+    [1 sentences with evidence and reasoning]
 
     CONCLUSION
-    [1-2 sentences summarizing why the motion should be upheld]
+    [1 sentences summarizing why the motion should be upheld]
 
     Keep total response under {debate_mini_max_chars} characters.
     Write ONLY the argument text — no tool calls, no JSON, no code.
@@ -535,19 +535,19 @@ debate_oppose_m:
     OPPOSITION: {topic} ({start}–{end})
 
     OPENING STATEMENT
-    [1-2 sentences establishing your counter-position clearly]
+    [1 sentences establishing your counter-position clearly]
 
     Counter-Argument 1: [Title]
-    [1-2 sentences with evidence and reasoning]
+    [1 sentences with evidence and reasoning]
 
     Counter-Argument 2: [Title]
-    [1-2 sentences with evidence and reasoning]
+    [1 sentences with evidence and reasoning]
 
     Counter-Argument 3: [Title]
-    [1-2 sentences with evidence and reasoning]
+    [1 sentences with evidence and reasoning]
 
     CONCLUSION
-    [1-2 sentences summarizing why the motion should be rejected]
+    [1 sentences summarizing why the motion should be rejected]
 
     Keep total response under {debate_mini_max_chars} characters.
     Write ONLY the argument text — no tool calls, no JSON, no code.
@@ -571,16 +571,16 @@ debate_decide_m:
     VERDICT: {topic} ({start}–{end})
 
     SUMMARY OF PROPOSITION
-    [1-2 sentences summarizing the PRO arguments]
+    [1 sentences summarizing the PRO arguments]
 
     SUMMARY OF OPPOSITION
-    [1-2 sentences summarizing the CON arguments]
+    [1 sentences summarizing the CON arguments]
 
     ANALYSIS
-    [1-2 sentences comparing the strength of both sides]
+    [1 sentences comparing the strength of both sides]
 
     DECISION
-    [1-2 sentences with your final verdict and reasoning]
+    [1 sentences with your final verdict and reasoning]
 
     Keep total response under {debate_mini_max_chars} characters.
     Write ONLY the verdict text — no tool calls, no JSON, no code.
