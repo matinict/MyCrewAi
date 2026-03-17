@@ -5,7 +5,6 @@
   "granularity": "yearly",
   "video_formats": [ "Shorts" ],
   "video_style": ["true" ],
-  "use_label_mappings": false,
   "fps": 4.9,
   "video_fps": 30,
   "fps_hd_offset": 1.37,
@@ -31,7 +30,7 @@
     "use_existing_csv": true,
     "definition_enabled": true,
     "use_existing_definition": true,
-    "definition_max_chars": 1500,
+    "definition_max_chars": 15000,
     "intro_enabled": true,
     "definition_video": true,
     "bar_race_video_enabled": true,
@@ -47,12 +46,13 @@
   },
   "debate": true,
   "debate_config": {
+    "use_label_mappings": true,
     "intro_slug": "One of the biggest debates in Ai tech right now",
     "debate_definition_enabled": true,
     "debate_max_chars": 2000,
     "llm_debate": "dashscope/qwen-plus",
-    "intro_enabled": true,
-    "debate_video_enabled": true,
+    "intro_enabled": false,
+    "debate_video_enabled": false,
     "debate_secs_per_line": 3.5,
     "debate_background_enabled": false,
     "debate_bg_opacity": 150,
@@ -60,7 +60,7 @@
      "debate_bg_opacity": 150,
     "image_gen_backend": "auto",
 
-    "debate_merge_enabled": true,
+    "debate_merge_enabled": false,
     "piper_voices": {
       "propose": {
         "model": "models/joe_medium.onnx",
