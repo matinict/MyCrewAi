@@ -275,16 +275,109 @@ class DebateVideoTool(BaseTool):
                     _f.write(spoken_text)
                 print(f"[DebateVideo] 📝 Narration saved: {cc_path} ({len(spoken_text)} chars)")
 
-                # ── Render silent video ───────────────────────────────────
+                # ── Build per-section spoken text ────────────────────────
+                _pro_spoken = self._section_to_spoken(pro_text,       "propose", channel, short_form=_is_short_form)
+                _con_spoken = self._section_to_spoken(con_text,       "oppose",  channel, short_form=_is_short_form)
+                _mod_spoken = self._section_to_spoken(moderator_text, "decide",  channel, short_form=_is_short_form)
+
+                # Safety: if MOD parsed to empty, use raw text so 3-voice is always triggered
+                if not _mod_spoken.strip():
+                    _mod_spoken = _clean_text(moderator_text.strip())
+                    print(f"[DebateVideo]   ⚠️ MOD spoken empty — using raw decide text ({len(_mod_spoken)} chars)")
+
+                _disclaimer_spoken = _clean_text(
+                    'This video is created for educational and research purposes, '
+                    'shared to spread knowledge and awareness.'
+                )
+                _subscribe_spoken = _clean_text(f'Subscribe to {channel} for more insights.')
+
+                audio_path        = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_audio.mp3")
+                _pro_audio        = audio_path.replace('.mp3', '_pro.mp3')
+                _con_audio        = audio_path.replace('.mp3', '_con.mp3')
+                _mod_audio        = audio_path.replace('.mp3', '_mod.mp3')
+                _disclaimer_audio = audio_path.replace('.mp3', '_disclaimer.mp3')
+                _subscribe_audio  = audio_path.replace('.mp3', '_subscribe.mp3')
+
+                # ── STEP 1: Generate each clip separately ─────────────────
+                # Separate clips let us measure each section's exact duration
+                # so video lines advance at the same pace as speech.
+                print(f"[DebateVideo] [{fmt}] 🔊 Step 1/3 — Generate per-section audio clips …")
+                print(f"[DebateVideo]   PRO={len(_pro_spoken)}ch  CON={len(_con_spoken)}ch  MOD={len(_mod_spoken)}ch")
+
+                self._tts_single(_pro_spoken, _pro_audio, tts_engine, _voices, role="propose")
+                self._tts_single(_con_spoken, _con_audio, tts_engine, _voices, role="oppose")
+                self._tts_single(_mod_spoken, _mod_audio, tts_engine, _voices, role="decide")
+                self._tts_single(_disclaimer_spoken, _disclaimer_audio, tts_engine, _voices, role="decide")
+                self._tts_single(_subscribe_spoken,  _subscribe_audio,  tts_engine, _voices, role="decide")
+
+                _pro_dur  = self._get_duration(_pro_audio)  if os.path.exists(_pro_audio)  else 0.0
+                _con_dur  = self._get_duration(_con_audio)  if os.path.exists(_con_audio)  else 0.0
+                _mod_dur  = self._get_duration(_mod_audio)  if os.path.exists(_mod_audio)  else 0.0
+                _disc_dur = self._get_duration(_disclaimer_audio) if os.path.exists(_disclaimer_audio) else 0.0
+                _sub_dur  = self._get_duration(_subscribe_audio)  if os.path.exists(_subscribe_audio)  else 0.0
+
+                print(f"[DebateVideo]   PRO={_pro_dur:.1f}s  CON={_con_dur:.1f}s  MOD={_mod_dur:.1f}s  "
+                      f"disc={_disc_dur:.1f}s  sub={_sub_dur:.1f}s")
+
+                # ── STEP 2: Assemble final audio ──────────────────────────
+                print(f"[DebateVideo] [{fmt}] 🔊 Step 2/3 — Assemble final audio …")
+                _clips_exist = [c for c in [_pro_audio, _con_audio, _mod_audio,
+                                             _disclaimer_audio, _subscribe_audio]
+                                if os.path.exists(c)]
+
+                if not _clips_exist:
+                    print(f"[DebateVideo] ⚠️ No audio clips produced")
+                    errors.append(f"❌ {fmt}: no audio clips produced")
+                    continue
+
+                if len(_clips_exist) == 1:
+                    os.replace(_clips_exist[0], audio_path)
+                else:
+                    _inputs = []
+                    for c in _clips_exist:
+                        _inputs += ["-i", c]
+                    n          = len(_clips_exist)
+                    _resample  = " ".join(f"[{i}:a]aresample=44100[a{i}];" for i in range(n))
+                    _concat_in = " ".join(f"[a{i}]" for i in range(n))
+                    _filter    = f"{_resample}{_concat_in}concat=n={n}:v=0:a=1[aout]"
+                    _r = subprocess.run(
+                        ["ffmpeg", "-y"] + _inputs +
+                        ["-filter_complex", _filter, "-map", "[aout]", "-q:a", "2", audio_path],
+                        capture_output=True, check=False
+                    )
+                    if _r.returncode == 0 and os.path.exists(audio_path):
+                        print(f"[DebateVideo]   Final audio assembled ({len(_clips_exist)} clips) ✅")
+                    else:
+                        print(f"[DebateVideo] ⚠️ concat failed: {_r.stderr.decode()[:120]}")
+                        os.replace(_clips_exist[0], audio_path)
+
+                for _tmp in [_pro_audio, _con_audio, _mod_audio, _disclaimer_audio, _subscribe_audio]:
+                    if os.path.exists(_tmp):
+                        os.remove(_tmp)
+
+                # ── STEP 3: Build per-line frame map then render ──────────
+                # Each wrapped display line gets frames proportional to its
+                # section's actual audio duration → perfect sync, no atempo.
+                print(f"[DebateVideo] [{fmt}] 🎬 Step 3/3 — Render video synced per-section …")
                 out_path    = silent_video
                 is_portrait = fmt in ("Shorts", "ShortsHD", "Shorts4K")
                 w, h        = (1080, 1920) if is_portrait else (1920, 1080)
-                print(f"\n[DebateVideo] [{fmt}] {w}x{h}  secs_per_line={secs_per_line}")
 
-                _bg_color = tuple(int(x) for x in str(bg_opacity).split(", "))[:3] if ", " in str(bg_opacity) else (0, 0, 0)
+                _frames_map = self._build_frames_map(
+                    raw_lines, w, video_fps,
+                    _pro_dur, _con_dur, _mod_dur, _disc_dur, _sub_dur,
+                    secs_per_line
+                )
+
+                _audio_dur = self._get_duration(audio_path)
+                _video_est = sum(_frames_map.values()) / video_fps
+                print(f"[DebateVideo]   audio={_audio_dur:.1f}s  video_est={_video_est:.1f}s")
+                print(f"[DebateVideo] [{fmt}] {w}x{h}  fps={video_fps}")
+
                 self._render(raw_lines, out_path, w, h, secs_per_line,
                              channel, watermark_enabled, watermark_text,
-                             video_fps, topic=topic, bg_opacity=bg_opacity, bg_color=_bg_color)
+                             video_fps, topic=topic, bg_opacity=bg_opacity, bg_color=(0,0,0),
+                             frames_per_line_map=_frames_map)
 
                 # ── Composite background video if available ───────────────
                 if debate_background_enabled:
@@ -294,8 +387,7 @@ class DebateVideoTool(BaseTool):
                         _op   = max(0.0, min(1.0, bg_opacity / 255.0))
                         _cmd_comp = [
                             "ffmpeg", "-y",
-                            "-i", _bg_vid,
-                            "-i", out_path,
+                            "-i", _bg_vid, "-i", out_path,
                             "-filter_complex",
                             f"[0:v]scale={w}:{h},setpts=PTS-STARTPTS[bg];"
                             f"[1:v]setpts=PTS-STARTPTS[fg];"
@@ -303,8 +395,7 @@ class DebateVideoTool(BaseTool):
                             "-map", "[out]",
                             "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                             "-pix_fmt", "yuv420p", "-r", str(video_fps),
-                            "-t", str(self._get_duration(out_path)),
-                            _comp
+                            "-t", str(self._get_duration(out_path)), _comp
                         ]
                         _cr = subprocess.run(_cmd_comp, capture_output=True)
                         if _cr.returncode == 0 and os.path.exists(_comp):
@@ -313,127 +404,29 @@ class DebateVideoTool(BaseTool):
                         else:
                             print(f"[DebateVideo] ⚠️ Background composite failed: {_cr.stderr.decode()[:150]}")
                     else:
-                        print(f"[DebateVideo] ⚠️ debate_background_enabled=true but {os.path.basename(_bg_vid)} not found — skipping composite")
+                        print(f"[DebateVideo] ⚠️ debate_bg_{fmt}.mp4 not found — skipping composite")
 
                 if not os.path.exists(out_path):
                     errors.append(f"❌ {fmt}: video missing after render")
                     continue
 
-                audio_path = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_audio.mp3")
                 video_dur  = self._get_duration(out_path)
+                _final_dur = max(video_dur, _audio_dur)
+                print(f"[DebateVideo] 🔊 video={video_dur:.1f}s  audio={_audio_dur:.1f}s  "
+                      f"final={_final_dur:.1f}s  delta={_audio_dur - video_dur:+.2f}s")
 
-                # Build per-section spoken text
-                _pro_spoken = self._section_to_spoken(pro_text,       "propose", channel, short_form=_is_short_form)
-                _con_spoken = self._section_to_spoken(con_text,       "oppose",  channel, short_form=_is_short_form)
-                _mod_spoken = self._section_to_spoken(moderator_text, "decide",  channel, short_form=_is_short_form)
+                self._merge_audio_video(out_path, audio_path, final_merged, _final_dur)
 
-                # spoken_text_no_sub = pro + con + mod only
-                _spoken_no_sub = f"{_pro_spoken} {_con_spoken} {_mod_spoken}".strip()
-
-                # Separate gTTS clips for disclaimer and subscribe (independent — if one fails the other still plays)
-                _disclaimer_spoken = _clean_text(
-                    'This video is created for educational and research purposes, '
-                    'shared to spread knowledge and awareness.'
-                )
-                _subscribe_spoken = _clean_text(f'Subscribe to {channel} for more insights.')
-
-                _pre_sub_audio    = audio_path.replace('.mp3', '_presub.mp3')
-                _disclaimer_audio = audio_path.replace('.mp3', '_disclaimer.mp3')
-                _subscribe_audio  = audio_path.replace('.mp3', '_subscribe.mp3')
-
-                # 1. Generate main debate audio (PRO + CON + MOD, engine-specific voices)
-                self._generate_tts(
-                     _spoken_no_sub, _pre_sub_audio,
-                    video_dur,
-                    tts_engine,
-                    pro_text=_pro_spoken,
-                    con_text=_con_spoken,
-                    mod_text=_mod_spoken,
-                    voices=_voices,
-                )
-
-                # 2. Generate disclaimer clip via gTTS (independent temp file)
-                #self._generate_tts(_disclaimer_spoken, _disclaimer_audio, 0, tts_engine, voices=_voices)
-                self._tts_single(_disclaimer_spoken, _disclaimer_audio, tts_engine, _voices, role="decide")
-                print(f"[DebateVideo] 🎤 Disclaimer: {'✅' if os.path.exists(_disclaimer_audio) else '⚠️ failed'}")
-
-                # 3. Generate subscribe clip via gTTS (independent temp file)
-                #self._generate_tts(_subscribe_spoken, _subscribe_audio, 0, tts_engine, voices=_voices)
-                self._tts_single(_subscribe_spoken, _subscribe_audio, tts_engine, _voices, role="decide")
-                print(f"[DebateVideo] 🎤 Subscribe: {'✅' if os.path.exists(_subscribe_audio) else '⚠️ failed'}")
-
-                # 4. Concat: main + disclaimer + subscribe → final audio_path
-                _clips = [_pre_sub_audio, _disclaimer_audio, _subscribe_audio]
-                _clips_exist = [c for c in _clips if os.path.exists(c)]
-
-                if len(_clips_exist) >= 1:
-                    if len(_clips_exist) == 1:
-                        # Only main audio — just rename
-                        os.replace(_clips_exist[0], audio_path)
-                        print(f"[DebateVideo] 🎤 Only main audio available — no disclaimer/subscribe appended")
-                    else:
-                        # Build ffmpeg inputs + filter_complex for N clips
-                        _inputs = []
-                        for c in _clips_exist:
-                            _inputs += ["-i", c]
-                        n = len(_clips_exist)
-                        _resample = " ".join(f"[{i}:a]aresample=44100[a{i}];" for i in range(n))
-                        _concat_in = " ".join(f"[a{i}]" for i in range(n))
-                        _filter = f"{_resample}{_concat_in}concat=n={n}:v=0:a=1[aout]"
-                        _r = subprocess.run(
-                            ["ffmpeg", "-y"] + _inputs +
-                            ["-filter_complex", _filter,
-                             "-map", "[aout]", "-q:a", "2", audio_path],
-                            capture_output=True, check=False
-                        )
-                        if _r.returncode == 0 and os.path.exists(audio_path):
-                            print(f"[DebateVideo] 🎤 Final audio assembled ({len(_clips_exist)} clips) ✅")
-                        else:
-                            print(f"[DebateVideo] ⚠️ Concat failed: {_r.stderr.decode()[:120]}")
-                            os.replace(_pre_sub_audio, audio_path)
-                    # Cleanup temp clips
-                    for _tmp in [_pre_sub_audio, _disclaimer_audio, _subscribe_audio]:
-                        if os.path.exists(_tmp):
-                            os.remove(_tmp)
-
-                # ── Merge audio + video ───────────────────────────────────
-                if os.path.exists(audio_path):
-                    _audio_dur = self._get_duration(audio_path)
-                    print(f"[DebateVideo] 🔊 audio={_audio_dur:.1f}s  video={video_dur:.1f}s   "
-                          f"delta={_audio_dur - video_dur:+.1f}s")
-
-                    # ── Trim or pad audio to exactly match video duration ──
-                    # Prevents video freezing on last frame while audio continues.
-                    # _synced_audio = audio_path.replace('.mp3', '_final_synced.mp3')
-                    # _trim_r = subprocess.run([
-                    #     "ffmpeg", "-y", "-i", audio_path,
-                    #     "-af", f"apad,atrim=0:{video_dur:.4f}",
-                    #     "-q:a", "2", _synced_audio
-                    # ], capture_output=True, check=False)
-                    # if _trim_r.returncode == 0 and os.path.exists(_synced_audio):
-                    #     os.replace(_synced_audio, audio_path)
-                    #     print(f"[DebateVideo] ✅ Audio trimmed/padded to {video_dur:.1f}s")
-                    # self._merge_audio_video(out_path, audio_path, final_merged, video_dur)
-
-
-
-                    # ── Use full audio duration as final length ──
-                    # disclaimer+subscribe audio appended AFTER main — don't trim them off
-                    _final_dur = max(video_dur, _audio_dur)
-                    print(f"[DebateVideo] ✅ Final duration: {_final_dur:.1f}s")
-
-                    self._merge_audio_video(out_path, audio_path, final_merged, _final_dur)
-
-
+                if os.path.exists(final_merged):
                     merged_kb = os.path.getsize(final_merged) // 1024
                     results.append(
-                        f"✅ {fmt}: {os.path.basename(final_merged)} ({merged_kb} KB)    "
-                        f"Duration: {video_dur:.1f}s"
+                        f"✅ {fmt}: {os.path.basename(final_merged)} ({merged_kb} KB)  "
+                        f"Duration: {_final_dur:.1f}s"
                     )
                     print(f"[DebateVideo] ✅ {fmt}: {os.path.basename(final_merged)} ({merged_kb} KB)")
                 else:
-                    kb = os.path.getsize(out_path) // 1024
-                    results.append(f"✅ {fmt}: {os.path.basename(silent_video)} ({kb} KB) [no audio]")
+                    kb = os.path.getsize(out_path) // 1024 if os.path.exists(out_path) else 0
+                    results.append(f"✅ {fmt}: {os.path.basename(out_path)} ({kb} KB) [no audio merge]")
 
             except Exception as e:
                 import traceback
@@ -522,9 +515,13 @@ class DebateVideoTool(BaseTool):
                 if pro_text and con_text and mod_text:
                     self._tts_edge_3voice(pro_text, con_text, mod_text, tmp, voices=_voices)
                 else:
-                    _fallback_voice = DEFAULT_EDGE_TTS_VOICES.get("propose", "en-US-AriaNeural")
-                    if isinstance(_voices.get("propose"), dict):
-                        _fallback_voice = _voices["propose"].get("edge_voice", _fallback_voice)
+                    _vcfg = _voices.get("propose", "")
+                    if isinstance(_vcfg, str) and _vcfg.strip():
+                        _fallback_voice = _vcfg.strip()
+                    elif isinstance(_vcfg, dict):
+                        _fallback_voice = _vcfg.get("edge_voice", DEFAULT_EDGE_TTS_VOICES.get("propose", "en-US-AriaNeural"))
+                    else:
+                        _fallback_voice = DEFAULT_EDGE_TTS_VOICES.get("propose", "en-US-AriaNeural")
                     self._tts_edge(text, tmp, voice=_fallback_voice)
             else:
                 self._tts_gtts(text, tmp)
@@ -709,52 +706,171 @@ class DebateVideoTool(BaseTool):
             # Remove corrupt output if it exists
             if os.path.exists(out_path):
                 os.remove(out_path)
-    def _tts_single(self, text: str, out_path: str, engine: str, voices: dict, role: str = "decide"):
-            """Generate single-voice TTS for short clips (disclaimer, subscribe).
-            Uses MOD/decide voice — avoids 3-voice piper which would repeat text 3×.
-            """
-            eng = engine.strip().lower()
-            if eng == "piper":
-                _v   = voices if voices else DEFAULT_PIPER_VOICES
-                vcfg = _v.get(role, DEFAULT_PIPER_VOICES.get(role, {}))
-                import tempfile
-                tmp_dir = tempfile.mkdtemp(prefix="debate_single_")
-                wav_out = os.path.join(tmp_dir, "single.wav")
-                model_path = vcfg.get("model", "")
-                if not os.path.isabs(model_path):
-                    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), model_path)
-                if model_path and os.path.exists(model_path):
-                    r = subprocess.run(
-                        ["piper", "--model", model_path,
-                        "--length_scale", str(1.0 / max(0.1, vcfg.get("speed", 1.0))),
-                        "--output_file", wav_out],
-                        input=text.encode(), capture_output=True, check=False
-                    )
-                    if r.returncode == 0 and os.path.exists(wav_out):
-                        subprocess.run(
-                            ["ffmpeg", "-y", "-i", wav_out, "-q:a", "2", out_path],
-                            capture_output=True, check=False
-                        )
-                        return
-                # fallback to gtts if piper fails
-                self._tts_gtts(text, out_path)
-            elif eng == "edge-tts":
-                _v    = voices if voices else {}
-                voice = "en-US-AriaNeural"
-                vcfg  = _v.get(role, {})
-                if isinstance(vcfg, dict):
-                    voice = vcfg.get("edge_voice", voice)
-                self._tts_edge(text, out_path, voice=voice)
+    def _build_frames_map(self, raw_lines: list, w: int, fps: int,
+                          pro_dur: float, con_dur: float, mod_dur: float,
+                          disc_dur: float, sub_dur: float,
+                          fallback_spl: float) -> dict:
+        """
+        Build {wrapped_line_idx: frame_count} so each section advances
+        at the exact pace of its TTS clip.
+
+        Section mapping:
+          propose lines → pro_dur spread evenly across wrapped propose lines
+          oppose  lines → con_dur spread evenly across wrapped oppose  lines
+          decide  lines → mod_dur spread evenly across wrapped decide  lines
+          last 2 lines  → disc_dur, sub_dur (disclaimer + subscribe)
+        """
+        from PIL import ImageFont
+        BASE_ACTIVE = w // 28
+        pad_x  = int(w * 0.05)
+        max_px = w - pad_x - int(w * 0.05)
+        try:
+            f_active = ImageFont.truetype(FONT_BOLD, BASE_ACTIVE)
+        except Exception:
+            f_active = ImageFont.load_default()
+
+        # Expand raw_lines → wrapped display lines with section labels
+        wrapped: list = []   # list of (text, section)
+        for item in raw_lines:
+            raw_text, sec = item if isinstance(item, tuple) else (item, 'propose')
+            for w_line in self._pixel_wrap(raw_text, f_active, max_px):
+                wrapped.append((w_line, sec))
+
+        total = len(wrapped)
+        if total == 0:
+            return {}
+
+        # Identify last 2 indices (disclaimer, subscribe) — always 'decide'
+        disc_idx = total - 2 if total >= 2 else total - 1
+        sub_idx  = total - 1
+
+        # Count wrapped lines per debate section (excluding last 2 tail lines)
+        sec_counts = {'propose': 0, 'oppose': 0, 'decide': 0}
+        for i, (_, sec) in enumerate(wrapped):
+            if i >= disc_idx:
+                break
+            sec_counts[sec] = sec_counts.get(sec, 0) + 1
+
+        # secs per wrapped line per section
+        def _spl(sec_dur, count):
+            if count <= 0:
+                return fallback_spl
+            v = sec_dur / count
+            return max(1.0, min(12.0, v))
+
+        _pro_spl  = _spl(pro_dur,  sec_counts.get('propose', 0))
+        _con_spl  = _spl(con_dur,  sec_counts.get('oppose',  0))
+        _mod_spl  = _spl(mod_dur,  sec_counts.get('decide',  0))
+        _disc_spl = max(1.0, disc_dur) if disc_dur > 0 else fallback_spl
+        _sub_spl  = max(1.0, sub_dur)  if sub_dur  > 0 else fallback_spl
+
+        print(f"[DebateVideo]   secs/line — PRO={_pro_spl:.2f}  CON={_con_spl:.2f}  "
+              f"MOD={_mod_spl:.2f}  disc={_disc_spl:.2f}  sub={_sub_spl:.2f}")
+        print(f"[DebateVideo]   wrapped counts — propose={sec_counts.get('propose',0)}  "
+              f"oppose={sec_counts.get('oppose',0)}  decide={sec_counts.get('decide',0)}")
+
+        fmap = {}
+        for i, (_, sec) in enumerate(wrapped):
+            if total >= 2 and i == sub_idx:
+                spl = _sub_spl
+            elif total >= 2 and i == disc_idx:
+                spl = _disc_spl
+            elif sec == 'propose':
+                spl = _pro_spl
+            elif sec == 'oppose':
+                spl = _con_spl
             else:
-                self._tts_gtts(text, out_path)
+                spl = _mod_spl
+            fmap[i] = max(1, int(round(spl * fps)))
+
+        return fmap
+
+    def _run_async(self, coro, timeout: int = 60):
+        """
+        Run async coroutine safely from sync code even inside CrewAI's event loop.
+        Spawns a dedicated daemon thread with its own event loop — avoids
+        'This event loop is already running' RuntimeError from asyncio.run().
+        """
+        import asyncio, threading
+        result_holder = [None]
+        error_holder  = [None]
+
+        def _thread_target():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result_holder[0] = loop.run_until_complete(
+                    asyncio.wait_for(coro, timeout=timeout)
+                )
+            except Exception as exc:
+                error_holder[0] = exc
+            finally:
+                loop.close()
+
+        t = threading.Thread(target=_thread_target, daemon=True)
+        t.start()
+        t.join(timeout=timeout + 10)
+        if t.is_alive():
+            raise TimeoutError(f"edge-tts thread timed out after {timeout + 10}s")
+        if error_holder[0]:
+            raise error_holder[0]
+        return result_holder[0]
+
+    def _tts_single(self, text: str, out_path: str, engine: str, voices: dict, role: str = "decide"):
+        """Generate single-voice TTS for one section clip."""
+        eng = engine.strip().lower()
+        if not text.strip():
+            print(f"[DebateVideo]   ⚠️ _tts_single: empty text for role={role} — skipped")
+            return
+
+        if eng == "piper":
+            _v   = voices if voices else DEFAULT_PIPER_VOICES
+            vcfg = _v.get(role, DEFAULT_PIPER_VOICES.get(role, {}))
+            import tempfile
+            tmp_dir    = tempfile.mkdtemp(prefix="debate_single_")
+            wav_out    = os.path.join(tmp_dir, "single.wav")
+            model_path = vcfg.get("model", "") if isinstance(vcfg, dict) else ""
+            if not os.path.isabs(model_path):
+                model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), model_path)
+            if model_path and os.path.exists(model_path):
+                speed = vcfg.get("speed", 1.0) if isinstance(vcfg, dict) else 1.0
+                r = subprocess.run(
+                    ["piper", "--model", model_path,
+                     "--length_scale", str(1.0 / max(0.1, speed)),
+                     "--output_file", wav_out],
+                    input=text.encode(), capture_output=True, check=False
+                )
+                if r.returncode == 0 and os.path.exists(wav_out):
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-i", wav_out, "-q:a", "2", out_path],
+                        capture_output=True, check=False
+                    )
+                    import shutil as _sh; _sh.rmtree(tmp_dir, ignore_errors=True)
+                    return
+            import shutil as _sh; _sh.rmtree(tmp_dir, ignore_errors=True)
+            self._tts_gtts(text, out_path)
+
+        elif eng == "edge-tts":
+            _v   = voices if voices else {}
+            vcfg = _v.get(role, "")
+            if isinstance(vcfg, str) and vcfg.strip():
+                voice = vcfg.strip()
+            elif isinstance(vcfg, dict):
+                voice = vcfg.get("edge_voice", DEFAULT_EDGE_TTS_VOICES.get(role, "en-US-AriaNeural"))
+            else:
+                voice = DEFAULT_EDGE_TTS_VOICES.get(role, "en-US-AriaNeural")
+            print(f"[DebateVideo]   🎤 {role} | voice={voice} | {len(text)} chars")
+            self._tts_edge(text, out_path, voice=voice)
+
+        else:
+            self._tts_gtts(text, out_path)
+
     def _tts_edge(self, text: str, out_path: str, voice: str = "en-US-AriaNeural", timeout: int = 60):
-        """Generate audio using edge-tts with timeout."""
+        """Generate single-voice audio using edge-tts. Safe inside CrewAI event loop."""
         try:
             import edge_tts
-            import asyncio
         except ImportError:
-            print("[DebateVideo] ⚠️ edge-tts not installed. Run: pip install edge-tts")
-            print("[DebateVideo]    Falling back to gTTS...")
+            print("[DebateVideo] ⚠️ edge-tts not installed — falling back to gTTS")
             self._tts_gtts(text, out_path)
             return
 
@@ -762,51 +878,51 @@ class DebateVideoTool(BaseTool):
             communicate = edge_tts.Communicate(text, voice=voice)
             await communicate.save(out_path)
 
-        async def _with_timeout():
-            await asyncio.wait_for(_generate(), timeout=timeout)
-
+        t_start = time.time()
         try:
-            asyncio.run(_with_timeout())
+            self._run_async(_generate(), timeout=timeout)
             if os.path.exists(out_path):
-                print(f"[DebateVideo] ✅ edge-tts saved: {out_path}")
+                kb = os.path.getsize(out_path) // 1024
+                print(f"[DebateVideo]   ✅ saved: {os.path.basename(out_path)} ({kb} KB, {time.time()-t_start:.1f}s)")
             else:
                 raise RuntimeError("edge-tts produced no output file")
-        except asyncio.TimeoutError:
-            print(f"[DebateVideo] ⚠️ edge-tts timed out after {timeout}s — falling back to gTTS")
+        except Exception as e:
+            print(f"[DebateVideo] ⚠️ edge-tts failed ({e}) — falling back to gTTS")
             if os.path.exists(out_path):
                 os.remove(out_path)
             self._tts_gtts(text, out_path)
-        except Exception as e:
-            print(f"[DebateVideo] ⚠️ edge-tts failed ({e}) — falling back to gTTS")
             if os.path.exists(out_path):
                 os.remove(out_path)
             self._tts_gtts(text, out_path)
 
     def _tts_edge_3voice(self, pro_text: str, con_text: str, mod_text: str,
                          out_path: str, voices: dict = None, timeout: int = 60):
-        """Generate 3-voice audio using edge-tts neural voices — ALL CONFIG FROM data.json."""
+        """Generate 3-voice audio using edge-tts. Uses _run_async — safe inside CrewAI."""
         import asyncio, tempfile
 
         _v = voices if voices else DEFAULT_EDGE_TTS_VOICES
 
         def _get_voice(role: str) -> str:
-            vcfg = _v.get(role, {})
+            vcfg = _v.get(role, "")
+            if isinstance(vcfg, str) and vcfg.strip():
+                return vcfg.strip()
             if isinstance(vcfg, dict):
                 return vcfg.get("edge_voice", DEFAULT_EDGE_TTS_VOICES.get(role, "en-US-AriaNeural"))
-            return str(vcfg) if vcfg else DEFAULT_EDGE_TTS_VOICES.get(role, "en-US-AriaNeural")
+            return DEFAULT_EDGE_TTS_VOICES.get(role, "en-US-AriaNeural")
 
         voice_map = {
             "propose": _get_voice("propose"),
             "oppose":  _get_voice("oppose"),
             "decide":  _get_voice("decide"),
         }
+        print(f"[DebateVideo] 🎙️  3-Voice: PRO={voice_map['propose']}  "
+              f"CON={voice_map['oppose']}  MOD={voice_map['decide']}")
 
         try:
             import edge_tts
         except ImportError:
             print("[DebateVideo] ⚠️ edge-tts not installed — falling back to gTTS")
-            full = f"{pro_text} {con_text} {mod_text}".strip()
-            self._tts_gtts(full, out_path)
+            self._tts_gtts(f"{pro_text} {con_text} {mod_text}".strip(), out_path)
             return
 
         sections = [
@@ -814,8 +930,7 @@ class DebateVideoTool(BaseTool):
             ("CON", con_text, voice_map["oppose"]),
             ("MOD", mod_text, voice_map["decide"]),
         ]
-
-        tmp_dir  = tempfile.mkdtemp(prefix="debate_edge_")
+        tmp_dir   = tempfile.mkdtemp(prefix="debate_edge_")
         mp3_clips = []
 
         async def _gen_clip(text: str, voice: str, clip_path: str):
@@ -825,29 +940,32 @@ class DebateVideoTool(BaseTool):
         async def _gen_all():
             for label, text_chunk, voice in sections:
                 if not text_chunk.strip():
-                    print(f"[DebateVideo]   ⚠️ {label}: empty — skipping")
+                    print(f"[DebateVideo]   ⏭️  {label}: empty — skipped")
                     continue
                 clip_path = os.path.join(tmp_dir, f"debate_{label.lower()}.mp3")
-                print(f"[DebateVideo]   🎤 {label}: {voice}  ({len(text_chunk)} chars)")
+                print(f"[DebateVideo]   🔊 {label} | voice={voice} | {len(text_chunk)} chars")
+                t0 = time.time()
                 try:
                     await asyncio.wait_for(_gen_clip(text_chunk, voice, clip_path), timeout=timeout)
                     if os.path.exists(clip_path):
+                        kb = os.path.getsize(clip_path) // 1024
                         mp3_clips.append(clip_path)
-                        print(f"[DebateVideo]   ✅ {label}: saved {os.path.basename(clip_path)}")
+                        print(f"[DebateVideo]   ✅ {label}: {kb} KB ({time.time()-t0:.1f}s)")
                     else:
-                        print(f"[DebateVideo]   ⚠️ {label}: no output file")
+                        print(f"[DebateVideo]   ❌ {label}: no output (voice={voice})")
                 except asyncio.TimeoutError:
-                    print(f"[DebateVideo]   ⚠️ {label}: timed out after {timeout}s — skipping clip")
-                except Exception as e:
-                    print(f"[DebateVideo]   ⚠️ {label}: failed ({e}) — skipping clip")
+                    print(f"[DebateVideo]   ❌ {label}: timed out (voice={voice})")
+                except Exception as exc:
+                    print(f"[DebateVideo]   ❌ {label}: error={exc}")
 
         try:
-            asyncio.run(_gen_all())
+            self._run_async(_gen_all(), timeout=timeout * len(sections) + 15)
+            print(f"[DebateVideo] 📋 Clips: {len(mp3_clips)}/{len(sections)}")
 
             if not mp3_clips:
-                print("[DebateVideo] ⚠️ No edge-tts clips — falling back to single-voice")
-                full = f"{pro_text} {con_text} {mod_text}".strip()
-                self._tts_edge(full, out_path)
+                print("[DebateVideo] ⚠️ No clips — falling back to single-voice")
+                self._tts_edge(f"{pro_text} {con_text} {mod_text}".strip(), out_path,
+                               voice=voice_map["propose"])
                 return
 
             concat_list = os.path.join(tmp_dir, "concat.txt")
@@ -861,12 +979,12 @@ class DebateVideoTool(BaseTool):
                 capture_output=True, check=False
             )
             if result.returncode == 0 and os.path.exists(out_path):
-                print(f"[DebateVideo] ✅ edge-tts 3-voice MP3 saved: {out_path}")
+                kb = os.path.getsize(out_path) // 1024
+                print(f"[DebateVideo] ✅ 3-voice MP3: {os.path.basename(out_path)} ({kb} KB)")
             else:
-                print(f"[DebateVideo] ⚠️ concat failed — falling back to single-voice")
-                full = f"{pro_text} {con_text} {mod_text}".strip()
-                self._tts_edge(full, out_path)
-
+                print(f"[DebateVideo] ❌ concat failed — single-voice fallback")
+                self._tts_edge(f"{pro_text} {con_text} {mod_text}".strip(), out_path,
+                               voice=voice_map["propose"])
         finally:
             import shutil as _sh
             _sh.rmtree(tmp_dir, ignore_errors=True)
@@ -909,11 +1027,12 @@ class DebateVideoTool(BaseTool):
 
         # Section-switch markers — DECISION handled separately so its content isn't lost
         _section_map = [
-            (re.compile(r'^PROPOSITION\s*[:\-]?', re.I), 'propose'),
-            (re.compile(r'^OPPOSITION\s*[:\-]?',  re.I), 'oppose'),
-            (re.compile(r'^VERDICT\s*[:\-]?',     re.I), 'decide'),
-            (re.compile(r'^MODERATOR\s*[:\-]?',   re.I), 'decide'),
-            (re.compile(r'^JUDGE\s*[:\-]?',       re.I), 'decide'),
+            (re.compile(r'^PROP(?:OSITION)?\s*[:\-]?', re.I), 'propose'),
+            (re.compile(r'^OPP(?:OSITION)?\s*[:\-]?',  re.I), 'oppose'),
+            (re.compile(r'^VERDICT\s*[:\-]?',           re.I), 'decide'),
+            (re.compile(r'^VERD?\s*[:\-]?',             re.I), 'decide'),
+            (re.compile(r'^MODERATOR\s*[:\-]?',         re.I), 'decide'),
+            (re.compile(r'^JUDGE\s*[:\-]?',             re.I), 'decide'),
         ]
 
         # Numbered argument headers — matches both formats:
@@ -927,7 +1046,10 @@ class DebateVideoTool(BaseTool):
             r'^(?:COUNTER[\s\-]?ARGUMENT\s+(\d+)|Arg[\s\-](\d+)\s*\(Con\))[\s\-:]*',
             re.I
         )
-        _decision_re    = re.compile(r'^DECISION\s*[:\-]?', re.I)
+        _decision_re    = re.compile(
+            r'^(?:DECISION|DECIS(?:ION)?|DECID(?:E)?|DEC)\s*[:\-]?',
+            re.I
+        )
 
         # Headers that close the currently-open includable block
         _block_end_headers = [
@@ -1204,12 +1326,16 @@ class DebateVideoTool(BaseTool):
             cx += ww + gap
 
     def _render(self, raw_lines, out_path, w, h, secs_per_line,
-                channel, wm_enabled, wm_text, video_fps, topic="", bg_opacity=255, bg_color=(0,0,0)):
-        """Render debate video — identical layout engine to definition_video_tool."""
+                channel, wm_enabled, wm_text, video_fps, topic="", bg_opacity=255, bg_color=(0,0,0),
+                frames_per_line_map: dict = None):
+        """Render debate video — identical layout engine to definition_video_tool.
+        frames_per_line_map: optional {line_idx: frame_count} for per-line sync.
+        When provided, secs_per_line is used only as fallback for unmapped lines.
+        """
         from PIL import Image, ImageDraw, ImageFont
-        FPS             = video_fps
-        frames_per_line = int(secs_per_line * FPS)
-        fade_frames     = min(6, frames_per_line // 5)
+        FPS                  = video_fps
+        _default_fpl         = max(1, int(secs_per_line * FPS))
+        fade_frames          = min(6, _default_fpl // 5)
         BASE_ACTIVE     = w // 28
         SHRINK_STEP     = w // 130
         MIN_SIZE        = w // 58
@@ -1279,7 +1405,12 @@ class DebateVideoTool(BaseTool):
             for wrapped in self._pixel_wrap(raw_text, f_active, max_px):
                 lines_data.append((wrapped, sec))
 
-        total_frames = len(lines_data) * frames_per_line
+        # Per-line frame counts: use map if provided, else uniform default
+        _fpl_list = []
+        for i in range(len(lines_data)):
+            _fpl_list.append(frames_per_line_map.get(i, _default_fpl) if frames_per_line_map else _default_fpl)
+
+        total_frames = sum(_fpl_list)
         print(f"[DebateVideo]   Wrapped lines: {len(lines_data)}     "
               f"Total frames: {total_frames}     "
               f"Est: {total_frames/FPS:.0f}s ({total_frames/FPS/60:.1f}min)")
@@ -1628,6 +1759,9 @@ class DebateVideoTool(BaseTool):
                 _flash_counter = _flash_frames
                 _section_frame = 0
                 _prev_sec_for_fr = cur_section
+
+            frames_per_line = _fpl_list[line_idx]
+            fade_frames     = min(6, max(1, frames_per_line // 5))
 
             for fi in range(frames_per_line):
                 alpha    = min(1.0, fi / max(fade_frames, 1))
