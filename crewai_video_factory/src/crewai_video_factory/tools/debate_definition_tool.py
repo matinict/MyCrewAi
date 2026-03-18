@@ -1,18 +1,25 @@
 """
-Debate Definition Tool (OPTIMIZED v5)
+Debate Definition Tool (OPTIMIZED v6)
 Auto-generates debate files for video factory.
-Smart skip: if all 6 .md files exist, returns immediately
-Full version: compressed for HD video (max_chars)
-Mobile version: 100% full content, NO restrictions
+
+All compression config lives in data/label_mappings.json:
+  debate_labels       -> abbreviation map (longest-match first)
+  debate_compression  -> aux_strip, article_strip, mobile_caps,
+                         hard_cap_ratio, header_prefixes, strip_trailing_to
+
+Smart skip: if all 6 .md files exist, returns immediately.
+Full version : compressed to debate_max_chars for HD video.
+Mobile version: Shorts-optimised with per-role char caps from JSON.
 Triggered by: "debate_definition_enabled": true in data.json
 """
+import json
 import os
 import re
 import time
-import traceback
 from crewai.tools import BaseTool
 from typing import Type
 from pydantic import BaseModel, Field
+
 
 class DebateDefinitionToolInput(BaseModel):
     topic: str = Field(..., description="Full debate topic/motion")
@@ -26,11 +33,61 @@ class DebateDefinitionToolInput(BaseModel):
     debate_max_chars: int = Field(default=5000, description="Hard cap on each debate argument in characters")
     lang_suffix: str = Field(default="En", description="Language suffix for output .md filenames")
 
+
 class DebateDefinitionTool(BaseTool):
     name: str = "Debate Definition Tool"
-    description: str = "Auto-generates debate files for video factory. Mobile -m.md = full content, no restrictions."
+    description: str = (
+        "Auto-generates debate files for video factory. "
+        "All compression config is driven by data/label_mappings.json."
+    )
     args_schema: Type[BaseModel] = DebateDefinitionToolInput
 
+    # ── In-process cache — reloads only if file changes ──────────────────────
+    _cfg_cache: dict = {}
+    _cfg_mtime: float = 0.0
+
+    @classmethod
+    def _find_label_mappings(cls) -> str:
+        """Walk up from this file until data/label_mappings.json is found.
+        Works regardless of project structure depth (src/, nested packages etc.)."""
+        current = os.path.dirname(os.path.abspath(__file__))
+        for _ in range(6):  # max 6 levels up
+            candidate = os.path.join(current, 'data', 'label_mappings.json')
+            if os.path.exists(candidate):
+                return candidate
+            current = os.path.dirname(current)
+        # Final fallback: same dir as this file
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'label_mappings.json')
+
+    @classmethod
+    def _load_cfg(cls) -> dict:
+        """Load label_mappings.json; reload automatically if file is updated."""
+        try:
+            path  = cls._find_label_mappings()
+            mtime = os.path.getmtime(path)
+            if cls._cfg_cache and mtime == cls._cfg_mtime:
+                return cls._cfg_cache
+            with open(path, 'r', encoding='utf-8') as f:
+                cls._cfg_cache = json.load(f)
+            cls._cfg_mtime = mtime
+            print(f"[DebateDef] Loaded label_mappings from: {path}")
+        except Exception as e:
+            print(f"[DebateDef] WARNING label_mappings.json not loaded: {e}")
+            cls._cfg_cache = {}
+        return cls._cfg_cache
+
+    @classmethod
+    def _debate_labels(cls) -> list:
+        """debate_labels sorted longest-key first (prevents partial matches)."""
+        labels = cls._load_cfg().get('debate_labels', {})
+        return sorted(labels.items(), key=lambda x: len(x[0]), reverse=True)
+
+    @classmethod
+    def _compression(cls) -> dict:
+        """debate_compression config block."""
+        return cls._load_cfg().get('debate_compression', {})
+
+    # ── Main entry point ──────────────────────────────────────────────────────
     def _run(
         self,
         topic: str,
@@ -46,271 +103,247 @@ class DebateDefinitionTool(BaseTool):
     ) -> str:
 
         if not debate_definition_enabled:
-            return "🔇 Debate definition skipped (debate_definition_enabled=false)"
+            return "Debate definition skipped (debate_definition_enabled=false)"
 
-        _lang = lang_suffix if lang_suffix else "En"
+        _lang = lang_suffix or "En"
+        _md_paths     = {r: os.path.join(output_dir, f"{r}_{_lang}.md") for r in ('propose', 'oppose', 'decide')}
+        _mobile_paths = {r: os.path.join(output_dir, f"{r}-m.md")       for r in ('propose', 'oppose', 'decide')}
 
-        _md_paths     = {role: os.path.join(output_dir, f"{role}_{_lang}.md") for role in ('propose', 'oppose', 'decide')}
-        _mobile_paths = {role: os.path.join(output_dir, f"{role}-m.md")         for role in ('propose', 'oppose', 'decide')}
-
-        # ── SMART SKIP: all 6 files already exist → nothing to do ──────────
+        # ── SMART SKIP: all 6 files already exist ────────────────────────────
         _all_exist = all(
             os.path.exists(p) and os.path.getsize(p) > 0
             for p in list(_md_paths.values()) + list(_mobile_paths.values())
         )
         if _all_exist:
-            _sizes  = {role: os.path.getsize(p) for role, p in _md_paths.items()}
-            _msizes = {role: os.path.getsize(p) for role, p in _mobile_paths.items()}
-            print(f"[DebateDef] ⭐️ All 6 debate files exist ({_lang}) — skipping")
-            lines = [f"   ✓ {role}_{_lang}.md ({_sizes[role]} B)  {role}-m.md ({_msizes[role]} B)" for role in ('propose', 'oppose', 'decide')]
-            return f"⭐️ Debate files exist ({_lang}) — skipping\n" + "\n".join(lines)
+            _sizes  = {r: os.path.getsize(p) for r, p in _md_paths.items()}
+            _msizes = {r: os.path.getsize(p) for r, p in _mobile_paths.items()}
+            print(f"[DebateDef] All 6 debate files exist ({_lang}) - skipping")
+            lines = [
+                f"   OK {r}_{_lang}.md ({_sizes[r]} B)  {r}-m.md ({_msizes[r]} B)"
+                for r in ('propose', 'oppose', 'decide')
+            ]
+            return f"Debate files exist ({_lang}) - skipping\n" + "\n".join(lines)
 
-        # ── PARTIAL SKIP: track which -m.md files still need writing ────────
+        # ── PARTIAL SKIP: track which -m.md files still need writing ─────────
         _mobile_needed = {
-            role for role in ('propose', 'oppose', 'decide')
-            if not (os.path.exists(_mobile_paths[role]) and os.path.getsize(_mobile_paths[role]) > 0)
+            r for r in ('propose', 'oppose', 'decide')
+            if not (os.path.exists(_mobile_paths[r]) and os.path.getsize(_mobile_paths[r]) > 0)
         }
-        if not _mobile_needed:
-            print(f"[DebateDef] ⭐️ All -m.md files already exist — skipping mobile generation")
 
         t0 = time.time()
-        print(f"\n[DebateDef] ▶ Generating debate files")
-        print(f"[DebateDef]   Topic: {topic}")
-        print(f"[DebateDef]   Max chars: {debate_max_chars}")
-        print(f"[DebateDef]   Lang: {_lang}")
+        print(f"[DebateDef] Generating debate files  topic={topic}  max={debate_max_chars}  lang={_lang}")
 
-        # ── Fallback: read from disk if agent didn't pass text in ──────────
-        # CrewAI output_file writes propose/oppose/decide .md directly;
-        # the agent may pass empty strings. Read from disk as fallback.
-        _disk_paths = {
-            'propose': (
-                os.path.join(output_dir, f'propose_{_lang}.md'),
-                os.path.join(output_dir, 'propose.md'),
-            ),
-            'oppose': (
-                os.path.join(output_dir, f'oppose_{_lang}.md'),
-                os.path.join(output_dir, 'oppose.md'),
-            ),
-            'decide': (
-                os.path.join(output_dir, f'decide_{_lang}.md'),
-                os.path.join(output_dir, 'decide.md'),
-            ),
-        }
-
-        def _load(passed_text, paths):
-            if passed_text and passed_text.strip():
-                return passed_text.strip()
-            for p in paths:
-                if os.path.exists(p) and os.path.getsize(p) > 0:
-                    with open(p, 'r', encoding='utf-8') as f:
-                        return f.read().strip()
-            return ''
-
+        # ── Load texts — agent-passed or disk fallback ────────────────────────
         all_texts = {
-            'propose': _load(propose_text, _disk_paths['propose']),
-            'oppose':  _load(oppose_text,  _disk_paths['oppose']),
-            'decide':  _load(decide_text,  _disk_paths['decide']),
+            'propose': self._load_text(propose_text, output_dir, 'propose', _lang),
+            'oppose':  self._load_text(oppose_text,  output_dir, 'oppose',  _lang),
+            'decide':  self._load_text(decide_text,  output_dir, 'decide',  _lang),
         }
         for role, text in all_texts.items():
             if not text:
-                return f"❌ {role}_text is empty and no .md file found on disk. Complete all 3 arguments first."
+                return f"ERROR: {role}_text is empty and no .md found on disk. Complete all 3 arguments first."
 
         os.makedirs(output_dir, exist_ok=True)
+
+        # ── Mobile caps from JSON ─────────────────────────────────────────────
+        cfg_caps    = self._compression().get('mobile_caps', {})
+        mobile_caps = {
+            'propose': cfg_caps.get('propose', 2000),
+            'oppose':  cfg_caps.get('oppose',  2000),
+            'decide':  cfg_caps.get('decide',  1000),
+        }
+
         results = []
-
-        _mobile_caps = {'propose': 2000, 'oppose': 2000, 'decide': 1000}
-
         for role, raw in all_texts.items():
             orig_chars = len(raw)
 
-            # ── Full version (compressed to debate_max_chars) ──
+            # Full / HD version
             cleaned = self._clean_debate_text(raw, debate_max_chars)
-            cleaned_chars = len(cleaned)
-            reduction = orig_chars - cleaned_chars
-
-            md_path = _md_paths[role]
-            with open(md_path, 'w', encoding='utf-8') as f:
+            with open(_md_paths[role], 'w', encoding='utf-8') as f:
                 f.write(cleaned)
-            print(f"[DebateDef] 📝 Saved: {md_path} ({cleaned_chars} chars)")
+            print(f"[DebateDef] Saved {_md_paths[role]} ({len(cleaned)} chars)")
 
-            # ── Mobile version (Shorts-optimised, per-role char cap) ──
+            # Mobile / Shorts version
             mobile_len = 0
             if role in _mobile_needed:
-                mobile = self._make_mobile(raw, _mobile_caps.get(role, 2000))
-                mobile_path = _mobile_paths[role]
-                with open(mobile_path, 'w', encoding='utf-8') as f:
+                mobile = self._make_mobile(raw, mobile_caps[role])
+                with open(_mobile_paths[role], 'w', encoding='utf-8') as f:
                     f.write(mobile)
                 mobile_len = len(mobile)
-                print(f"[DebateDef] 📱 Saved: {mobile_path} ({mobile_len} chars)")
+                print(f"[DebateDef] Saved {_mobile_paths[role]} ({mobile_len} chars)")
             else:
                 mobile_len = os.path.getsize(_mobile_paths[role])
-                print(f"[DebateDef] ⭐️ Skip {role}-m.md (already exists, {mobile_len} B)")
+                print(f"[DebateDef] Skip {role}-m.md (exists, {mobile_len} B)")
 
-            results.append({'type': role, 'original': orig_chars, 'cleaned': cleaned_chars, 'mobile': mobile_len, 'reduction': reduction})
+            results.append({
+                'role': role, 'original': orig_chars,
+                'cleaned': len(cleaned), 'mobile': mobile_len,
+            })
 
         elapsed = time.time() - t0
-        summary = f"✅ Debate files generated in {elapsed:.1f}s\n\n"
+        summary  = f"Debate files generated in {elapsed:.1f}s\n\n"
         for r in results:
-            summary += f"✓ {r['type'].upper()}: {r['original']} → {r['cleaned']} chars (saved {r['reduction']}) | 📱 {r['mobile']} chars\n"
-        summary += f"\nFiles: {output_dir}/\n"
-        summary += f"  Full  : propose_{_lang}.md  oppose_{_lang}.md  decide_{_lang}.md\n"
-        summary += f"  Mobile: propose-m.md  oppose-m.md  decide-m.md\n"
-        summary += f"→ ready for debate_video_tool"
-
-        print(f"\n[DebateDef] ✅ Complete in {elapsed:.1f}s")
+            saved = r['original'] - r['cleaned']
+            summary += f"{r['role'].upper()}: {r['original']} -> {r['cleaned']} chars (saved {saved}) | mobile {r['mobile']} chars\n"
+        summary += (
+            f"\nFiles: {output_dir}/\n"
+            f"  Full  : propose_{_lang}.md  oppose_{_lang}.md  decide_{_lang}.md\n"
+            f"  Mobile: propose-m.md  oppose-m.md  decide-m.md\n"
+            f"-> ready for debate_video_tool"
+        )
+        print(f"[DebateDef] Complete in {elapsed:.1f}s")
         return summary
 
-    def _clean_debate_text(self, text: str, max_chars: int = 5000) -> str:
-        """Compress for full/HD version only."""
-        text = self._apply_abbreviations(text)
-        text = self._remove_aux_and_articles(text)
-        text = self._collapse_whitespace(text)
-        text = self._hard_cap(text, max_chars)
-        return text
-
-    def _make_mobile(self, text: str, max_chars: int = 2000) -> str:
-        """Shorts-optimised compression: abbreviate + strip aux + smart trim."""
-        text = self._apply_abbreviations(text)
-        text = self._remove_aux_and_articles(text)
-        text = self._collapse_whitespace(text)
-        if len(text) <= max_chars:
-            return text
-        return self._smart_trim(text, max_chars)
-
-    def _smart_trim(self, text: str, max_chars: int) -> str:
-        """Drop trailing sentences from longest block iteratively.
-        Preserves all headers & opening sentences — only trims tail content."""
-        blocks = re.split(r'(\n{2,})', text)
-        pairs = []
-        i = 0
-        while i < len(blocks):
-            blk = blocks[i]
-            sep = blocks[i + 1] if i + 1 < len(blocks) and not blocks[i + 1].strip() else '\n'
-            pairs.append([blk, sep])
-            i += 2 if (i + 1 < len(blocks) and not blocks[i + 1].strip()) else 1
-
-        hdr = re.compile(
-            r'^(Prop|Opp|ARG|C-Arg|Opening|Closing|Concl|Sum Of|Anal\.|Decis\.|Verdict)',
-            re.IGNORECASE
-        )
-
-        def joined(p):
-            return ''.join(b + s for b, s in p).strip()
-
-        for _ in range(200):
-            if len(joined(pairs)) <= max_chars:
-                break
-            li, ll = -1, 0
-            for idx, (blk, _s) in enumerate(pairs):
-                if not hdr.match(blk.strip()) and len(blk) > ll:
-                    ll = len(blk)
-                    li = idx
-            if li == -1:
-                break
-            nb = re.sub(r'[^.!?\n]*[.!?]["\']?\s*$', '', pairs[li][0], flags=re.DOTALL).strip()
-            if nb == pairs[li][0] or not nb:
-                pairs.pop(li)
-            else:
-                pairs[li][0] = nb
-
-        return self._hard_cap(joined(pairs), max_chars)
-
+    # ── Public: called by main.py after kickoff() ─────────────────────────────
     def post_process_from_disk(self, output_dir: str, lang_suffix: str = "En") -> str:
-        """Fallback: read existing propose/oppose/decide .md files from disk
-        and write compressed -m.md versions. Called by main.py after kickoff
-        when debate files were written by CrewAI output_file (not this tool).
-        Mobile caps: propose=2000, oppose=2000, decide=1000 chars."""
-        _mobile_caps = {'propose': 2000, 'oppose': 2000, 'decide': 1000}
+        """Read propose/oppose/decide .md files written by CrewAI output_file
+        and produce compressed -m.md versions.
+        All caps read from label_mappings.json -> debate_compression.mobile_caps."""
+        cfg_caps    = self._compression().get('mobile_caps', {})
+        mobile_caps = {
+            'propose': cfg_caps.get('propose', 2000),
+            'oppose':  cfg_caps.get('oppose',  2000),
+            'decide':  cfg_caps.get('decide',  1000),
+        }
         results = []
-        for role, cap in _mobile_caps.items():
-            # Accept both lang-suffixed and plain filenames
-            src = os.path.join(output_dir, f'{role}_{lang_suffix}.md')
-            if not (os.path.exists(src) and os.path.getsize(src) > 0):
-                src = os.path.join(output_dir, f'{role}.md')
+        for role, cap in mobile_caps.items():
+            raw = self._load_text('', output_dir, role, lang_suffix)
             dst = os.path.join(output_dir, f'{role}-m.md')
-            if os.path.exists(src) and os.path.getsize(src) > 0:
-                with open(src, 'r', encoding='utf-8') as f:
-                    raw = f.read()
+            if raw:
                 mob = self._make_mobile(raw, cap)
                 with open(dst, 'w', encoding='utf-8') as f:
                     f.write(mob)
-                print(f"[DebateMobile] 📱 {role}-m.md  {len(mob)} chars  (cap={cap})")
-                results.append(f"✓ {role}-m.md ({len(mob)} chars)")
+                print(f"[DebateMobile] {role}-m.md  {len(mob)} chars  (cap={cap})")
+                results.append(f"{role}-m.md ({len(mob)} chars)")
             else:
-                print(f"[DebateMobile] ⚠️  {src} not found — skipping {role}-m.md")
-                results.append(f"⚠️  {role}-m.md skipped (source not found)")
+                print(f"[DebateMobile] WARNING source for {role} not found - skipping {role}-m.md")
+                results.append(f"WARNING {role}-m.md skipped (source not found)")
         return "\n".join(results)
 
+    # ── Internal helpers ──────────────────────────────────────────────────────
+    @staticmethod
+    def _load_text(passed: str, output_dir: str, role: str, lang: str) -> str:
+        """Return passed text if non-empty, else read from disk (lang-suffixed then plain fallback)."""
+        if passed and passed.strip():
+            return passed.strip()
+        for path in (
+            os.path.join(output_dir, f'{role}_{lang}.md'),
+            os.path.join(output_dir, f'{role}.md'),
+        ):
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                with open(path, 'r', encoding='utf-8') as f:
+                    return f.read().strip()
+        return ''
+
+    def _clean_debate_text(self, text: str, max_chars: int = 5000) -> str:
+        """Full/HD compression: abbreviate -> strip aux -> collapse -> hard cap."""
+        text = self._apply_abbreviations(text)
+        text = self._strip_aux_and_articles(text)
+        text = self._collapse_whitespace(text)
+        return self._hard_cap(text, max_chars)
+
+    def _make_mobile(self, text: str, max_chars: int = 2000) -> str:
+        """Shorts compression: keep ALL args, word-safe + logic-safe trim."""
+        #max_chars = 1000 # 🔒 hard limit
+        text = self._apply_abbreviations(text)
+        text = self._strip_aux_and_articles(text)
+        text = self._collapse_whitespace(text)
+        if len(text) <= max_chars:
+            return text
+        # Split blocks (Opening, Arg1, Arg2, ...)
+        blocks = re.split(r'\n{2,}', text)
+        n = len(blocks)
+        if n == 0:
+            return self._clean_tail(text[:max_chars])
+
+        per_block = max_chars // n
+        new_blocks = []
+        for blk in blocks:
+            blk = blk.strip()
+            if len(blk) <= per_block:
+                new_blocks.append(blk)
+                continue
+            # ✅ WORD-SAFE TRIM (no broken words)
+            words = blk.split()
+            trimmed_words = []
+            for w in words:
+                test = " ".join(trimmed_words + [w])
+                if len(test) > per_block:
+                    break
+                trimmed_words.append(w)
+            trimmed = " ".join(trimmed_words)
+            # ✅ LOGIC-SAFE TAIL CLEAN (no dangling fragments or orphan words)
+            trimmed = self._clean_tail(trimmed, min_words=3)
+            new_blocks.append(trimmed)
+        result = "\n\n".join(new_blocks)
+        # ✅ FINAL HARD LIMIT (safe)
+        if len(result) > max_chars:
+            result = self._clean_tail(result[:max_chars], min_words=3)
+        return result
+    def _clean_tail(self, text: str, min_words: int = 3) -> str:
+        """
+        Remove orphan trailing fragments after the last clean sentence boundary.
+        1. Strip trailing punctuation noise (, ; : - and whitespace)
+        2. Snap to last . ! ? if result keeps ≥55% of text and ≥ min_words
+        3. Strip trailing ≤2-word orphan after last comma/semicolon
+        4. Return as-is if nothing safe to cut
+        """
+        # 1. Strip trailing punctuation noise
+        text = re.sub(r'[\s,;:\-]+$', '', text)
+        # 2. Snap to last sentence boundary
+        for m in reversed(list(re.finditer(r'[.!?]', text))):
+            candidate = text[:m.end()].strip()
+            if len(candidate.split()) >= min_words and len(candidate) >= len(text) * 0.55:
+                return candidate
+        # 3. Strip trailing ≤2-word orphan after last comma/semicolon
+        m2 = re.search(r'[,;]\s*\S+(\s+\S+)?\s*$', text)
+        if m2:
+            candidate = text[:m2.start()].strip()
+            if len(candidate.split()) >= min_words:
+                return candidate
+        return text
+        
+    @classmethod
+    def _regex_patterns(cls) -> list:
+        """All regex patterns from label_mappings.json -> debate_regex_patterns.
+        Returns flat list of [pattern, replacement] pairs in declared order."""
+        cfg = cls._load_cfg().get('debate_regex_patterns', {})
+        patterns = []
+        for key, pairs in cfg.items():
+            if key.startswith('_'):
+                continue
+            patterns.extend(pairs)
+        return patterns
+
     def _apply_abbreviations(self, text: str) -> str:
-        """Headers + word abbreviations for full version only."""
-        # Headers
-        text = re.sub(r'\bCOUNTER[\s\-]?ARGUMENT\s*(\d+)\s*[:\-]?', r'C-Arg \1:', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bARGUMENT\s*(\d+)\s*[:\-]?', r'ARG \1:', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bOPENING\s+STATEMENT\s*[:\-]?', 'Opening:', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bCONCLUSION\s*[:\-]?', 'Concl:', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bPROPOSITION\s*[:\-]?', 'Prop:', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bOPPOSITION\s*[:\-]?', 'Opp:', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bANALYSIS\s*[:\-]?', 'Anal:', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bDECISION\s*[:\-]?', 'Decis:', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bVERDICT\s*[:\-]?', 'Verdict:', text, flags=re.IGNORECASE)
+        """Apply all abbreviations and patterns from label_mappings.json only.
+        1. debate_labels  — plain string replacements, longest key first
+        2. debate_regex_patterns — capture-group regex, in declared order"""
 
-        # Common words / symbols
-        text = re.sub(r'\band\b',       '&',   text, flags=re.IGNORECASE)
-        text = re.sub(r'\bwith\b',      'w/',  text, flags=re.IGNORECASE)
-        text = re.sub(r'\bwithout\b',   'w/o', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bbecause\b',   'b/c', text, flags=re.IGNORECASE)
-        text = re.sub(r'\btherefore\b', '→',   text, flags=re.IGNORECASE)
-        text = re.sub(r'\bthrough\b',   'thru',text, flags=re.IGNORECASE)
+        # 1. Plain string mappings (longest key first prevents partial matches)
+        for src, dst in self._debate_labels():
+            if ' ' in src or '-' in src:
+                text = re.sub(re.escape(src), dst, text, flags=re.IGNORECASE)
+            else:
+                text = re.sub(r'\b' + re.escape(src) + r'\b', dst, text, flags=re.IGNORECASE)
 
-        # Phrase substitutions
-        for src, dst in [
-            ('For instance, ', ''), ('For example, ', ''), ('thereby ', ''),
-            ('rather than', 'not'), ('In conclusion', 'Concl.'), ('In summary', 'In sum'),
-            ('highlights', 'shows'), ('emphasizes', 'stresses'),
-            ('invaluable', 'key'), ('crucial', 'key'), ('essential', 'vital'),
-        ]:
-            text = text.replace(src, dst)
-
-        # Word abbreviations
-        word_abbrevs = [
-            (r'\bcapabilities\b',  'ability'),  (r'\binformation\b',   'info'),
-            (r'\bdevelopment\b',   'dev'),       (r'\bmanagement\b',    'mgmt'),
-            (r'\btechnology\b',    'tech'),      (r'\btechnologies\b',  'tech'),
-            (r'\bartificial intelligence\b', 'AI'),
-            (r'\bmachine learning\b',        'ML'),
-            (r'\bnatural language processing\b', 'NLP'),
-            (r'\balgorithm\b',     'algo'),      (r'\balgorithms\b',    'algos'),
-            (r'\bdemonstrates\b',  'shows'),     (r'\bdemonstrate\b',   'show'),
-            (r'\bsignificant\b',   'key'),       (r'\bimportant\b',     'key'),
-            (r'\bunderstanding\b', 'grasp'),     (r'\bintelligence\b',  'intellect'),
-            (r'\bintelligent\b',   'smart'),     (r'\bprofessional\b',  'prof'),
-            (r'\borganizations\b', 'orgs'),      (r'\borganization\b',  'org'),
-        ]
-        for pattern, replacement in word_abbrevs:
+        # 2. Regex patterns with capture groups
+        for pattern, replacement in self._regex_patterns():
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-
-        # Strip markdown-style bracketed placeholders
-        text = re.sub(r'\[.*?\]', '', text)
 
         return text
 
-    def _remove_aux_and_articles(self, text: str) -> str:
-        """Remove aux verbs & articles for full version only."""
-        aux_list = [
-            r'\bam\b',    r'\bis\b',    r'\bare\b',   r'\bwas\b',   r'\bwere\b',
-            r'\bbe\b',    r'\bbeing\b', r'\bbeen\b',
-            r'\bhave\b',  r'\bhas\b',   r'\bhad\b',
-            r'\bdo\b',    r'\bdoes\b',  r'\bdid\b',
-            r'\bshall\b', r'\bshould\b',r'\bwill\b',  r'\bwould\b',
-            r'\bmay\b',   r'\bmight\b', r'\bmust\b',
-            r'\bcan\b',   r'\bcould\b', r'\bought\b',
-        ]
-        for aux in aux_list:
-            text = re.sub(aux + r'\s+', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'\bthe\s+', '', text, flags=re.IGNORECASE)
-        text = re.sub(r'\ban\s+',  '', text, flags=re.IGNORECASE)
-        text = re.sub(r'\ba\s+',   '', text, flags=re.IGNORECASE)
-        text = re.sub(r'(?<=\s)to\s+', '', text, flags=re.IGNORECASE)
+    def _strip_aux_and_articles(self, text: str) -> str:
+        """Remove aux verbs and articles — all lists from label_mappings.json
+        debate_compression.aux_strip and article_strip."""
+        cfg = self._compression()
+
+        for word in cfg.get('aux_strip', []):
+            text = re.sub(r'\b' + re.escape(word) + r'\b\s+', '', text, flags=re.IGNORECASE)
+
+        for word in cfg.get('article_strip', []):
+            text = re.sub(r'\b' + re.escape(word) + r'\b\s+', '', text, flags=re.IGNORECASE)
+
         return text
 
     def _collapse_whitespace(self, text: str) -> str:
@@ -321,8 +354,50 @@ class DebateDefinitionTool(BaseTool):
     def _hard_cap(self, text: str, max_chars: int) -> str:
         if len(text) <= max_chars:
             return text
-        cap = text[:max_chars]
-        cut = max(cap.rfind('.'), cap.rfind('\n'))
-        if cut > int(max_chars * 0.67):
+        ratio = self._compression().get('hard_cap_ratio', 0.67)
+        cap   = text[:max_chars]
+        cut   = max(cap.rfind('.'), cap.rfind('\n'))
+        if cut > int(max_chars * ratio):
             return cap[:cut + 1].strip()
         return cap.strip()
+
+    def _smart_trim(self, text: str, max_chars: int) -> str:
+        """Iteratively drop trailing sentences from the longest non-header block.
+        Header prefixes loaded from label_mappings.json -> debate_compression.header_prefixes."""
+        prefixes = self._compression().get('header_prefixes', [
+            'Prop', 'Opp', 'Arg', 'C-Arg', 'Opening', 'Closing',
+            'Concl', 'Sum Of', 'Anal', 'Decis', 'Verd',
+        ])
+        hdr = re.compile(
+            r'^(' + '|'.join(re.escape(p) for p in prefixes) + r')',
+            re.IGNORECASE
+        )
+
+        blocks = re.split(r'(\n{2,})', text)
+        pairs  = []
+        i = 0
+        while i < len(blocks):
+            blk = blocks[i]
+            sep = blocks[i + 1] if i + 1 < len(blocks) and not blocks[i + 1].strip() else '\n'
+            pairs.append([blk, sep])
+            i += 2 if (i + 1 < len(blocks) and not blocks[i + 1].strip()) else 1
+
+        def joined(p):
+            return ''.join(b + s for b, s in p).strip()
+
+        for _ in range(200):
+            if len(joined(pairs)) <= max_chars:
+                break
+            li, ll = -1, 0
+            for idx, (blk, _s) in enumerate(pairs):
+                if not hdr.match(blk.strip()) and len(blk) > ll:
+                    ll, li = len(blk), idx
+            if li == -1:
+                break
+            nb = re.sub(r'[^.!?\n]*[.!?]["\']?\s*$', '', pairs[li][0], flags=re.DOTALL).strip()
+            if nb == pairs[li][0] or not nb:
+                pairs.pop(li)
+            else:
+                pairs[li][0] = nb
+
+        return self._hard_cap(joined(pairs), max_chars)

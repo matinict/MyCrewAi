@@ -450,10 +450,10 @@ create_debate_video:
   description: >
     Create a bottom-to-top streaming debate video for {topic} using PRO/CON/Moderator markdown files.
     This task will automatically skip if debate_video_enabled is false in inputs.
-    Input files required in {output_dir}/:
-      - propose.md  (PRO arguments)
-      - oppose.md   (CON arguments)
-      - decide.md   (Moderator conclusion)
+    Input files used per format (resolved automatically by the tool):
+      Shorts / ShortsHD / Shorts4K → propose-m.md, oppose-m.md, decide-m.md
+      HD / 4K / landscape formats  → propose.md,   oppose.md,   decide.md
+    Fallback: if the format-specific file is missing, the tool falls back to the plain .md file.
 
     CRITICAL — call the Debate Video Tool with EXACTLY these values:
       topic: "{topic}"

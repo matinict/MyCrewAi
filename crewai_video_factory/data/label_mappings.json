@@ -81,7 +81,6 @@
     "Generative AI": "GenAI",
     "ChatGPT": "ChatGPT",
     "GPT": "GPT",
-
     "PROPOSITION": "Prop",
     "Proposition": "Prop",
     "proposition": "Prop",
@@ -113,11 +112,10 @@
     "Counter-Argument 1": "C-Arg 1",
     "Counter-Argument 2": "C-Arg 2",
     "Counter-Argument 3": "C-Arg 3",
-
     "and": "&",
     "with": "w/",
     "without": "w/o",
-    "between": "btw",
+    "between": "btwn",
     "through": "thru",
     "because": "b/c",
     "therefore": "so",
@@ -133,7 +131,6 @@
     "including": "incl",
     "especially": "esp",
     "particularly": "esp",
-
     "information": "info",
     "application": "app",
     "applications": "apps",
@@ -145,31 +142,27 @@
     "professional": "pro",
     "operational": "ops",
     "collaboration": "collab",
-
     "intelligence": "intel",
     "intelligent": "smart",
-    "consciousness": "awareness",
+    "consciousness": "conscious",
     "understanding": "grasp",
-    "comprehension": "grasp",
+    "comprehension": "comprehend",
     "capability": "ability",
-    "capabilities": "abilities",
+    "capabilities": "cap",
     "functionality": "function",
-
     "algorithm": "algo",
     "algorithms": "algos",
     "model": "mdl",
     "models": "mdls",
     "system": "sys",
     "systems": "sys",
-
     "significant": "key",
-    "significantly": "greatly",
+    "significantly": "sig",
     "furthermore": "also",
     "nevertheless": "yet",
     "consequently": "thus",
     "ultimately": "finally",
     "importantly": "notably",
-
     "sophisticated mimicry": "soph-mimic",
     "mimicry mechanism": "mimic-mech",
     "self-awareness": "self-aware",
@@ -189,7 +182,6 @@
     "self-reflection": "self-reflect",
     "emotional reasoning": "emo-reason",
     "pattern recognition": "pattern-rec",
-
     "problem-solving": "prob-solve",
     "complex problem-solving": "complex-solve",
     "adaptability": "adapt",
@@ -210,7 +202,6 @@
     "knowledge creation": "know-create",
     "decision-making": "dec-make",
     "transformative potential": "transform-pot",
-
     "inability": "inability",
     "advanced learning": "adv-learn",
     "human-like understanding": "human-grasp",
@@ -222,13 +213,156 @@
     "compelling arguments": "compel-arg",
     "critical flaws": "crit-flaws",
     "operational intelligence": "ops-intel",
-
     "page": "p.",
     "pages": "pp.",
     "section": "sec.",
     "figure": "fig.",
     "table": "tbl.",
     "reference": "ref.",
-    "references": "refs."
-  } 
+    "references": "refs.",
+    "characteristics": "chars",
+    "demonstrating": "demo",
+    "effectively": "eff",
+    "successfully": "succ",
+    "interactions": "interact",
+    "traditional": "trad",
+    "explicitly": "explicit",
+    "possesses": "possess",
+    "suggesting": "suggest",
+    "indicative": "indicate",
+    "disregards": "disregard",
+    "complexities": "complex",
+    "which are hallmarks": "which hallmark",
+    "that it operates": "it operates",
+    "that AI possesses": "AI possess",
+    "that are not": "not",
+    "is indicative": "indicate",
+    "are simply": "simply",
+    "shows characteristics": "show chars",
+    "within": "in",
+    "such as": "like",
+    "in order to": "to",
+    "due to the fact that": "b/c",
+    "in addition": "also",
+    "as a result": "thus",
+    "more than": ">",
+    "less than": "<",
+    "independently": "indep",
+    "performance": "perf",
+    "conceptualize": "concept",
+    "articulate": "artic",
+    "diverse": "var",
+    "inaccuracies": "errors",
+    "dependence": "depend",
+    "attributes": "attrs",
+    "originality": "origin",
+    "limitations": "limits",
+    "creations": "creates",
+    "which are determined": "determined",
+    "is merely": "merely",
+    "it so by": "by",
+    "it produce": "produce",
+    "like": "as",
+    "based on": "via",
+    "in his": "his",
+    "limitation": "limit",
+    " or ": "/",
+    "or": "/",
+    "different": "diff",
+    "answer": "ans",
+    " e.g., ": "ex.",
+    "(None–None) ": "",
+    "(": "",
+    ")": "",
+    "None": "",
+    "our": "",
+    "we": "",
+    "This": "",
+    "This": "",
+    "they": "",
+    " when ": "",
+    "when": "",
+    "that": "",
+    " simply ": "simply",
+    " For instance": "",
+    "what it means": "meaning"
+  },
+  "debate_regex_patterns": {
+    "_comment": "Regex patterns needing capture groups. Format: [[pattern, replacement], ...]. Applied after debate_labels.",
+    "numbered_args": [
+      [
+        "\\bCOUNTER[\\s\\-]?ARGUMENT\\s*(\\d+)\\s*[:\\-]?",
+        "C-Arg \\1:"
+      ],
+      [
+        "\\bARGUMENT\\s*(\\d+)\\s*[:\\-]?",
+        "Arg \\1:"
+      ]
+    ],
+    "strip_trailing_to": [
+      [
+        "(?<=\\s)to\\s+",
+        ""
+      ]
+    ],
+    "strip_placeholders": [
+      [
+        "\\[.*?\\]",
+        ""
+      ]
+    ]
+  },
+  "debate_compression": {
+    "_comment": "Tunable config for DebateDefinitionTool. Edit here, never in code.",
+    "mobile_caps": {
+      "propose": 1500,
+      "oppose": 1200,
+      "decide": 900
+    },
+    "hard_cap_ratio": 0.67,
+    "aux_strip": [
+      "am",
+      "is",
+      "are",
+      "was",
+      "were",
+      "be",
+      "being",
+      "been",
+      "have",
+      "has",
+      "had",
+      "do",
+      "does",
+      "did",
+      "shall",
+      "should",
+      "will",
+      "would",
+      "may",
+      "might",
+      "must",
+      "can",
+      "could",
+      "ought"
+    ],
+    "article_strip": [
+      "the",
+      "an",
+      "a"
+    ],
+    "header_prefixes": [
+      "Propose",
+      "Oppose",
+      "Arg",
+      "C-Arg",
+      "Opening",
+      "Closing",
+      "Concl",
+      "Sum Of",
+      "Anal",
+      "Decis",
+      "Verdict"
+    ]
+  }
 }

@@ -159,47 +159,44 @@ class DebateVideoTool(BaseTool):
             output_dir = os.path.join(_project_root, output_dir)
         os.makedirs(output_dir, exist_ok=True)
 
-        # ── Load debate content (lang-suffixed md files) ─────────────────────
+        # ── Format-aware .md file resolution (called per-format inside loop) ─
         _lang = lang_suffix if lang_suffix else "En"
-        propose_file = os.path.join(output_dir, f"propose_{_lang}.md")
-        oppose_file  = os.path.join(output_dir, f"oppose_{_lang}.md")
-        decide_file  = os.path.join(output_dir, f"decide_{_lang}.md")
+        _MOBILE_FORMATS = ("Shorts", "ShortsHD", "Shorts4K")
 
-        # Fallback to plain .md if lang-suffixed not found (backward compat)
-        for label, path, fallback in [
-            (f"propose_{_lang}.md", propose_file, os.path.join(output_dir, "propose.md")),
-            (f"oppose_{_lang}.md",  oppose_file,  os.path.join(output_dir, "oppose.md")),
-            (f"decide_{_lang}.md",  decide_file,  os.path.join(output_dir, "decide.md")),
-        ]:
-            if not os.path.exists(path):
-                if os.path.exists(fallback):
-                    print(f"[DebateVideo] ⚠️  {label} not found — using fallback {os.path.basename(fallback)}")
-                    if 'propose' in label: propose_file = fallback
-                    elif 'oppose' in label: oppose_file = fallback
-                    else: decide_file = fallback
-                else:
-                    return f"❌ {label} not found in {output_dir}"
+        def _resolve_md_files(fmt: str):
+            """
+            Return (propose_file, oppose_file, decide_file) for the given format.
 
-        with open(propose_file, 'r', encoding='utf-8') as f:
-            pro_text = f.read().strip()
-        with open(oppose_file, 'r', encoding='utf-8') as f:
-            con_text = f.read().strip()
-        with open(decide_file, 'r', encoding='utf-8') as f:
-            moderator_text = f.read().strip()
+            Resolution order per role (e.g. "propose"):
+              1. propose-m_{lang}.md   — mobile lang-suffixed  (Shorts* formats)
+              2. propose-m.md          — mobile plain           (Shorts* formats)
+              3. propose_{lang}.md     — lang-suffixed          (all formats)
+              4. propose.md            — plain fallback         (all formats)
+            """
+            _is_mobile = fmt in _MOBILE_FORMATS
+            _files = {}
+            for role in ("propose", "oppose", "decide"):
+                candidates = []
+                if _is_mobile:
+                    candidates.append(os.path.join(output_dir, f"{role}-m_{_lang}.md"))
+                    candidates.append(os.path.join(output_dir, f"{role}-m.md"))
+                candidates.append(os.path.join(output_dir, f"{role}_{_lang}.md"))
+                candidates.append(os.path.join(output_dir, f"{role}.md"))
 
-        # ── Combine into single narrative ─────────────────────────────────
-        raw = "\n\n".join([
-            f"PROPOSITION:\n{pro_text}",
-            f"OPPOSITION:\n{con_text}",
-            f"VERDICT:\n{moderator_text}",
-        ])
+                resolved = None
+                for c in candidates:
+                    if os.path.exists(c):
+                        resolved = c
+                        break
+                _files[role] = resolved
+
+            return _files["propose"], _files["oppose"], _files["decide"]
 
         results, errors = [], []
 
         for fmt in video_formats:
             try:
                 # ── File paths (intermediate — merge tool handles final naming) ──
-                _lang = lang_suffix if lang_suffix else "En"
                 silent_video = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}.mp4")
                 audio_file   = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_audio.mp3")
                 final_merged = os.path.join(output_dir, f"debate_video_{fmt}_{_lang}_with_audio.mp4")
@@ -217,10 +214,42 @@ class DebateVideoTool(BaseTool):
                         os.remove(_stale)
                         print(f"[DebateVideo] 🗑️  Removed stale: {os.path.basename(_stale)}")
 
+                # ── Load format-specific .md content ────────────────────────
+                # Shorts* → propose-m.md / oppose-m.md / decide-m.md (+ lang fallback)
+                # HD/4K   → propose.md   / oppose.md   / decide.md   (+ lang fallback)
+                _is_short_form = fmt in _MOBILE_FORMATS
+                propose_file, oppose_file, decide_file = _resolve_md_files(fmt)
+
+                _missing = [role for role, f in
+                            [("propose", propose_file), ("oppose", oppose_file), ("decide", decide_file)]
+                            if f is None]
+                if _missing:
+                    _suffix = "-m" if _is_short_form else ""
+                    for _role in _missing:
+                        errors.append(f"❌ {fmt}: {_role}{_suffix}.md not found in {output_dir}")
+                    continue
+
+                with open(propose_file, 'r', encoding='utf-8') as f:
+                    pro_text = f.read().strip()
+                with open(oppose_file, 'r', encoding='utf-8') as f:
+                    con_text = f.read().strip()
+                with open(decide_file, 'r', encoding='utf-8') as f:
+                    moderator_text = f.read().strip()
+
+                print(f"[DebateVideo] [{fmt}] 📄 propose: {os.path.basename(propose_file)}")
+                print(f"[DebateVideo] [{fmt}] 📄 oppose:  {os.path.basename(oppose_file)}")
+                print(f"[DebateVideo] [{fmt}] 📄 decide:  {os.path.basename(decide_file)}")
+
+                # ── Combine into single narrative ─────────────────────────
+                raw = "\n\n".join([
+                    f"PROPOSITION:\n{pro_text}",
+                    f"OPPOSITION:\n{con_text}",
+                    f"VERDICT:\n{moderator_text}",
+                ])
+
                 # ── Parse lines ─────────────────────────────────────────────
                 # HD/4K/landscape formats → full content, no filtering
                 # Shorts/portrait formats → short-form (ARG 1 + COUNTER-ARG 1 + DECISION only)
-                _is_short_form = fmt in ("Shorts", "ShortsHD", "Shorts4K")
                 raw_lines = self._parse_lines(raw, short_form=_is_short_form)
 
                 # Append disclaimer + subscribe line to video lines so audio & video end together
