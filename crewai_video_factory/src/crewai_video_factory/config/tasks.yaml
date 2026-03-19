@@ -664,7 +664,6 @@ debate_propose:
     Full proposition argument as plain text, starting with "PROPOSITION: {topic} ({start}–{end})".
     Must be under {debate_max_chars} characters. No tool calls or JSON.
   agent: debater
-  output_file: output/{filename}/propose.md
 
 debate_oppose:
   description: >
@@ -699,7 +698,6 @@ debate_oppose:
   agent: debater
   context:
     - debate_propose
-  output_file: output/{filename}/oppose.md
 
 debate_decide:
   description: >
@@ -732,7 +730,46 @@ debate_decide:
   context:
     - debate_propose
     - debate_oppose
-  output_file: output/{filename}/decide.md
+
+# ─────────────────────────────────────────────────────────────
+# DEBATE DEFINITION TASK — compresses & saves all .md files
+# Replaces the post_process_from_disk() call that was in main.py
+# ─────────────────────────────────────────────────────────────
+create_debate_definition:
+  description: >
+    Compress and save all debate text files for {topic}.
+    This task runs only when debate_definition_enabled=true. If false, skip.
+
+    CRITICAL — call the Debate Definition Tool with EXACTLY these values:
+      topic: "{topic}"
+      filename: "{filename}"
+      output_dir: "{output_dir}"
+      propose_text: ""
+      oppose_text: ""
+      decide_text: ""
+      debate_definition_enabled: {debate_definition_enabled}
+      channel: "{channel}"
+      debate_max_chars: {debate_max_chars}
+      lang_suffix: "{lang_suffix}"
+
+    The tool reads propose.md / oppose.md / decide.md from {output_dir}
+    automatically when propose_text / oppose_text / decide_text are empty.
+    Smart skip: if all 6 files already exist and are non-empty, returns immediately.
+
+    Output files in {output_dir}/:
+      Full (HD)  : propose_{lang_suffix}.md  oppose_{lang_suffix}.md  decide_{lang_suffix}.md
+      Mobile (-m): propose-m.md              oppose-m.md              decide-m.md
+
+  expected_output: >
+    Confirmation of all 6 debate files written with char counts,
+    OR smart-skip message if all files already exist,
+    OR error if source .md files are missing.
+    Example: "Debate files generated in 0.3s\n\nPROPOSE: 1820 -> 1650 chars..."
+  agent: definition_specialist
+  context:
+    - debate_propose
+    - debate_oppose
+    - debate_decide
 
 # ✅ NEW: Debate Merge Task (ADDED - DO NOT REMOVE)
 debate_merge:

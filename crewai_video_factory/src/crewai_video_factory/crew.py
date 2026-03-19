@@ -12,6 +12,7 @@ from crewai_video_factory.tools.merge_tool import MergeAudioVideoTool
 from crewai_video_factory.tools.yt_metadata_tool import YouTubeMetadataTool
 from crewai_video_factory.tools.definition_tool import DefinitionTool
 from crewai_video_factory.tools.definition_video_tool import DefinitionVideoTool
+from crewai_video_factory.tools.debate_definition_tool import DebateDefinitionTool
 from crewai_video_factory.tools.yt_upload_tool import YTUploadTool
 from crewai_video_factory.tools.social_share_tool import SocialShareTool
 from crewai_video_factory.tools.debate_video_tool import DebateVideoTool
@@ -102,10 +103,14 @@ class CrewaiVideoFactory:
             tools=[MergeAudioVideoTool()],
             verbose=True
         )
- 
+
     @agent
     def definition_specialist(self) -> Agent:
-        kwargs = dict(config=self.agents_config['definition_specialist'], tools=[DefinitionTool()], verbose=True)
+        kwargs = dict(
+            config=self.agents_config['definition_specialist'],
+            tools=[DefinitionTool(), DebateDefinitionTool()],
+            verbose=True
+        )
         if self._llm('llm_definition'):
             kwargs['llm'] = self._llm('llm_definition')
         return Agent(**kwargs)
@@ -152,19 +157,22 @@ class CrewaiVideoFactory:
         if self._llm('llm_debate'):
             kwargs['llm'] = self._llm('llm_debate')
         return Agent(**kwargs)
+
     @agent
     def debate_merge_specialist(self) -> Agent:
         return Agent(
             config=self.agents_config['debate_merge_specialist'],
             tools=[DebateMergeTool()],
             verbose=True
-    )
+        )
+
     @agent
     def youtube_metadata_specialist(self) -> Agent:
         kwargs = dict(config=self.agents_config['youtube_metadata_specialist'], tools=[YouTubeMetadataTool()], verbose=True)
         if self._llm('llm_youtube'):
             kwargs['llm'] = self._llm('llm_youtube')
         return Agent(**kwargs)
+
     @agent
     def youtube_upload_specialist(self) -> Agent:
         kwargs = dict(config=self.agents_config['youtube_upload_specialist'], tools=[YTUploadTool()], verbose=True)
@@ -239,8 +247,6 @@ class CrewaiVideoFactory:
     def debate_decide_m(self) -> Task:
         return Task(config=self.tasks_config['debate_decide_m'])
 
-
-
     @task
     def debate_propose(self) -> Task:
         return Task(config=self.tasks_config['debate_propose'])
@@ -254,12 +260,17 @@ class CrewaiVideoFactory:
         return Task(config=self.tasks_config['debate_decide'])
 
     @task
+    def create_debate_definition(self) -> Task:
+        return Task(config=self.tasks_config['create_debate_definition'])
+
+    @task
     def create_debate_video(self) -> Task:
         return Task(config=self.tasks_config['create_debate_video'])
 
     @task
     def debate_merge(self) -> Task:
         return Task(config=self.tasks_config['debate_merge'])
+
     @task
     def debate_merge_m(self) -> Task:
         return Task(config=self.tasks_config['debate_merge_m'])

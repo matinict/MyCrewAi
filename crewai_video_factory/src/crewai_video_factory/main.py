@@ -569,9 +569,10 @@ def run():
         # [9]  merge_audio_video       [10] debate_propose_m        [11] debate_oppose_m
         # [12] debate_decide_m
         # [13] debate_propose          [14] debate_oppose           [15] debate_decide
-        # [16] create_debate_video     [17] debate_merge            [18] debate_merge_m
-        # [19] generate_youtube_metadata [20] upload_to_youtube     [21] upload_to_facebook
-        # [22] share_to_social   ← always last
+        # [16] create_debate_definition  ← writes all .md files via DebateDefinitionTool
+        # [17] create_debate_video     [18] debate_merge            [19] debate_merge_m
+        # [20] generate_youtube_metadata [21] upload_to_youtube     [22] upload_to_facebook
+        # [23] share_to_social   ← always last
 
         if not inputs.get('_skip_research', False):
             final_tasks.append(full_crew.tasks[0])  # research_data
@@ -642,7 +643,7 @@ def run():
                 final_tasks.append(full_crew.tasks[12])  # debate_decide_m
 
         if inputs.get('debate_mini_merge_enabled', False) and not is_youtube_id:
-            final_tasks.append(full_crew.tasks[18])  # debate_merge_m
+            final_tasks.append(full_crew.tasks[19])  # debate_merge_m
 
         # ── Full Debate pipeline ───────────────────────────────────────────────
         # Must run BEFORE generate_youtube_metadata so merged CC files exist
@@ -669,16 +670,20 @@ def run():
                 final_tasks.append(full_crew.tasks[14])  # debate_oppose
                 final_tasks.append(full_crew.tasks[15])  # debate_decide
 
-        # ✅ CRITICAL: This line MUST be uncommented to generate the video
-        # Now safe to use inputs.get() directly; no dependency on _propose_exists here
-        if inputs.get("debate_video_enabled", False) and not is_youtube_id:
-            print(f"🎬 Queueing Task 16: create_debate_video")
-            final_tasks.append(full_crew.tasks[16])  # create_debate_video
+        # create_debate_definition runs whenever debate_definition_enabled=true.
+        # Responsible for compressing raw agent text → propose_En.md, oppose_En.md,
+        # decide_En.md (HD) and propose-m.md, oppose-m.md, decide-m.md (Shorts).
+        # The tool's own smart-skip returns immediately if all 6 files already exist.
+        if inputs.get('debate_definition_enabled', False) and not is_youtube_id:
+            final_tasks.append(full_crew.tasks[16])  # create_debate_definition
 
-        # ✅ CRITICAL: Merge must run to create the final file for FB
+        if inputs.get("debate_video_enabled", False) and not is_youtube_id:
+            print(f"🎬 Queueing Task 17: create_debate_video")
+            final_tasks.append(full_crew.tasks[17])  # create_debate_video
+
         if inputs.get("debate_merge_enabled", False) and not is_youtube_id:
-            print(f"🔀 Queueing Task 17: debate_merge")
-            final_tasks.append(full_crew.tasks[17])  # debate_merge
+            print(f"🔀 Queueing Task 18: debate_merge")
+            final_tasks.append(full_crew.tasks[18])  # debate_merge
 
         # ── Facebook Upload Task ───────────────────────────────────────────────
         # Only add if explicitly enabled AND video file exists (or is being generated)
@@ -696,7 +701,7 @@ def run():
             # Add task if video exists OR if we are generating it in this run (merge enabled)
             if _has_video or inputs.get('debate_merge_enabled', False):
                 print(f"📘 Facebook Upload: Task queued (Video exists={_has_video})")
-                final_tasks.append(full_crew.tasks[21])  # upload_to_facebook
+                final_tasks.append(full_crew.tasks[22])  # upload_to_facebook
             else:
                 print(f"⚠️  Facebook Upload: Skipped (No video file found and merge not enabled)")
                 # Debug: List available mp4 files to help identify naming mismatches
@@ -720,11 +725,11 @@ def run():
             # Falls back to main video_formats if not set.
             _meta_fmts = inputs.get('metadata_video_formats') or inputs.get('video_formats', ['HD'])
             inputs['_metadata_video_formats'] = _meta_fmts
-            final_tasks.append(full_crew.tasks[19])  # generate_youtube_metadata
+            final_tasks.append(full_crew.tasks[20])  # generate_youtube_metadata
 
         # Run upload task if uploading video OR if CC/MD update needed for existing video
         if inputs.get('upload_youtube_video', False) or inputs.get('upload_cc', False):
-            final_tasks.append(full_crew.tasks[20])  # upload_to_youtube
+            final_tasks.append(full_crew.tasks[21])  # upload_to_youtube
 
         # Social share — LAST unit always.
         # Parent switch "social" MUST be true AND social_share_enabled must be true.
@@ -734,7 +739,7 @@ def run():
             if is_youtube_id:
                 print("📢 Social Share: Will use existing YouTube video URL")
                 inputs['social_video_url'] = f"https://youtu.be/{topic_val}"
-            final_tasks.append(full_crew.tasks[22])  # share_to_social  ← always last
+            final_tasks.append(full_crew.tasks[23])  # share_to_social  ← always last
 
         if not final_tasks:
             print("❌ ERROR: No tasks to execute. At least one task must be enabled.")
@@ -768,13 +773,6 @@ def run():
             _crew_done.set()
             _hb.join(timeout=1)
 
-
-        # ── Generate Shorts mobile debate files (-m.md) ──────────────────────
-        # CrewAI output_file writes the .md files directly to disk.
-        # Delegate all compression + writing to DebateDefinitionTool.
-        if inputs.get('debate_definition_enabled', False) and not is_youtube_id:
-            from crewai_video_factory.tools.debate_definition_tool import DebateDefinitionTool
-            DebateDefinitionTool().post_process_from_disk(output_dir, inputs.get('lang_suffix', 'En'))
 
         # Save definition from result.raw (define_topic agent writes pure text, no tool)
         if inputs.get('definition_enabled', False) and not inputs.get('use_existing_definition', False):

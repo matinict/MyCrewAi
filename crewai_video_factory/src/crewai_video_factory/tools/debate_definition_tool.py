@@ -25,9 +25,9 @@ class DebateDefinitionToolInput(BaseModel):
     topic: str = Field(..., description="Full debate topic/motion")
     filename: str = Field(..., description="Base filename slug")
     output_dir: str = Field(..., description="Output subdirectory for debate files")
-    propose_text: str = Field(..., description="Arguments supporting the motion (FOR)")
-    oppose_text: str = Field(..., description="Arguments against the motion (AGAINST)")
-    decide_text: str = Field(..., description="Moderator's conclusion/verdict")
+    propose_text: str = Field(default="", description="Arguments supporting the motion (FOR) — leave empty to read from disk")
+    oppose_text: str = Field(default="", description="Arguments against the motion (AGAINST) — leave empty to read from disk")
+    decide_text: str = Field(default="", description="Moderator's conclusion/verdict — leave empty to read from disk")
     debate_definition_enabled: bool = Field(default=False, description="Whether to process debate definitions")
     channel: str = Field(default="PlayOwnAi", description="Channel name for branding")
     debate_max_chars: int = Field(default=5000, description="Hard cap on each debate argument in characters")
@@ -193,7 +193,7 @@ class DebateDefinitionTool(BaseTool):
         )
         print(f"[DebateDef] Complete in {elapsed:.1f}s")
         return summary
-
+ 
     # ── Public: called by main.py after kickoff() ─────────────────────────────
     def post_process_from_disk(self, output_dir: str, lang_suffix: str = "En") -> str:
         """Read propose/oppose/decide .md files written by CrewAI output_file
