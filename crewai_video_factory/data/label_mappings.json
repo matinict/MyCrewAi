@@ -213,9 +213,6 @@
     "compelling arguments": "compel-arg",
     "critical flaws": "crit-flaws",
     "operational intelligence": "ops-intel",
-    "page": "p.",
-    "pages": "pp.",
-    "section": "sec.",
     "figure": "fig.",
     "table": "tbl.",
     "reference": "ref.",
@@ -266,10 +263,8 @@
     "based on": "via",
     "in his": "his",
     "limitation": "limit",
-    " or ": "/",
-    "or": "/",
     "different": "diff",
-    "answer": "ans",
+    "answer": "anw",
     " e.g., ": "ex.",
     "(None–None) ": "",
     "(": "",
@@ -315,9 +310,9 @@
   "debate_compression": {
     "_comment": "Tunable config for DebateDefinitionTool. Edit here, never in code.",
     "mobile_caps": {
-      "propose": 1500,
-      "oppose": 1200,
-      "decide": 900
+      "propose": 1300,
+      "oppose": 1100,
+      "decide":900
     },
     "hard_cap_ratio": 0.67,
     "aux_strip": [

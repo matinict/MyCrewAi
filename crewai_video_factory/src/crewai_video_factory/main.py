@@ -668,8 +668,46 @@ def run():
                 final_tasks.append(full_crew.tasks[15])  # debate_oppose
                 final_tasks.append(full_crew.tasks[16])  # debate_decide
 
-        if inputs.get("debate_video_enabled", False) and not is_youtube_id:
-            final_tasks.append(full_crew.tasks[17])  # create_debate_video
+        # if inputs.get("debate_video_enabled", False) and not is_youtube_id:
+        #     final_tasks.append(full_crew.tasks[17])  # create_debate_video
+        # ── Facebook Upload Task ───────────────────────────────────────────────
+        # Fixed Logic: Upload if Video Enabled OR if FB Upload is explicitly forced.
+        # CRITICAL: Must also check 'not is_youtube_id'.
+        if (inputs.get("debate_video_enabled", False) or
+            (inputs.get("fb_upload", False) and inputs.get("upload_facebook_video", False))) and not is_youtube_id:
+
+            # Ensure debate video files exist before attempting upload
+            _lang = inputs.get('lang_suffix', 'En')
+            _topic_slug = inputs.get('topic_slug', '')
+            _channel = inputs.get('channel', 'PlayOwnAi')
+
+            # Check for BOTH intermediate (debate_video_tool) and merged (debate_merge_tool) filenames
+            def _check_files(fmt):
+                patterns = [
+                    # Pattern 1: Intermediate file from debate_video_tool
+                    f"debate_video_{fmt}_{_lang}_with_audio.mp4",
+                    # Pattern 2: Merged file from debate_merge_tool (Channel_Topic_Slug_fmt_Lang.mp4)
+                    f"{_channel}_Debate_{_topic_slug}_{fmt}_{_lang}.mp4",
+                    # Pattern 3: Fallback generic merge name
+                    f"{_channel}_Debate_{_topic_slug}_{fmt}.mp4",
+                    # Pattern 4: Your specific previous output name format (if different)
+                    f"{_channel}_Debate_AI_Replace_Entry_Level_{fmt}_{_lang}.mp4"
+                ]
+                return any(os.path.exists(os.path.join(output_dir, p)) for p in patterns)
+
+            _has_video = any(_check_files(fmt) for fmt in inputs.get('video_formats', []))
+
+            # Add task if video exists OR if we are generating it in this run
+            if _has_video or inputs.get("debate_video_enabled", False):
+                print(f"📘 Facebook Upload: Task queued (Video exists={_has_video})")
+                final_tasks.append(full_crew.tasks[21])  # upload_to_facebook
+            else:
+                print(f"⚠️  Facebook Upload: Skipped (No video file found in {output_dir})")
+                # Debug: List available mp4 files to help you see the mismatch
+                import glob
+                _found = glob.glob(os.path.join(output_dir, "*.mp4"))
+                if _found:
+                    print(f"   🔍 Found these MP4s instead: {[os.path.basename(f) for f in _found]}")
 
         if inputs.get("debate_merge_enabled", False) and not is_youtube_id:
             final_tasks.append(full_crew.tasks[18])  # debate_merge
