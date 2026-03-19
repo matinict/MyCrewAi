@@ -456,8 +456,8 @@ def run():
         print(f"   ✍️  Debate Text:     {inputs.get('debate_definition_enabled', False)}" +
               (f"  [max={inputs.get('debate_max_chars',10000)}ch]"
                if inputs.get('debate_definition_enabled') else ""))
-        _mini_auto = any(f in {'Shorts','ShortsHD','Shorts4K'} for f in inputs.get('video_formats',[])) and inputs.get('debate_definition_enabled', False)
-        print(f"   ✍️  Mini Debate (-m): {_mini_auto}  [auto: Shorts format]")
+        _has_shorts = any(f in {'Shorts','ShortsHD','Shorts4K'} for f in inputs.get('video_formats',[]))
+        print(f"   📱 Shorts (-m.md):   {_has_shorts and inputs.get('debate_definition_enabled', False)}  [auto via DebateDefinitionTool]")
         print(f"   🔀 Mini Merge:       {inputs.get('debate_mini_merge_enabled', False)}")
         _eng = inputs.get('tts_engine', 'gtts')
         print(f"   🎤 TTS Engine:      {_eng}")
@@ -615,67 +615,21 @@ def run():
         if inputs.get('merge_audio_video', False):
             final_tasks.append(full_crew.tasks[9])  # merge_audio_video
 
-        # ── Mini Debate pipeline (-m.md) ──────────────────────────────────────
-        # Auto-triggered when Shorts format is active + debate_definition_enabled=true.
-        # No flag needed in data.json — format presence drives this automatically.
-        # Outputs: propose-m.md / oppose-m.md / decide-m.md
-        _has_shorts = any(f in {'Shorts', 'ShortsHD', 'Shorts4K'} for f in inputs.get('video_formats', []))
-        if _has_shorts and inputs.get('debate_definition_enabled', False) and not is_youtube_id:
-            _debate_dir = output_dir
-            _lang = inputs.get('lang_suffix', 'En')
-            _propose_m_exists = (
-                os.path.exists(os.path.join(_debate_dir, f'propose-m_{_lang}.md')) or
-                os.path.exists(os.path.join(_debate_dir, 'propose-m.md'))
-            )
-            _oppose_m_exists = (
-                os.path.exists(os.path.join(_debate_dir, f'oppose-m_{_lang}.md')) or
-                os.path.exists(os.path.join(_debate_dir, 'oppose-m.md'))
-            )
-            _decide_m_exists = (
-                os.path.exists(os.path.join(_debate_dir, f'decide-m_{_lang}.md')) or
-                os.path.exists(os.path.join(_debate_dir, 'decide-m.md'))
-            )
-            if _propose_m_exists and _oppose_m_exists and _decide_m_exists:
-                print(f"⭐️  Mini debate files exist ({_lang}) — skipping LLM generation (using existing)")
-            else:
-                final_tasks.append(full_crew.tasks[10])  # debate_propose_m
-                final_tasks.append(full_crew.tasks[11])  # debate_oppose_m
-                final_tasks.append(full_crew.tasks[12])  # debate_decide_m
+        # ── Full Debate pipeline ──────────────────────────────────────────────
+        # Order: full agents first → create_debate_definition compresses to HD +
+        # Shorts (-m.md) in one pass. Mini agents (debate_propose_m etc.) are NOT
+        # queued — DebateDefinitionTool already produces -m.md from the full text,
+        # so separate mini LLM calls are redundant.
+        # Smart-skip is handled inside DebateDefinitionTool — main.py just routes.
+        if inputs.get('debate_definition_enabled', False) and not is_youtube_id:
+            final_tasks.append(full_crew.tasks[13])  # debate_propose
+            final_tasks.append(full_crew.tasks[14])  # debate_oppose
+            final_tasks.append(full_crew.tasks[15])  # debate_decide
+            final_tasks.append(full_crew.tasks[16])  # create_debate_definition
+            # ↑ writes propose_En.md + propose-m.md (and oppose/decide) in one shot
 
         if inputs.get('debate_mini_merge_enabled', False) and not is_youtube_id:
             final_tasks.append(full_crew.tasks[19])  # debate_merge_m
-
-        # ── Full Debate pipeline ───────────────────────────────────────────────
-        # Must run BEFORE generate_youtube_metadata so merged CC files exist
-        if inputs.get('debate_definition_enabled', False) and not is_youtube_id:
-            # Check for existing lang-suffixed debate files
-            _debate_dir = output_dir
-            _lang = inputs.get('lang_suffix', 'En')
-
-            # ✅ Define these variables HERE so they are available later
-            _propose_exists = os.path.exists(os.path.join(_debate_dir, f'propose_{_lang}.md'))
-            _oppose_exists  = os.path.exists(os.path.join(_debate_dir, f'oppose_{_lang}.md'))
-            _decide_exists  = os.path.exists(os.path.join(_debate_dir, f'decide_{_lang}.md'))
-
-            # Fallback: check plain .md for backward compat
-            if not (_propose_exists and _oppose_exists and _decide_exists):
-                _propose_exists = _propose_exists or os.path.exists(os.path.join(_debate_dir, 'propose.md'))
-                _oppose_exists  = _oppose_exists  or os.path.exists(os.path.join(_debate_dir, 'oppose.md'))
-                _decide_exists  = _decide_exists  or os.path.exists(os.path.join(_debate_dir, 'decide.md'))
-
-            if _propose_exists and _oppose_exists and _decide_exists:
-                print(f"⭐️  Debate files exist ({_lang}) — skipping LLM generation (using existing)")
-            else:
-                final_tasks.append(full_crew.tasks[13])  # debate_propose
-                final_tasks.append(full_crew.tasks[14])  # debate_oppose
-                final_tasks.append(full_crew.tasks[15])  # debate_decide
-
-        # create_debate_definition runs whenever debate_definition_enabled=true.
-        # Responsible for compressing raw agent text → propose_En.md, oppose_En.md,
-        # decide_En.md (HD) and propose-m.md, oppose-m.md, decide-m.md (Shorts).
-        # The tool's own smart-skip returns immediately if all 6 files already exist.
-        if inputs.get('debate_definition_enabled', False) and not is_youtube_id:
-            final_tasks.append(full_crew.tasks[16])  # create_debate_definition
 
         if inputs.get("debate_video_enabled", False) and not is_youtube_id:
             print(f"🎬 Queueing Task 17: create_debate_video")

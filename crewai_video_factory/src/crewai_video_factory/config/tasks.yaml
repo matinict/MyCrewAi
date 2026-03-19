@@ -664,6 +664,7 @@ debate_propose:
     Full proposition argument as plain text, starting with "PROPOSITION: {topic} ({start}–{end})".
     Must be under {debate_max_chars} characters. No tool calls or JSON.
   agent: debater
+  output_file: output/{filename}/propose.md
 
 debate_oppose:
   description: >
@@ -698,6 +699,7 @@ debate_oppose:
   agent: debater
   context:
     - debate_propose
+  output_file: output/{filename}/oppose.md
 
 debate_decide:
   description: >
@@ -730,6 +732,7 @@ debate_decide:
   context:
     - debate_propose
     - debate_oppose
+  output_file: output/{filename}/decide.md
 
 # ─────────────────────────────────────────────────────────────
 # DEBATE DEFINITION TASK — compresses & saves all .md files

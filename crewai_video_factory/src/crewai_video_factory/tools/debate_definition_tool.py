@@ -1,5 +1,5 @@
 """
-Debate Definition Tool (OPTIMIZED v6)
+Debate Definition Tool (OPTIMIZED v7)
 Auto-generates debate files for video factory.
 
 All compression config lives in data/label_mappings.json:
@@ -193,32 +193,6 @@ class DebateDefinitionTool(BaseTool):
         )
         print(f"[DebateDef] Complete in {elapsed:.1f}s")
         return summary
- 
-    # ── Public: called by main.py after kickoff() ─────────────────────────────
-    def post_process_from_disk(self, output_dir: str, lang_suffix: str = "En") -> str:
-        """Read propose/oppose/decide .md files written by CrewAI output_file
-        and produce compressed -m.md versions.
-        All caps read from label_mappings.json -> debate_compression.mobile_caps."""
-        cfg_caps    = self._compression().get('mobile_caps', {})
-        mobile_caps = {
-            'propose': cfg_caps.get('propose', 2000),
-            'oppose':  cfg_caps.get('oppose',  2000),
-            'decide':  cfg_caps.get('decide',  1000),
-        }
-        results = []
-        for role, cap in mobile_caps.items():
-            raw = self._load_text('', output_dir, role, lang_suffix)
-            dst = os.path.join(output_dir, f'{role}-m.md')
-            if raw:
-                mob = self._make_mobile(raw, cap)
-                with open(dst, 'w', encoding='utf-8') as f:
-                    f.write(mob)
-                print(f"[DebateMobile] {role}-m.md  {len(mob)} chars  (cap={cap})")
-                results.append(f"{role}-m.md ({len(mob)} chars)")
-            else:
-                print(f"[DebateMobile] WARNING source for {role} not found - skipping {role}-m.md")
-                results.append(f"WARNING {role}-m.md skipped (source not found)")
-        return "\n".join(results)
 
     # ── Internal helpers ──────────────────────────────────────────────────────
     @staticmethod
