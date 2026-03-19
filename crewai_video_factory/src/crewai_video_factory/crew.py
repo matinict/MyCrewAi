@@ -102,9 +102,7 @@ class CrewaiVideoFactory:
             tools=[MergeAudioVideoTool()],
             verbose=True
         )
-
-
-
+ 
     @agent
     def definition_specialist(self) -> Agent:
         kwargs = dict(config=self.agents_config['definition_specialist'], tools=[DefinitionTool()], verbose=True)
@@ -241,9 +239,7 @@ class CrewaiVideoFactory:
     def debate_decide_m(self) -> Task:
         return Task(config=self.tasks_config['debate_decide_m'])
 
-    @task
-    def debate_merge_m(self) -> Task:
-        return Task(config=self.tasks_config['debate_merge_m'])
+
 
     @task
     def debate_propose(self) -> Task:
@@ -264,6 +260,10 @@ class CrewaiVideoFactory:
     @task
     def debate_merge(self) -> Task:
         return Task(config=self.tasks_config['debate_merge'])
+    @task
+    def debate_merge_m(self) -> Task:
+        return Task(config=self.tasks_config['debate_merge_m'])
+
     @task
     def generate_youtube_metadata(self) -> Task:
         return Task(config=self.tasks_config['generate_youtube_metadata'])

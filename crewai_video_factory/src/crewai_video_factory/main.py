@@ -449,6 +449,35 @@ def run():
                if inputs.get('audio_enabled') else ""))
         print(f"   📹 Merge Audio+Video:{inputs.get('merge_audio_video', False)}")
 
+    # ── Debate block ─────────────────────────────────────────
+    debate_on = inputs.get('debate', False)
+    print(f"🗣️  Debate Video:     {debate_on}")
+    if debate_on:
+        print(f"   ✍️  Debate Text:     {inputs.get('debate_definition_enabled', False)}" +
+              (f"  [max={inputs.get('debate_max_chars',10000)}ch]"
+               if inputs.get('debate_definition_enabled') else ""))
+        _mini_auto = any(f in {'Shorts','ShortsHD','Shorts4K'} for f in inputs.get('video_formats',[])) and inputs.get('debate_definition_enabled', False)
+        print(f"   ✍️  Mini Debate (-m): {_mini_auto}  [auto: Shorts format]")
+        print(f"   🔀 Mini Merge:       {inputs.get('debate_mini_merge_enabled', False)}")
+        _eng = inputs.get('tts_engine', 'gtts')
+        print(f"   🎤 TTS Engine:      {_eng}")
+        if inputs.get('tts_voices'):
+            _v = inputs['tts_voices']
+            if _eng == 'piper':
+                print(f"   🎙️  PRO voice:  {_v.get('propose', {}).get('model', 'default')}")
+                print(f"   🎙️  CON voice:  {_v.get('oppose',  {}).get('model', 'default')}")
+                print(f"   🎙️  MOD voice:  {_v.get('decide',  {}).get('model', 'default')}")
+            elif _eng == 'edge-tts':
+                print(f"   🎙️  PRO voice:  {_v.get('propose', {}).get('edge_voice', 'default')}")
+                print(f"   🎙️  CON voice:  {_v.get('oppose',  {}).get('edge_voice', 'default')}")
+                print(f"   🎙️  MOD voice:  {_v.get('decide',  {}).get('edge_voice', 'default')}")
+            else:
+                print(f"   🎙️  Voices:        (engine defaults)")
+        print(f"   🎬 Debate Video:    {inputs.get('debate_video_enabled', False)}" +
+              (f"  [secs/line={inputs.get('debate_secs_per_line', 3.5)}]"
+               if inputs.get('debate_video_enabled') else ""))
+        print(f"   🔀 Debate Merge:    {inputs.get('debate_merge_enabled', False)}")
+
     # ── Metadata block ───────────────────────────────────────
     meta_on = inputs.get('metadata_prep', False)
     print(f"📺 Metadata Prep:    {meta_on}")
@@ -483,36 +512,6 @@ def run():
         plats = ', '.join(inputs.get('social_platforms', []))
         print(f"   🌐 Platforms:       {plats or '(none)'}")
         print(f"   🧪 Dry Run:         {inputs.get('social_share_dry_run', False)}")
-
-    # ── Debate block ─────────────────────────────────────────
-    debate_on = inputs.get('debate', False)
-    print(f"🗣️  Debate Video:     {debate_on}")
-    if debate_on:
-        print(f"   ✍️  Debate Text:     {inputs.get('debate_definition_enabled', False)}" +
-              (f"  [max={inputs.get('debate_max_chars',10000)}ch]"
-               if inputs.get('debate_definition_enabled') else ""))
-        _mini_auto = any(f in {'Shorts','ShortsHD','Shorts4K'} for f in inputs.get('video_formats',[])) and inputs.get('debate_definition_enabled', False)
-        print(f"   ✍️  Mini Debate (-m): {_mini_auto}  [auto: Shorts format]")
-        print(f"   🔀 Mini Merge:       {inputs.get('debate_mini_merge_enabled', False)}")
-        _eng = inputs.get('tts_engine', 'gtts')
-        print(f"   🎤 TTS Engine:      {_eng}")
-        if inputs.get('tts_voices'):
-            _v = inputs['tts_voices']
-            if _eng == 'piper':
-                print(f"   🎙️  PRO voice:  {_v.get('propose', {}).get('model', 'default')}")
-                print(f"   🎙️  CON voice:  {_v.get('oppose',  {}).get('model', 'default')}")
-                print(f"   🎙️  MOD voice:  {_v.get('decide',  {}).get('model', 'default')}")
-            elif _eng == 'edge-tts':
-                print(f"   🎙️  PRO voice:  {_v.get('propose', {}).get('edge_voice', 'default')}")
-                print(f"   🎙️  CON voice:  {_v.get('oppose',  {}).get('edge_voice', 'default')}")
-                print(f"   🎙️  MOD voice:  {_v.get('decide',  {}).get('edge_voice', 'default')}")
-            else:
-                print(f"   🎙️  Voices:        (engine defaults)")
-        print(f"   🎬 Debate Video:    {inputs.get('debate_video_enabled', False)}" +
-              (f"  [secs/line={inputs.get('debate_secs_per_line', 3.5)}]"
-               if inputs.get('debate_video_enabled') else ""))
-        print(f"   🔀 Debate Merge:    {inputs.get('debate_merge_enabled', False)}")
-
     # ── LLM overrides ────────────────────────────────────────
     llm_keys = ['llm_researcher', 'llm_definition', 'llm_csv', 'llm_video',
                 'llm_audio', 'llm_youtube', 'llm_upload', 'llm_social', 'llm_debate']
@@ -568,9 +567,9 @@ def run():
         # [3]  create_definition_video [4]  create_video            [5]  create_bar_race_video
         # [6]  create_intro_clip       [7]  bar_merge               [8]  add_audio
         # [9]  merge_audio_video       [10] debate_propose_m        [11] debate_oppose_m
-        # [12] debate_decide_m         [13] debate_merge_m
-        # [14] debate_propose          [15] debate_oppose           [16] debate_decide
-        # [17] create_debate_video     [18] debate_merge
+        # [12] debate_decide_m
+        # [13] debate_propose          [14] debate_oppose           [15] debate_decide
+        # [16] create_debate_video     [17] debate_merge            [18] debate_merge_m
         # [19] generate_youtube_metadata [20] upload_to_youtube     [21] upload_to_facebook
         # [22] share_to_social   ← always last
 
@@ -643,7 +642,7 @@ def run():
                 final_tasks.append(full_crew.tasks[12])  # debate_decide_m
 
         if inputs.get('debate_mini_merge_enabled', False) and not is_youtube_id:
-            final_tasks.append(full_crew.tasks[13])  # debate_merge_m
+            final_tasks.append(full_crew.tasks[18])  # debate_merge_m
 
         # ── Full Debate pipeline ───────────────────────────────────────────────
         # Must run BEFORE generate_youtube_metadata so merged CC files exist
@@ -651,6 +650,8 @@ def run():
             # Check for existing lang-suffixed debate files
             _debate_dir = output_dir
             _lang = inputs.get('lang_suffix', 'En')
+
+            # ✅ Define these variables HERE so they are available later
             _propose_exists = os.path.exists(os.path.join(_debate_dir, f'propose_{_lang}.md'))
             _oppose_exists  = os.path.exists(os.path.join(_debate_dir, f'oppose_{_lang}.md'))
             _decide_exists  = os.path.exists(os.path.join(_debate_dir, f'decide_{_lang}.md'))
@@ -664,53 +665,52 @@ def run():
             if _propose_exists and _oppose_exists and _decide_exists:
                 print(f"⭐️  Debate files exist ({_lang}) — skipping LLM generation (using existing)")
             else:
-                final_tasks.append(full_crew.tasks[14])  # debate_propose
-                final_tasks.append(full_crew.tasks[15])  # debate_oppose
-                final_tasks.append(full_crew.tasks[16])  # debate_decide
+                final_tasks.append(full_crew.tasks[13])  # debate_propose
+                final_tasks.append(full_crew.tasks[14])  # debate_oppose
+                final_tasks.append(full_crew.tasks[15])  # debate_decide
 
-        # if inputs.get("debate_video_enabled", False) and not is_youtube_id:
-        #     final_tasks.append(full_crew.tasks[17])  # create_debate_video
+        # ✅ CRITICAL: This line MUST be uncommented to generate the video
+        # Now safe to use inputs.get() directly; no dependency on _propose_exists here
+        if inputs.get("debate_video_enabled", False) and not is_youtube_id:
+            print(f"🎬 Queueing Task 16: create_debate_video")
+            final_tasks.append(full_crew.tasks[16])  # create_debate_video
+
+        # ✅ CRITICAL: Merge must run to create the final file for FB
+        if inputs.get("debate_merge_enabled", False) and not is_youtube_id:
+            print(f"🔀 Queueing Task 17: debate_merge")
+            final_tasks.append(full_crew.tasks[17])  # debate_merge
+
         # ── Facebook Upload Task ───────────────────────────────────────────────
-        # Fixed Logic: Upload if Video Enabled OR if FB Upload is explicitly forced.
-        # CRITICAL: Must also check 'not is_youtube_id'.
-        if (inputs.get("debate_video_enabled", False) or
-            (inputs.get("fb_upload", False) and inputs.get("upload_facebook_video", False))) and not is_youtube_id:
-
-            # Ensure debate video files exist before attempting upload
+        # Only add if explicitly enabled AND video file exists (or is being generated)
+        if inputs.get('fb_upload', False) and inputs.get('upload_facebook_video', False):
             _lang = inputs.get('lang_suffix', 'En')
             _topic_slug = inputs.get('topic_slug', '')
             _channel = inputs.get('channel', 'PlayOwnAi')
 
-            # Check for BOTH intermediate (debate_video_tool) and merged (debate_merge_tool) filenames
-            def _check_files(fmt):
-                patterns = [
-                    # Pattern 1: Intermediate file from debate_video_tool
-                    f"debate_video_{fmt}_{_lang}_with_audio.mp4",
-                    # Pattern 2: Merged file from debate_merge_tool (Channel_Topic_Slug_fmt_Lang.mp4)
-                    f"{_channel}_Debate_{_topic_slug}_{fmt}_{_lang}.mp4",
-                    # Pattern 3: Fallback generic merge name
-                    f"{_channel}_Debate_{_topic_slug}_{fmt}.mp4",
-                    # Pattern 4: Your specific previous output name format (if different)
-                    f"{_channel}_Debate_AI_Replace_Entry_Level_{fmt}_{_lang}.mp4"
-                ]
-                return any(os.path.exists(os.path.join(output_dir, p)) for p in patterns)
+            # Check for final merged file
+            _has_video = any(
+                os.path.exists(os.path.join(output_dir, f'{_channel}_Debate_{_topic_slug}_{fmt}_{_lang}.mp4'))
+                for fmt in inputs.get('video_formats', [])
+            )
 
-            _has_video = any(_check_files(fmt) for fmt in inputs.get('video_formats', []))
-
-            # Add task if video exists OR if we are generating it in this run
-            if _has_video or inputs.get("debate_video_enabled", False):
+            # Add task if video exists OR if we are generating it in this run (merge enabled)
+            if _has_video or inputs.get('debate_merge_enabled', False):
                 print(f"📘 Facebook Upload: Task queued (Video exists={_has_video})")
                 final_tasks.append(full_crew.tasks[21])  # upload_to_facebook
             else:
-                print(f"⚠️  Facebook Upload: Skipped (No video file found in {output_dir})")
-                # Debug: List available mp4 files to help you see the mismatch
+                print(f"⚠️  Facebook Upload: Skipped (No video file found and merge not enabled)")
+                # Debug: List available mp4 files to help identify naming mismatches
                 import glob
                 _found = glob.glob(os.path.join(output_dir, "*.mp4"))
                 if _found:
                     print(f"   🔍 Found these MP4s instead: {[os.path.basename(f) for f in _found]}")
 
-        if inputs.get("debate_merge_enabled", False) and not is_youtube_id:
-            final_tasks.append(full_crew.tasks[18])  # debate_merge
+        else:
+            # Explicitly log why the task is missing from the queue
+            if inputs.get('fb_upload', False) and not inputs.get('upload_facebook_video', False):
+                print(f"⏭️  Facebook Upload: Task omitted (upload_facebook_video=false)")
+            elif not inputs.get('fb_upload', False):
+                print(f"⏭️  Facebook Upload: Task omitted (fb_upload=false)")
 
         # ── generate_youtube_metadata runs after all video/merge tasks ──
         if inputs.get('generate_youtube_metadata', False):
