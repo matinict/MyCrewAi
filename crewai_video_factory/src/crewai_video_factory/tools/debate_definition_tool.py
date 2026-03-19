@@ -244,7 +244,7 @@ class DebateDefinitionTool(BaseTool):
 
     def _make_mobile(self, text: str, max_chars: int = 2000) -> str:
         """Shorts compression: keep ALL args, word-safe + logic-safe trim."""
-        #max_chars = 1000 # 🔒 hard limit
+        max_chars = 1200 # 🔒 hard limit
         text = self._apply_abbreviations(text)
         text = self._strip_aux_and_articles(text)
         text = self._collapse_whitespace(text)
@@ -302,7 +302,7 @@ class DebateDefinitionTool(BaseTool):
             if len(candidate.split()) >= min_words:
                 return candidate
         return text
-        
+
     @classmethod
     def _regex_patterns(cls) -> list:
         """All regex patterns from label_mappings.json -> debate_regex_patterns.

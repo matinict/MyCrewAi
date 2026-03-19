@@ -491,9 +491,8 @@ def run():
         print(f"   ✍️  Debate Text:     {inputs.get('debate_definition_enabled', False)}" +
               (f"  [max={inputs.get('debate_max_chars',10000)}ch]"
                if inputs.get('debate_definition_enabled') else ""))
-        print(f"   ✍️  Mini Debate:     {inputs.get('debate_mini_enabled', False)}" +
-              (f"  [max={inputs.get('debate_mini_max_chars',5200)}ch, ~1-1.5min TTS]"
-               if inputs.get('debate_mini_enabled') else ""))
+        _mini_auto = any(f in {'Shorts','ShortsHD','Shorts4K'} for f in inputs.get('video_formats',[])) and inputs.get('debate_definition_enabled', False)
+        print(f"   ✍️  Mini Debate (-m): {_mini_auto}  [auto: Shorts format]")
         print(f"   🔀 Mini Merge:       {inputs.get('debate_mini_merge_enabled', False)}")
         _eng = inputs.get('tts_engine', 'gtts')
         print(f"   🎤 TTS Engine:      {_eng}")
@@ -617,9 +616,11 @@ def run():
             final_tasks.append(full_crew.tasks[9])  # merge_audio_video
 
         # ── Mini Debate pipeline (-m.md) ──────────────────────────────────────
-        # Short version: ~120-180 words per file → 1–1.5 min TTS audio each
+        # Auto-triggered when Shorts format is active + debate_definition_enabled=true.
+        # No flag needed in data.json — format presence drives this automatically.
         # Outputs: propose-m.md / oppose-m.md / decide-m.md
-        if inputs.get('debate_mini_enabled', False) and not is_youtube_id:
+        _has_shorts = any(f in {'Shorts', 'ShortsHD', 'Shorts4K'} for f in inputs.get('video_formats', []))
+        if _has_shorts and inputs.get('debate_definition_enabled', False) and not is_youtube_id:
             _debate_dir = output_dir
             _lang = inputs.get('lang_suffix', 'En')
             _propose_m_exists = (
