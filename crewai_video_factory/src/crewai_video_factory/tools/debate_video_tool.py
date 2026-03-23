@@ -662,12 +662,25 @@ class DebateVideoTool(BaseTool):
             # Detect section changes
             matched_section = next((role for p, role in _section_map if p.match(line)), None)
             if matched_section:
+                _pat = next(p for p, role in _section_map if role == matched_section and p.match(line))
+                _rest_of_header = line[_pat.match(line).end():].strip()
                 if matched_section != section:
                     section = matched_section
-                    include_content = True # Reset gate
+                    include_content = True
                     decide_decision_reached = False
                     print(f"[DebateVideo] 📄 Section switch: {section}")
-                continue # Skip header line itself
+                # Capture any content on the same line as the header (e.g. "Verd: text...")
+                # Split long inline content at sentence boundaries for readable display
+                if _rest_of_header:
+                    _rest_of_header = _rest_of_header[0].upper() + _rest_of_header[1:]
+                    if len(_rest_of_header) > 120:
+                        for _sent in re.split(r'(?<=[.!?])\s+', _rest_of_header):
+                            _sent = _sent.strip()
+                            if _sent:
+                                result.append((_sent[0].upper() + _sent[1:], section))
+                    else:
+                        result.append((_rest_of_header, section))
+                continue
 
             # Handle DECISION header specifically to ensure we start capturing after it
             if _decision_re.match(line):
@@ -686,10 +699,20 @@ class DebateVideoTool(BaseTool):
             if any(p.match(line) for p in _skip):
                 continue
 
-            # Capitalize first letter for consistency, but keep rest original
+            # Split long single-line paragraphs at sentence boundaries
+            # (e.g. decide-m.md is one giant line — break into readable chunks)
             if line:
                 line = line[0].upper() + line[1:]
-                result.append((line, section))
+                # If line is very long (>120 chars), split at ". " or ". " boundaries
+                if len(line) > 120:
+                    import re as _re_split
+                    sentences = _re_split.split(r'(?<=[.!?])\s+', line)
+                    for sent in sentences:
+                        sent = sent.strip()
+                        if sent:
+                            result.append((sent[0].upper() + sent[1:], section))
+                else:
+                    result.append((line, section))
 
         print(f"[DebateVideo] 📊 Parsed {len(result)} content lines (Raw/No-Clean)")
         return result
@@ -869,11 +892,51 @@ class DebateVideoTool(BaseTool):
 
         import math as _math, random as _random
         _bg_v = max(0, min(255, bg_opacity))
-        _base = Image.new("RGBA", (w, h), (bg_color[0], bg_color[1], bg_color[2], 255))
+
+        # ── Animated gradient background (same style as intro_clip_tool) ────
+        def _gradient_base(frame_idx: int) -> Image.Image:
+            shift = (frame_idx / max(total_frames, 1)) * _math.pi * 2
+            _gi = Image.new('RGB', (w, h))
+            _px = _gi.load()
+            for _gy in range(h):
+                _t = _gy / h
+                _r0 = int(8  + 20  * _t)
+                _g0 = int(6  + 10  * _t)
+                _b0 = int(30 + 60  * _t)
+                _wave = 0.5 + 0.5 * _math.sin(shift + _t * _math.pi * 3)
+                _r1 = int(min(255, _r0 + 80  * _wave * (1 - _t)))
+                _g1 = int(min(255, _g0 + 40  * _wave * _t))
+                _b1 = int(min(255, _b0 + 120 * _wave))
+                for _gx in range(w):
+                    _px[_gx, _gy] = (_r1, _g1, _b1)
+            return _gi
 
         _rng = _random.Random(42)
-        _N_PARTICLES = 22
-        _particles = [{'x': _rng.uniform(0, w), 'y': _rng.uniform(0, h), 'vx': _rng.uniform(-0.18, 0.18), 'vy': _rng.uniform(-0.22, -0.06), 'r': _rng.uniform(1.2, 3.0), 'phase': _rng.uniform(0, _math.tau)} for _ in range(_N_PARTICLES)]
+        _DEBATE_WORDS = [
+            '?', '!', '...', '??', '?!',
+            'Why', 'How', 'Who', 'Where', 'When', 'What', 'Which',
+            'Yes', 'No', 'True', 'False', 'Pro', 'Con',
+            'Agree', 'Disagree', 'For', 'Against',
+            'AI', 'AGI', 'LLM', 'GPT', 'Bot', 'Data',
+            'Code', 'Mind', 'Brain', 'Logic', 'Think',
+            'Rights', 'Ethics', 'Human', 'Future', 'Risk',
+            'Power', 'Truth', 'Bias', 'Fear', 'Trust',
+            'Debate', 'Proof', 'Fact', 'Myth', 'Law',
+        ]
+        _N_PARTICLES = max(60, w // 16)
+        _particles = [
+            {
+                'x':       _rng.uniform(0, w),
+                'y':       _rng.uniform(0, h),
+                'vx':      _rng.uniform(-0.3, 0.3) * (w / 1080),
+                'vy':      _rng.uniform(0.4, 2.0) * (h / 1080),
+                'font_size': _rng.randint(14, 32),
+                'alpha':   _rng.randint(60, 180),
+                'phase':   _rng.uniform(0, _math.tau),
+                'word':    _DEBATE_WORDS[_rng.randint(0, len(_DEBATE_WORDS) - 1)],
+            }
+            for _ in range(_N_PARTICLES)
+        ]
 
         _av_y = int(h * 0.875)
         _av_r = int(w * 0.080)
@@ -1014,16 +1077,27 @@ class DebateVideoTool(BaseTool):
 
         def _draw_particles(draw, particles, sec_col, frame):
             import math as _m
+            from PIL import ImageFont as _IFont
             for p in particles:
-                p['x'] = (p['x'] + p['vx']) % w
-                p['y'] = p['y'] + p['vy']
-                if p['y'] < -5: p['y'] = h + 5
-                pulse = 0.4 + 0.6 * abs(_m.sin(frame * 0.04 + p['phase']))
-                alpha = int(40 * pulse)
-                r_now = max(1, int(p['r'] * pulse))
-                pcol = tuple(int(c * 0.6) for c in sec_col)
-                x, y = int(p['x']), int(p['y'])
-                draw.ellipse([x-r_now, y-r_now, x+r_now, y+r_now], fill=(*pcol, alpha))
+                # debate word-snow: fall with wobble
+                _wobble = _m.sin(frame * 0.03 + p['phase']) * 1.8
+                _sx = int((p['x'] + frame * p['vx'] + _wobble) % w)
+                _sy = int((p['y'] + frame * p['vy']) % h)
+                _a  = p['alpha']
+                _word = p['word']
+                _fs = p['font_size']
+                try:
+                    _wf = _IFont.truetype(
+                        '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf', _fs)
+                except Exception:
+                    _wf = _IFont.load_default()
+                # soft glow shadow
+                for _dx, _dy in [(-1,1),(1,1),(-1,-1),(1,-1)]:
+                    draw.text((_sx+_dx*2, _sy+_dy*2), _word, font=_wf,
+                              fill=(100, 160, 255, max(0, _a // 5)))
+                # bright word
+                draw.text((_sx, _sy), _word, font=_wf,
+                          fill=(200, 230, 255, _a))
 
         def _draw_flash(draw, w, h, sec_col, intensity):
             if intensity <= 0: return
@@ -1045,6 +1119,7 @@ class DebateVideoTool(BaseTool):
                 sec_col = _sec_rgb.get(cur_section, (200, 200, 200))
                 _section_frame += 1
 
+                _base = _gradient_base(global_frame).convert("RGBA")
                 img = Image.new("RGBA", (w, h), (0, 0, 0, _bg_v))
                 draw = ImageDraw.Draw(img)
                 _draw_particles(draw, _particles, sec_col, global_frame)

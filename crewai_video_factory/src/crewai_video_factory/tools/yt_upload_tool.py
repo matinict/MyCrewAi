@@ -377,11 +377,19 @@ class YTUploadTool(BaseTool):
             print(f"\n[YTUpload] ── Format: {fmt} ──────────────────")
 
             # ── Smart skip: check upload log ──────────────────────────────
-            # Check both standard and debate log paths
-            #_log_std    = os.path.join(output_dir, "YT", fmt, "upload_log.json")
-            #_log_debate = os.path.join(output_dir, "YT", "debate", fmt, "upload_log.json")
-            log_path = os.path.join(output_dir, "YT", "upload_log.json")
-            #log_path = _log_debate if os.path.exists(_log_debate) else _log_std
+            # Per-format log — one file per format inside its own YT/debate/{fmt}/ dir.
+            # HD  → YT/debate/HD/upload_log.json
+            # Shorts → YT/debate/Shorts/upload_log.json
+            # To re-upload a format: delete its upload_log.json and run again.
+            _log_debate = os.path.join(output_dir, "YT", "debate", fmt, "upload_log.json")
+            _log_std    = os.path.join(output_dir, "YT", fmt, "upload_log.json")
+            # Prefer existing debate log; if neither exists, default save to debate path
+            if os.path.exists(_log_debate):
+                log_path = _log_debate
+            elif os.path.exists(_log_std):
+                log_path = _log_std
+            else:
+                log_path = _log_debate  # new upload → save under debate/{fmt}/
             if os.path.exists(log_path):
                 try:
                     with open(log_path) as _lf:
@@ -526,7 +534,7 @@ class YTUploadTool(BaseTool):
                 os.makedirs(os.path.dirname(log_path), exist_ok=True)
                 with open(log_path, "w") as _lf:
                     json.dump(log_entry, _lf, indent=2)
-                print(f"[YTUpload]   💾 Log saved → YT/{fmt}/upload_log.json (video secured)")
+                print(f"[YTUpload]   💾 Log saved → {log_path} (video secured)")
 
                 # ── Upload CC files ────────────────────────────────────────
                 cc_stats = {"uploaded": 0, "skipped": 0, "failed": 0}
