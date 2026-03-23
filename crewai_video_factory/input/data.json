@@ -1,5 +1,5 @@
 {
-  "topic": "Is AI Making Humans Dumber? The Cognitive Decline Debate",
+  "topic": "AI Making Humans Dumber? The Cognitive Decline Debate",
   "start": null,
   "end": null,
   "granularity": "yearly",
@@ -44,15 +44,15 @@
     "llm_video": "ollama/llama3.1:8b",
     "llm_audio": "ollama/deepseek-r1:1.5b"
   },
-  "debate": true,
+  "debate": false,
   "debate_config": {
-    "use_label_mappings": true,
+    "use_label_mappings": false,
     "intro_slug": "One of the biggest debates in Ai tech right now",
-    "debate_definition_enabled": true,
+    "debate_definition_enabled": false,
     "debate_max_chars":8000,
     "llm_debate": "dashscope/qwen-plus",
-    "intro_enabled": true,
-    "debate_video_enabled": true,
+    "intro_enabled": false,
+    "debate_video_enabled": false,
     "debate_secs_per_line": 3.5,
     "debate_background_enabled": false,
     "debate_bg_opacity": 150,
@@ -60,7 +60,7 @@
      "debate_bg_opacity": 150,
     "image_gen_backend": "auto",
 
-    "debate_merge_enabled": true,
+    "debate_merge_enabled": false,
     "piper_voices": {
       "propose": {
         "model": "models/joe_medium.onnx",
@@ -92,27 +92,27 @@
 
   },
 
-  "metadata_prep": false,
+  "metadata_prep": true,
   "metadata_prep_config": {
     "generate_youtube_metadata": true,
     "generate_thumbnail": true,
     "yt_metadata_lang": "35",
-    "yt_cc_lang": "35",
+    "yt_cc_lang": "3",
     "llm_youtube": "ollama/qwen2.5:latest"
   },
 
-  "publisher": false,
+  "publisher": true,
   "publisher_config": {
       "llm_upload": "ollama/qwen2.5-coder:3b",
       "llm_embed": "ollama/nomic-embed-text:latest",
-      "yt_upload": false,
+      "yt_upload": true,
       "yt_upload_config": {
-          "upload_youtube_video": false,
+          "upload_youtube_video": true,
           "upload_dry_run": false,
           "upload_privacy": "private",
           "upload_category_id": "28",
-          "upload_cc": false,
-          "upload_cc_lang": "35",
+          "upload_cc": true,
+          "upload_cc_lang": "3",
           "upload_md_lang": "35",
           "yt_pin_comment_gen": false,
           "upload_notify_subscribers": false,
@@ -127,9 +127,9 @@
       }
   },
 
-  "social": false,
+  "social": true,
   "social_config": {
-    "social_share_enabled": false,
+    "social_share_enabled": true,
     "social_share_dry_run": false,
     "social_platforms": ["LinkedIn", "Instagram", "Facebook"],
     "schedule_post": false,

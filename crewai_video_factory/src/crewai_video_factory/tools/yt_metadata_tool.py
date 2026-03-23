@@ -33,18 +33,18 @@ def _load_lang_config():
             try:
                 with open(_p, encoding="utf-8") as _f:
                     _cfg = json.load(_f)
-                    _langs = sorted(_cfg["languages"], key=lambda x: x["rank"])
-                    _codes = [l["code"] for l in _langs]
-                    _names = {l["code"]: l["name"] for l in _langs}
-                    _yt_map = {l["code"]: l["yt_code"] for l in _langs}
-                    # aliases: zh → zh-hans, etc.
-                    for alias, target in _cfg.get("aliases", {}).items():
-                        if alias not in _names:
-                            _names[alias] = _names.get(target, target)
-                        if alias not in _yt_map:
-                            _yt_map[alias] = _yt_map.get(target, target)
-                    print(f"[LangConfig] Loaded {len(_codes)} languages from {_p}")
-                    return _codes, _names, _yt_map
+                _langs = sorted(_cfg["languages"], key=lambda x: x["rank"])
+                _codes = [l["code"] for l in _langs]
+                _names = {l["code"]: l["name"] for l in _langs}
+                _yt_map = {l["code"]: l["yt_code"] for l in _langs}
+                # aliases: zh → zh-hans, etc.
+                for alias, target in _cfg.get("aliases", {}).items():
+                    if alias not in _names:
+                        _names[alias] = _names.get(target, target)
+                    if alias not in _yt_map:
+                        _yt_map[alias] = _yt_map.get(target, target)
+                print(f"[LangConfig] Loaded {len(_codes)} languages from {_p}")
+                return _codes, _names, _yt_map
             except Exception as _e:
                 print(f"[LangConfig] Failed to load {_p}: {_e} — using fallback")
                 break
@@ -62,6 +62,7 @@ def _load_lang_config():
 LANGUAGES, LANG_NAMES, _LANG_YT_MAP = _load_lang_config()
 
 # ── Translation helper ────────────────────────────────────────────────────────
+
 def _google_translate(text: str, dest: str, retries: int = 3) -> str:
     if not text or not text.strip():
         return text
@@ -79,7 +80,7 @@ def _google_translate(text: str, dest: str, retries: int = 3) -> str:
             try:
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
-                    return "  ".join(part[0] for part in data[0] if part[0])
+                    return " ".join(part[0] for part in data[0] if part[0])
             except Exception as e:
                 if attempt < retries - 1:
                     time.sleep(1.5)
@@ -91,15 +92,9 @@ def _google_translate(text: str, dest: str, retries: int = 3) -> str:
         return text
 
 # ── YouTube API Scraper (For YouTube ID Mode) ────────────────────────────────
-def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
-    """Fetch metadata + real CC transcript for a YouTube video ID.
 
-    Method priority (no API key required for 1-4):
-      1. yt-dlp  — title, description, tags, chapters, real transcript/CC
-      2. noembed.com — title + author (no key)
-      3. YouTube oEmbed — title + author (no key)
-      4. YouTube Data API v3 — full metadata (YOUTUBE_API_KEY required)
-    """
+def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
+    """Fetch metadata + real CC transcript for a YouTube video ID."""
     import os, tempfile, glob as _glob
 
     api_key = api_key or os.environ.get('YOUTUBE_API_KEY', '')
@@ -114,9 +109,9 @@ def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-        title        = info.get('title', f"YouTube Video {video_id}")
-        description  = info.get('description', '')
-        tags         = info.get('tags', []) or []
+        title = info.get('title', f"YouTube Video {video_id}")
+        description = info.get('description', '')
+        tags = info.get('tags', []) or []
         chapters_raw = info.get('chapters', []) or []
         chapters_str = "\n".join(
             f"{int(c.get('start_time', 0) // 60):02d}:{int(c.get('start_time', 0) % 60):02d} {c.get('title', '')}"
@@ -128,14 +123,14 @@ def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 sub_opts = {
-                    'quiet':          True,
-                    'no_warnings':    True,
-                    'skip_download':  True,
-                    'writesubtitles': True,       # manual/uploaded CC
-                    'writeautomaticsub': True,    # auto-generated CC fallback
+                    'quiet': True,
+                    'no_warnings': True,
+                    'skip_download': True,
+                    'writesubtitles': True,
+                    'writeautomaticsub': True,
                     'subtitleslangs': ['en', 'en-US', 'en-GB'],
-                    'subtitlesformat':'vtt',
-                    'outtmpl':        os.path.join(tmpdir, '%(id)s.%(ext)s'),
+                    'subtitlesformat': 'vtt',
+                    'outtmpl': os.path.join(tmpdir, '%(id)s.%(ext)s'),
                 }
                 with yt_dlp.YoutubeDL(sub_opts) as ydl_sub:
                     ydl_sub.download([url])
@@ -144,7 +139,6 @@ def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
                 vtt_files = _glob.glob(os.path.join(tmpdir, '*.vtt'))
                 if vtt_files:
                     raw = open(vtt_files[0], encoding='utf-8').read()
-                    # Strip VTT markup → plain text
                     import re as _re
                     lines = raw.splitlines()
                     seen, clean_lines = set(), []
@@ -152,14 +146,12 @@ def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
                         line = line.strip()
                         if not line or line.startswith('WEBVTT') or line.startswith('NOTE') or line.startswith('STYLE'):
                             continue
-                        # Skip VTT metadata headers: Kind: captions, Language: en, etc.
                         if _re.match(r'^(Kind|Language|Position|Align|Line|Size)\s*:', line, _re.IGNORECASE):
                             continue
-                        if _re.match(r'^\d{2}:\d{2}', line):    # timestamp line
+                        if _re.match(r'^\d{2}:\d{2}', line):
                             continue
-                        if _re.match(r'^\d+$', line):            # sequence number
+                        if _re.match(r'^\d+$', line):
                             continue
-                        # Strip inline tags like <c>, </c>, <00:00:01.000>
                         line = _re.sub(r'<[^>]+>', '', line).strip()
                         if line and line not in seen:
                             seen.add(line)
@@ -173,13 +165,13 @@ def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
 
         print(f"[YTScrape] ✅ yt-dlp: '{title[:80]}' | tags={len(tags)} | chapters={len(chapters_raw)}")
         return {
-            'title':             title,
-            'description':       description,
-            'tags':              tags,
-            'chapters':          chapters_str,
-            'transcript':        transcript_text,   # real CC if available, else ""
+            'title': title,
+            'description': description,
+            'tags': tags,
+            'chapters': chapters_str,
+            'transcript': transcript_text,
             'existing_captions': [],
-            'source':            'yt-dlp',
+            'source': 'yt-dlp',
         }
     except ImportError:
         print(f"[YTScrape] ℹ️  yt-dlp not installed — run: pip install yt-dlp --break-system-packages")
@@ -192,17 +184,17 @@ def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
         req = urllib.request.Request(noembed_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        title  = data.get('title', f"YouTube Video {video_id}")
+        title = data.get('title', f"YouTube Video {video_id}")
         author = data.get('author_name', '')
         print(f"[YTScrape] ✅ noembed: '{title[:80]}'")
         return {
-            'title':             title,
-            'description':       f"Video by {author}. Watch: {url}",
-            'tags':              ['youtube', 'video', author.lower().replace(' ', '')] if author else ['youtube', 'video'],
-            'chapters':          "0:00 Introduction",
-            'transcript':        '',
+            'title': title,
+            'description': f"Video by {author}. Watch: {url}",
+            'tags': ['youtube', 'video', author.lower().replace(' ', '')] if author else ['youtube', 'video'],
+            'chapters': "0:00 Introduction",
+            'transcript': '',
             'existing_captions': [],
-            'source':            'noembed',
+            'source': 'noembed',
         }
     except Exception as e:
         print(f"[YTScrape] ⚠️  noembed error: {e} — trying YouTube oEmbed")
@@ -213,17 +205,17 @@ def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
         req = urllib.request.Request(oembed_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        title  = data.get('title', f"YouTube Video {video_id}")
+        title = data.get('title', f"YouTube Video {video_id}")
         author = data.get('author_name', '')
         print(f"[YTScrape] ✅ oEmbed: '{title[:80]}'")
         return {
-            'title':             title,
-            'description':       f"Video by {author}. Watch: {url}",
-            'tags':              ['youtube', 'video'],
-            'chapters':          "0:00 Introduction",
-            'transcript':        '',
+            'title': title,
+            'description': f"Video by {author}. Watch: {url}",
+            'tags': ['youtube', 'video'],
+            'chapters': "0:00 Introduction",
+            'transcript': '',
             'existing_captions': [],
-            'source':            'oembed',
+            'source': 'oEmbed',
         }
     except Exception as e:
         print(f"[YTScrape] ⚠️  oEmbed error: {e} — trying YouTube Data API")
@@ -232,29 +224,29 @@ def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
     if api_key:
         try:
             from googleapiclient.discovery import build
-            youtube  = build('youtube', 'v3', developerKey=api_key)
-            resp     = youtube.videos().list(
+            youtube = build('youtube', 'v3', developerKey=api_key)
+            resp = youtube.videos().list(
                 part='snippet,contentDetails,status,localizations', id=video_id
             ).execute()
             if resp.get('items'):
-                item    = resp['items'][0]
+                item = resp['items'][0]
                 snippet = item['snippet']
                 meta = {
-                    'title':             snippet.get('title', f"YouTube Video {video_id}"),
-                    'description':       snippet.get('description', ''),
-                    'tags':              snippet.get('tags', []),
-                    'chapters':          "0:00 Introduction",
-                    'transcript':        '',
-                    'category_id':       snippet.get('categoryId', '28'),
+                    'title': snippet.get('title', f"YouTube Video {video_id}"),
+                    'description': snippet.get('description', ''),
+                    'tags': snippet.get('tags', []),
+                    'chapters': "0:00 Introduction",
+                    'transcript': '',
+                    'category_id': snippet.get('categoryId', '28'),
                     'existing_captions': [],
-                    'source':            'youtube_api',
+                    'source': 'youtube_api',
                 }
                 try:
-                    cap_resp   = youtube.captions().list(part='snippet', videoId=video_id).execute()
+                    cap_resp = youtube.captions().list(part='snippet', videoId=video_id).execute()
                     meta['existing_captions'] = [
-                        {'language': c['snippet'].get('language','en'),
-                         'name': c['snippet'].get('name',''),
-                         'track_kind': c['snippet'].get('trackKind','standard'),
+                        {'language': c['snippet'].get('language', 'en'),
+                         'name': c['snippet'].get('name', ''),
+                         'track_kind': c['snippet'].get('trackKind', 'standard'),
                          'id': c['id']}
                         for c in cap_resp.get('items', [])
                     ]
@@ -271,16 +263,17 @@ def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
     # ── Final fallback ────────────────────────────────────────────────────────
     print(f"[YTScrape] ⚠️  All methods failed — stub metadata for {video_id}")
     return {
-        'title':             f"YouTube Video {video_id}",
-        'description':       f"Watch: https://youtu.be/{video_id}",
-        'tags':              ['youtube', 'video'],
-        'chapters':          "0:00 Introduction",
-        'transcript':        '',
+        'title': f"YouTube Video {video_id}",
+        'description': f"Watch: https://youtu.be/{video_id}",
+        'tags': ['youtube', 'video'],
+        'chapters': "0:00 Introduction",
+        'transcript': '',
         'existing_captions': [],
-        'source':            'fallback',
+        'source': 'fallback',
     }
 
 # ── Schema ────────────────────────────────────────────────────────────────────
+
 class YouTubeMetadataToolInput(BaseModel):
     topic: str = Field(..., description="Topic/title for the video (or YouTube video ID for yt_id mode)")
     filename: str = Field(..., description="Base filename slug")
@@ -306,6 +299,7 @@ class YouTubeMetadataToolInput(BaseModel):
     yt_source_video_id: str = Field(default="", description="YouTube video ID to scrape (yt_id mode)")
 
 # ── Tool ──────────────────────────────────────────────────────────────────────
+
 class YouTubeMetadataTool(BaseTool):
     name: str = "YouTube Metadata Generator"
     description: str = (
@@ -314,6 +308,37 @@ class YouTubeMetadataTool(BaseTool):
         "Supports 'debate' (YT/debate/{fmt}/), 'yt_id' (YT/yt_id/{fmt}/), and 'animation' (YT/{fmt}/) modes."
     )
     args_schema: Type[BaseModel] = YouTubeMetadataToolInput
+
+    def _clean_tags(self, tags: list, max_words: int = 3) -> list:
+        """Sanitize tags: 1-3 words max, no articles/verbs at start."""
+        _stop_words = {
+            'is', 'are', 'was', 'were', 'be', 'been', 'being',
+            'the', 'a', 'an', 'this', 'that', 'these', 'those',
+            'and', 'or', 'but', 'for', 'nor', 'so', 'yet',
+            'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+            'how', 'what', 'when', 'where', 'why', 'which', 'who',
+            'can', 'could', 'will', 'would', 'shall', 'should',
+            'do', 'does', 'did', 'have', 'has', 'had',
+        }
+        cleaned = []
+        seen = set()
+        for tag in tags:
+            if not tag or not isinstance(tag, str):
+                continue
+            tag = tag.strip().rstrip('.,!?;:')
+            words = tag.split()
+            while words and words[0].lower() in _stop_words:
+                words = words[1:]
+            words = words[:max_words]
+            if not words or len(' '.join(words)) < 2:
+                continue
+            clean_tag = ' '.join(words)
+            if clean_tag.lower() not in seen:
+                seen.add(clean_tag.lower())
+                cleaned.append(clean_tag)
+            if sum(len(t) + 1 for t in cleaned) > 480:
+                break
+        return cleaned[:25]
 
     def _run(
         self,
@@ -349,7 +374,7 @@ class YouTubeMetadataTool(BaseTool):
         print(f"[YTMetadata] v2.0 — structured YT/{{style}}/{{fmt}}/MD|CC/ output + Thumbnails")
 
         # ── Format classification ─────────────────────────────────────────────
-        _pipeline = {"debate", "animation", "yt_id", "ytid"}  # ytid = alias for yt_id
+        _pipeline = {"debate", "animation", "yt_id", "ytid"}
         _real = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
         _valid = _pipeline | _real
 
@@ -358,13 +383,10 @@ class YouTubeMetadataTool(BaseTool):
         elif isinstance(video_formats, str):
             video_formats = [v.strip() for v in _vre.findall(r"[A-Za-z0-9]+", video_formats)
                              if v not in ("true", "false", "null", "list")]
-        # Normalise ytid → yt_id so all downstream checks use one token
         video_formats = [("yt_id" if f == "ytid" else f) for f in video_formats if f in _valid] or ["HD"]
 
-        # ── video_style injects pipeline tokens into video_formats ────────────
         if video_style:
             _style_list = [video_style] if isinstance(video_style, str) else list(video_style)
-            # Normalise ytid → yt_id in style list too
             _style_tokens = [("yt_id" if s.strip().lower() == "ytid" else s.strip().lower())
                              for s in _style_list if s.strip().lower() in _pipeline]
             for _tok in _style_tokens:
@@ -373,7 +395,6 @@ class YouTubeMetadataTool(BaseTool):
             if _style_tokens:
                 print(f"[YTMetadata]   video_style={_style_tokens} → injected into video_formats: {video_formats}")
 
-        # animation_video_formats = real formats used for all branches
         if not animation_video_formats:
             animation_video_formats = [f for f in video_formats if f in _real] or ["HD"]
         else:
@@ -382,7 +403,7 @@ class YouTubeMetadataTool(BaseTool):
         active_md_langs = LANGUAGES[:min(int(yt_metadata_lang), len(LANGUAGES))]
         active_cc_langs = LANGUAGES[:min(int(yt_cc_lang), len(LANGUAGES))]
 
-        clean = filename.strip().replace("/", "  ").replace("\\", "  ")
+        clean = filename.strip().replace("/", " ").replace("\\", " ")
 
         print(f"[YTMetadata]   lang config : metadata={len(active_md_langs)} | CC={len(active_cc_langs)}")
         print(f"[YTMetadata] Starting — topic='{topic}' filename='{clean}' channel='{channel}'")
@@ -391,13 +412,10 @@ class YouTubeMetadataTool(BaseTool):
         print(f"[YTMetadata]   narration  : {generate_narration} | metadata: {generate_youtube_metadata} | thumbnail: {generate_thumbnail}")
 
         os.makedirs(output_dir, exist_ok=True)
-
-        # Create YT directory for upload_log.json
         yt_dir = os.path.join(output_dir, "YT")
         os.makedirs(yt_dir, exist_ok=True)
 
         results = []
-
         self._migrate_old_yt_structure(output_dir, video_formats)
 
         # ── YOUTUBE ID SCRAPE MODE ────────────────────────────────────────────
@@ -433,21 +451,18 @@ class YouTubeMetadataTool(BaseTool):
             direct_fmts = [] if (has_debate or has_animation or has_yt_id) else [f for f in video_formats if f not in _pipeline]
             fmt_results = []
 
-            # ── YT_ID MODE → YT/yt_id/{real_fmt}/MD/ ─────────────────────────
             if has_yt_id:
                 print(f"[YTMetadata]   • [yt_id] Processing formats: {animation_video_formats}")
                 for real_fmt in animation_video_formats:
                     lbl = f"yt_id/{real_fmt}"
-                    scraped_title    = scraped_metadata.get('title', topic)[:255]
-                    scraped_desc     = scraped_metadata.get('description', f"Video ID: {topic}")
-                    scraped_tags     = scraped_metadata.get('tags', self._generate_youtube_tags(topic, channel=channel))
+                    scraped_title = scraped_metadata.get('title', topic)[:255]
+                    scraped_desc = scraped_metadata.get('description', f"Video ID: {topic}")
+                    scraped_tags = self._clean_tags(scraped_metadata.get('tags', self._generate_youtube_tags(topic, channel=channel)))
                     scraped_chapters = scraped_metadata.get('chapters', "0:00 Introduction\n0:30 Content\n1:00 Conclusion")
-
                     fmt_results.append(self._write_metadata_files(
                         topic, scraped_title, scraped_desc, scraped_tags, scraped_chapters,
                         output_dir, fmt=lbl, lang_list=active_md_langs, scraped_from_yt=True))
 
-            # ── DEBATE MODE → YT/debate/{real_fmt}/MD/ ───────────────────────
             if has_debate:
                 print(f"[YTMetadata]   • [debate] Processing formats: {animation_video_formats}")
                 for real_fmt in animation_video_formats:
@@ -460,12 +475,11 @@ class YouTubeMetadataTool(BaseTool):
                         meta["tags"], meta["chapters"],
                         output_dir, fmt=lbl, lang_list=active_md_langs))
 
-            # ── ANIMATION MODE → YT/{real_fmt}/MD/ ───────────────────────────
             if has_animation:
                 print(f"[YTMetadata]   • [animation] Processing formats: {animation_video_formats}")
                 periods = self._detect_periods(n_periods, clean, start_year, end_year)
                 title = self._generate_youtube_title(topic, start_year, end_year, channel=channel)
-                tags = self._generate_youtube_tags(topic, channel=channel)
+                tags = self._clean_tags(self._generate_youtube_tags(topic, channel=channel))
 
                 for real_fmt in animation_video_formats:
                     lbl = real_fmt
@@ -474,17 +488,15 @@ class YouTubeMetadataTool(BaseTool):
                         topic, start_year, end_year, dur,
                         channel=channel, channel_lower=channel_lower, website=website)
                     ch = self._generate_youtube_chapters(start_year, end_year, dur)
-
                     fmt_results.append(self._write_metadata_files(
                         topic, title, desc, tags, ch,
                         output_dir, fmt=lbl, lang_list=active_md_langs))
 
-            # ── DIRECT MODE → YT/{fmt}/MD/ ───────────────────────────────────
             if direct_fmts:
                 print(f"[YTMetadata]   • [direct] Processing formats: {direct_fmts}")
                 periods = self._detect_periods(n_periods, clean, start_year, end_year)
                 title = self._generate_youtube_title(topic, start_year, end_year, channel=channel)
-                tags = self._generate_youtube_tags(topic, channel=channel)
+                tags = self._clean_tags(self._generate_youtube_tags(topic, channel=channel))
 
                 for fmt in direct_fmts:
                     dur = self._calc_duration(fmt, periods, fps, fps_hd_offset)
@@ -492,7 +504,6 @@ class YouTubeMetadataTool(BaseTool):
                         topic, start_year, end_year, dur,
                         channel=channel, channel_lower=channel_lower, website=website)
                     ch = self._generate_youtube_chapters(start_year, end_year, dur)
-
                     fmt_results.append(self._write_metadata_files(
                         topic, title, desc, tags, ch,
                         output_dir, fmt=fmt, lang_list=active_md_langs))
@@ -524,15 +535,12 @@ class YouTubeMetadataTool(BaseTool):
         results.append(cc_result)
 
         self._cleanup_and_rename(output_dir, video_formats, channel, topic)
-
-        # Save upload_log.json inside YT/ directory
         self._save_upload_log(yt_dir, topic, channel)
 
         print(f"[YTMetadata] All steps done in {_time.time()-t0:.1f}s")
         return "\n\n".join(r for r in results if r)
 
     def _save_upload_log(self, yt_dir: str, topic: str, channel: str):
-        """Save upload log inside YT/ directory"""
         log_path = os.path.join(yt_dir, "upload_log.json")
         log_data = {
             "topic": topic,
@@ -543,8 +551,6 @@ class YouTubeMetadataTool(BaseTool):
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(log_data, f, indent=2, ensure_ascii=False)
         print(f"[YTMetadata] Saved: YT/upload_log.json")
-
-    # ── Small helpers ─────────────────────────────────────────────────────────
 
     def _detect_periods(self, n_periods: int, clean: str, start_year: int, end_year: int) -> int:
         if n_periods > 0:
@@ -563,43 +569,38 @@ class YouTubeMetadataTool(BaseTool):
         spp = fps if fmt in ("Shorts", "ShortsHD", "Shorts4K") else fps * fps_hd_offset
         return periods * spp + spp * 2
 
-    # ── Narration ─────────────────────────────────────────────────────────────
-
     def _generate_narration_file(self, topic, start_year, end_year,
                                   output_dir, clean, channel="PlayOwnAi", scraped_metadata=None) -> str:
         csv_path = f"output/{clean}.csv"
         print(f"[YTMetadata]   CSV path: {csv_path} (exists={os.path.exists(csv_path)})")
 
-        # ── YT_ID MODE ────────────────────────────────────────────────────────
         if scraped_metadata and scraped_metadata.get('title'):
             transcript = scraped_metadata.get('transcript', '').strip()
-            title      = scraped_metadata.get('title', topic)
-            desc       = scraped_metadata.get('description', '').strip()
-            tags       = scraped_metadata.get('tags', [])
-            chapters   = scraped_metadata.get('chapters', '')
-            src        = scraped_metadata.get('source', 'unknown')
+            title = scraped_metadata.get('title', topic)
+            desc = scraped_metadata.get('description', '').strip()
+            tags = scraped_metadata.get('tags', [])
+            chapters = scraped_metadata.get('chapters', '')
+            src = scraped_metadata.get('source', 'unknown')
 
-            # Build title slug for filename: first 5 words of real title
             import re as _re2
             _slug_words = _re2.findall(r'[A-Za-z0-9]+', title)[:5]
             _title_slug = '_'.join(_slug_words) if _slug_words else clean
             cc_filename = f"{_title_slug}_cc_en.txt"
-            out_path    = os.path.join(output_dir, cc_filename)
+            out_path = os.path.join(output_dir, cc_filename)
 
-            # ── Smart skip: don't overwrite existing slug-named cc file ──────────
             if os.path.exists(out_path):
                 existing = open(out_path, encoding='utf-8').read().strip()
                 print(f"[YTMetadata]   {cc_filename} exists ({len(existing)} chars) — keeping, not overwriting")
                 cc_result = f"Narration kept: {cc_filename} (existing, not overwritten)"
             else:
                 if transcript:
-                    cc_text  = transcript
+                    cc_text = transcript
                     src_note = f"real YouTube CC/transcript (via {src})"
                 elif desc:
-                    cc_text  = f"{title}. {desc[:800].rsplit(' ', 1)[0]}"
+                    cc_text = f"{title}. {desc[:800].rsplit(' ', 1)[0]}"
                     src_note = f"video description (no CC available)"
                 else:
-                    cc_text  = f"{title}. Watch: https://youtu.be/{topic}"
+                    cc_text = f"{title}. Watch: https://youtu.be/{topic}"
                     src_note = "title only"
 
                 with open(out_path, "w", encoding="utf-8") as f:
@@ -607,43 +608,42 @@ class YouTubeMetadataTool(BaseTool):
                 print(f"[YTMetadata]   {cc_filename} written ({len(cc_text)} chars) — source: {src_note}")
                 cc_result = f"Narration saved: {cc_filename} ({src_note})"
 
-            # ── Write metadata.md — scraped content as human-readable markdown ─
             md_path = os.path.join(output_dir, "metadata.md")
             if not os.path.exists(md_path):
                 md_lines = [
                     f"# {title}",
-                    "",
-                    f"**Video ID:** `{topic}`  ",
-                    f"**Source:** {src}  ",
+                    " ",
+                    f"**Video ID:** `{topic}`",
+                    f"**Source:** {src}",
                     f"**URL:** https://www.youtube.com/watch?v={topic}",
-                    "",
+                    " ",
                     "## Description",
-                    "",
+                    " ",
                     desc if desc else "_No description available._",
-                    "",
+                    " ",
                 ]
                 if tags:
                     md_lines += [
                         "## Tags",
-                        "",
+                        " ",
                         ", ".join(f"`{t}`" for t in tags[:30]),
-                        "",
+                        " ",
                     ]
                 if chapters:
                     md_lines += [
                         "## Chapters",
-                        "",
+                        " ",
                         "```",
                         chapters,
                         "```",
-                        "",
+                        " ",
                     ]
                 if transcript:
                     md_lines += [
                         "## Transcript (CC)",
-                        "",
+                        " ",
                         transcript[:3000] + ("..." if len(transcript) > 3000 else ""),
-                        "",
+                        " ",
                     ]
                 with open(md_path, "w", encoding="utf-8") as f:
                     f.write("\n".join(md_lines))
@@ -661,23 +661,23 @@ class YouTubeMetadataTool(BaseTool):
                 yrs = df[tc].tolist()
                 s, e = int(yrs[0]), int(yrs[-1])
                 parts = [
-                    f"Welcome to @{channel}. ",
-                    f"Today, we're exploring {topic} from {s} to {e}. ",
-                    "Only for basic idea about trending. ",
-                    "Let's see how the landscape evolved. ",
+                    f"Welcome to @{channel}.",
+                    f"Today, we're exploring {topic} from {s} to {e}.",
+                    "Only for basic idea about trending.",
+                    "Let's see how the landscape evolved.",
                 ]
                 for _, row in df.iterrows():
                     ldr = row[dc].idxmax(); val = row[ldr]; yr = int(row[tc])
                     if val <= 20:
-                        parts.append(f"{yr}. The market is forming. ")
+                        parts.append(f"{yr}. The market is forming.")
                     elif val <= 40:
-                        parts.append(f"{yr}. {ldr} gains traction. ")
+                        parts.append(f"{yr}. {ldr} gains traction.")
                     elif val <= 70:
-                        parts.append(f"{yr}. {ldr} shows strength. ")
+                        parts.append(f"{yr}. {ldr} shows strength.")
                     else:
-                        parts.append(f"{yr}. {ldr} leads the market. ")
-                parts.append(f"Subscribe to @{channel} for more insights. ")
-                narration = "   ".join(parts)
+                        parts.append(f"{yr}. {ldr} leads the market.")
+                parts.append(f"Subscribe to @{channel} for more insights.")
+                narration = " ".join(parts)
             except Exception as ex:
                 print(f"[YTMetadata]   CSV read failed: {ex}")
                 narration = self._fallback_narration(topic, start_year, end_year, channel)
@@ -689,15 +689,13 @@ class YouTubeMetadataTool(BaseTool):
         return "Narration text saved to: cc_en.txt"
 
     def _fallback_narration(self, topic, start_year, end_year, channel="PlayOwnAi") -> str:
-        return (f"Welcome to @{channel}. Today, we're exploring {topic} from {start_year} to {end_year}.   "
-                "Only for basic idea about trending.   "
+        return (f"Welcome to @{channel}. Today, we're exploring {topic} from {start_year} to {end_year}. "
+                "Only for basic idea about trending. "
                 f"Subscribe to @{channel} for more insights.")
 
-    # ── Debate metadata builder ───────────────────────────────────────────────
-
     def _build_debate_metadata(self, topic, output_dir, start_year, end_year,
-                                fmt="HD", channel="PlayOwnAi", channel_lower="playownai",
-                                website="youtube.com/@PlayOwnAi") -> dict:
+                               fmt="HD", channel="PlayOwnAi", channel_lower="playownai",
+                               website="youtube.com/@PlayOwnAi") -> dict:
         is_short = fmt in ("Shorts", "ShortsHD", "Shorts4K")
 
         def _read(name):
@@ -706,22 +704,22 @@ class YouTubeMetadataTool(BaseTool):
                 if os.path.exists(p):
                     with open(p, "r", encoding="utf-8") as f:
                         return f.read()
-            return " "
+            return ""
 
         def _sentences(text, n=2):
             text = re.sub(r"^#+\s.*$", " ", text, flags=re.MULTILINE)
             text = re.sub(r"^\s*[-*]\s+", " ", text, flags=re.MULTILINE)
             text = re.sub(r"\*+", " ", text)
-            text = re.sub(r"\n{2,}", "   ", text).strip()
+            text = re.sub(r"\n{2,}", " ", text).strip()
             sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if len(s.strip()) > 20]
-            return "   ".join(sents[:n])
+            return " ".join(sents[:n])
 
         pro_raw = _read("propose")
         con_raw = _read("oppose")
         dec_raw = _read("decide")
-        print(f"[YTMetadata]   • [debate] MD files:   "
-              f"propose={'Yes' if pro_raw else 'No'}   "
-              f"oppose={'Yes' if con_raw else 'No'}   "
+        print(f"[YTMetadata]   • [debate] MD files: "
+              f"propose={'Yes' if pro_raw else 'No'} "
+              f"oppose={'Yes' if con_raw else 'No'} "
               f"decide={'Yes' if dec_raw else 'No'}")
 
         if not (pro_raw or con_raw or dec_raw):
@@ -731,7 +729,7 @@ class YouTubeMetadataTool(BaseTool):
                 "description": self._generate_youtube_description(
                     topic, start_year, end_year, dur,
                     channel=channel, channel_lower=channel_lower, website=website),
-                "tags": self._generate_youtube_tags(topic, channel=channel),
+                "tags": self._clean_tags(self._generate_youtube_tags(topic, channel=channel)),
                 "chapters": ("0:00 Introduction\n0:10 Pro Argument\n0:35 Counter Argument\n0:50 Verdict"
                             if is_short else
                             "0:00 Introduction\n0:30 Pro Argument\n1:30 Counter Argument\n2:30 Verdict & Conclusion"),
@@ -775,14 +773,16 @@ FOLLOW US:
 Disclaimer: Arguments generated by AI for educational purposes only.
 """.strip()
             chapters = "0:00 Introduction\n0:30 Pro Argument\n1:30 Counter Argument\n2:30 Verdict & Conclusion"
+
         print(f"[YTMetadata]   • [debate/{fmt}] Title: {title}")
 
-        tags = [
+        raw_tags = [
             topic.lower(), f"{topic.lower()} debate", f"{topic.lower()} analysis",
             "AI debate", "artificial intelligence", "tech debate", "pro vs con",
             "AI analysis", "future of work", "technology debate",
             channel, f"@{channel}", "data driven", "tech trends",
-        ][:25]
+        ]
+        tags = self._clean_tags(raw_tags)
 
         return {
             "title": title,
@@ -791,10 +791,8 @@ Disclaimer: Arguments generated by AI for educational purposes only.
             "chapters": chapters,
         }
 
-    # ── Metadata file writer ──────────────────────────────────────────────────
-
     def _write_metadata_files(self, topic, title, description, tags, chapters,
-                              output_dir, fmt=" ", lang_list=None, scraped_from_yt: bool = False) -> str:
+                              output_dir, fmt="", lang_list=None, scraped_from_yt: bool = False) -> str:
         if lang_list is None:
             lang_list = LANGUAGES[:35]
         lbl = fmt if fmt else "Video"
@@ -804,10 +802,11 @@ Disclaimer: Arguments generated by AI for educational purposes only.
         en_json = os.path.join(md_dir, "en.json")
         if not os.path.exists(en_json):
             with open(en_json, "w", encoding="utf-8") as f:
+                # ✅ FIXED: Keys WITHOUT trailing spaces
                 json.dump({"title": title, "description": description, "tags": tags,
-                           "chapters": chapters, "category": "Science & Technology",
-                           "language": "en", "created_at": datetime.now().isoformat(),
-                           "scraped_from_youtube": scraped_from_yt},
+                            "chapters": chapters, "category": "Science & Technology",
+                            "language": "en", "created_at": datetime.now().isoformat(),
+                            "scraped_from_youtube": scraped_from_yt},
                           f, indent=2, ensure_ascii=False)
             print(f"[YTMetadata]   Saved: YT/{lbl}/MD/en.json")
         else:
@@ -845,8 +844,6 @@ Disclaimer: Arguments generated by AI for educational purposes only.
 
         return f"[{lbl}] {ok+2}/{len(lang_list)+2} files in YT/{lbl}/MD/"
 
-    # ── Standard metadata generators ─────────────────────────────────────────
-
     def _generate_youtube_title(self, topic, start_year, end_year, channel="PlayOwnAi") -> str:
         t = [
             f"{topic} Race {start_year}-{end_year}: Complete Evolution & Trends",
@@ -873,13 +870,14 @@ Disclaimer: Educational content. Data compiled from public sources.
 """.strip()
 
     def _generate_youtube_tags(self, topic, channel="PlayOwnAi") -> list:
-        return ([
+        raw_tags = [
             "data visualization", "market analysis", "tech trends",
             "bar chart race", "data animation", channel,
             topic.lower(), f"{topic.lower()} trends", f"{topic.lower()} comparison",
             f"{topic.lower()} evolution", f"{topic.lower()} analysis",
             str(datetime.now().year), "trend analysis", "visualization",
-        ])[:25]
+        ]
+        return self._clean_tags(raw_tags, max_words=3)
 
     def _generate_youtube_chapters(self, start_year, end_year, video_duration) -> str:
         total = end_year - start_year + 1
@@ -892,27 +890,16 @@ Disclaimer: Educational content. Data compiled from public sources.
         lines.append(f"{ts//60:02d}:{ts%60:02d} Conclusion")
         return "\n".join(lines)
 
-    # ── Thumbnail generator ───────────────────────────────────────────────────
-
     def _generate_thumbnails(self, topic, start_year, end_year, output_dir, clean,
                              video_formats, animation_video_formats,
                              csv_path="", channel="PlayOwnAi", video_style=None,
                              scraped_metadata=None) -> str:
-        """
-        Save thumbnails to:
-          yt_id     → YT/yt_id/{real_fmt}/Th/{title_slug}.png|jpg
-          debate    → YT/debate/{real_fmt}/Th/{clean}.png|jpg
-          animation → YT/{real_fmt}/Th/{clean}.png|jpg
-          direct    → YT/{fmt}/Th/{clean}.png|jpg
-        """
         if not video_style:
             video_style = []
 
-        # In ytid mode — use real scraped title for display + slug for filename
         _is_ytid = (scraped_metadata is not None)
         if _is_ytid and scraped_metadata.get('title'):
             display_topic = scraped_metadata['title']
-            # Build a clean slug from the first 5 words of the title
             import re as _re
             _words = _re.findall(r'[A-Za-z0-9]+', display_topic)[:5]
             th_clean = '_'.join(_words) if _words else clean
@@ -928,26 +915,22 @@ Disclaimer: Educational content. Data compiled from public sources.
         debate_targets = []
         bar_targets = []
 
-        # ── YT_ID MODE ────────────────────────────────────────────────────────
         if "yt_id" in video_formats or "yt_id" in video_style:
             for rf in animation_video_formats:
                 debate_targets.append(
                     (os.path.join(output_dir, "YT", "yt_id", rf, "Th"), rf)
                 )
 
-        # ── DEBATE MODE ───────────────────────────────────────────────────────
         if "debate" in video_formats or "debate" in video_style:
             for rf in animation_video_formats:
                 debate_targets.append(
                     (os.path.join(output_dir, "YT", "debate", rf, "Th"), rf)
                 )
 
-        # ── ANIMATION MODE ────────────────────────────────────────────────────
         if "animation" in video_formats or "animation" in video_style:
             for rf in animation_video_formats:
                 bar_targets.append(os.path.join(output_dir, "YT", rf, "Th"))
 
-        # ── DIRECT MODE ───────────────────────────────────────────────────────
         direct_fmts = [f for f in video_formats if f in {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}]
         if direct_fmts and not (debate_targets or bar_targets):
             for fmt in direct_fmts:
@@ -975,13 +958,11 @@ Disclaimer: Educational content. Data compiled from public sources.
                     print(f"[YTMetadata]   Exists: {rel}")
             saved.append(os.path.relpath(th_dir, output_dir))
 
-        # ── Render debate/yt_id thumbnails (no CSV) ───────────────────────────
         for th_dir, real_fmt in debate_targets:
             is_short = real_fmt in ("Shorts", "ShortsHD", "Shorts4K")
             img = self._render_debate_thumbnail(display_topic, output_dir, channel, is_short=is_short)
             _save_img(img, th_dir)
 
-        # ── Render bar-race thumbnails (need CSV) ─────────────────────────────
         if bar_targets:
             csv_data = None
             for cp in [csv_path, f"output/{clean}.csv"]:
@@ -1057,7 +1038,7 @@ Disclaimer: Educational content. Data compiled from public sources.
             words = text.split()
             lines, cur = [], ""
             for w in words:
-                test = (cur + "  " + w).strip()
+                test = (cur + " " + w).strip()
                 bb = draw.textbbox((0, 0), test, font=font)
                 if bb[2] - bb[0] <= max_w:
                     cur = test
@@ -1082,19 +1063,18 @@ Disclaimer: Educational content. Data compiled from public sources.
                         raw = re.sub(r"^\s*[-*]\s+", " ", raw, flags=re.MULTILINE)
                         raw = re.sub(r"\*+", " ", raw)
                         raw = re.sub(r"\b[A-Z][A-Z\s]{3,}:\s*", " ", raw)
-                        raw = re.sub(r"\n{2,}", "   ", raw).strip()
+                        raw = re.sub(r"\n{2,}", " ", raw).strip()
                         sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", raw)
                                  if len(s.strip()) > 15]
-                        return "   ".join(sents[:n_sent])
+                        return " ".join(sents[:n_sent])
                     except Exception:
                         pass
-            return " "
+            return ""
 
         pro_txt = _read_snippet("propose") or "AI automation increasingly handles routine coding tasks."
         con_txt = _read_snippet("oppose") or "Human creativity and problem-solving remain irreplaceable."
         dec_txt = _read_snippet("decide") or "A nuanced transition is underway — adapt or be left behind."
 
-        # BADGE: top-left
         badge_f = _font(38)
         badge_label = "AI DEBATE"
         bb = draw.textbbox((0, 0), badge_label, font=badge_f)
@@ -1102,7 +1082,6 @@ Disclaimer: Educational content. Data compiled from public sources.
         draw.rounded_rectangle([(40, 38), (40 + bw, 38 + bh)], radius=14, fill=(40, 60, 160))
         draw.text((40 + 20, 38 + 10), badge_label, fill=WHITE, font=badge_f)
 
-        # fmt badge: top-right
         fmt_label = "#SHORTS" if is_short else "HD"
         fmt_col = GOLD if is_short else CYAN
         fmt_f = _font(38)
@@ -1112,7 +1091,6 @@ Disclaimer: Educational content. Data compiled from public sources.
         draw.rounded_rectangle([(W - 40 - fw, 38), (W - 40, 38 + fh)], radius=14, fill=(30, 30, 60))
         draw.text((W - 40 - fw + 20, 38 + 10), fmt_label, fill=fmt_col, font=fmt_f)
 
-        # TOPIC title
         title_f = _font(72)
         ty = 120
         title_lines = _wrap_text(topic, title_f, W - 80, max_lines=3)
@@ -1123,7 +1101,6 @@ Disclaimer: Educational content. Data compiled from public sources.
             ty += h + 10
         ty += 18
 
-        # horizontal rule
         draw.line([(80, ty), (W - 80, ty)], fill=(60, 65, 100), width=2)
         ty += 24
 
@@ -1216,7 +1193,7 @@ Disclaimer: Educational content. Data compiled from public sources.
         lf, mf, sf = _font(80), _font(55), _font(36)
         ty = 60
         words = topic.split()
-        for line in ["   ".join(words[:4]), "   ".join(words[4:])]:
+        for line in [" ".join(words[:4]), " ".join(words[4:])]:
             if not line:
                 continue
             bb = draw.textbbox((0, 0), line, font=lf)
@@ -1247,17 +1224,8 @@ Disclaimer: Educational content. Data compiled from public sources.
         draw.text(((W - (bb[2] - bb[0])) // 2, H - 60), footer, fill=pri_col, font=sf)
         return img
 
-    # ── CC translator ─────────────────────────────────────────────────────────
-
     def _translate_cc_files(self, output_dir, video_formats,
                             lang_list=None, animation_video_formats=None, video_style=None) -> str:
-        """
-        Translate CC source files.
-        yt_id   → YT/yt_id/{real_fmt}/CC/
-        debate  → YT/debate/{real_fmt}/CC/
-        animation → YT/{real_fmt}/CC/
-        direct  → YT/{fmt}/CC/
-        """
         if not video_style:
             video_style = []
         if lang_list is None:
@@ -1273,11 +1241,7 @@ Disclaimer: Educational content. Data compiled from public sources.
         report = []
         cc_sources = []
 
-        # ── YT_ID MODE ────────────────────────────────────────────────────────
-        # Read directly from {title_slug}_cc_en.txt — avoids duplicate YT/Shorts/CC/ folder.
-        # en.txt + translated langs all go into YT/yt_id/{fmt}/CC/ only.
         if "yt_id" in video_formats or "yt_id" in video_style:
-            # Find the slug-named cc file: {anything}_cc_en.txt or fallback cc_en.txt
             import glob as _cc_glob
             _cc_candidates = (
                 sorted(_cc_glob.glob(os.path.join(output_dir, "*_cc_en.txt"))) +
@@ -1286,14 +1250,13 @@ Disclaimer: Educational content. Data compiled from public sources.
             _cc_src = next((p for p in _cc_candidates if os.path.exists(p)), None)
             if _cc_src:
                 for real_fmt in animation_video_formats:
-                    cc_dir  = os.path.join(output_dir, "YT", "yt_id", real_fmt, "CC")
+                    cc_dir = os.path.join(output_dir, "YT", "yt_id", real_fmt, "CC")
                     display = f"yt_id/{real_fmt}"
                     cc_sources.append((_cc_src, cc_dir, display))
                     print(f"[YTMetadata] yt_id CC source: {os.path.basename(_cc_src)} → {display}")
             else:
                 print(f"[YTMetadata] ⚠️  No CC source file found — yt_id CC translations skipped")
 
-        # ── DEBATE MODE ───────────────────────────────────────────────────────
         if "debate" in video_formats or "debate" in video_style:
             for real_fmt in animation_video_formats:
                 patterns = [
@@ -1317,7 +1280,6 @@ Disclaimer: Educational content. Data compiled from public sources.
                 else:
                     print(f"[YTMetadata] No CC file for debate/{real_fmt} (optional)")
 
-        # ── ANIMATION/DIRECT MODE ─────────────────────────────────────────────
         if "animation" in video_formats or "animation" in video_style:
             for real_fmt in animation_video_formats:
                 merged = []
@@ -1337,9 +1299,6 @@ Disclaimer: Educational content. Data compiled from public sources.
                     cc_sources.append((merged[0], cc_dir, display))
                     print(f"[YTMetadata] Found CC [{real_fmt}]: {os.path.basename(merged[0])}")
 
-        # Standard cc_en.txt fallback — only for animation/direct pipelines.
-        # Skip when video_style contains yt_id/ytid/debate — those pipelines
-        # already wrote cc_en.txt to their own YT/{pipeline}/{fmt}/CC/ path above.
         _active_styles = set(
             ("yt_id" if s in ("ytid", "yt_id") else s)
             for s in (video_style or [])
@@ -1360,7 +1319,6 @@ Disclaimer: Educational content. Data compiled from public sources.
             print(f"[YTMetadata] {msg}")
             return msg
 
-        # Normalise tuples — all entries have 3 elements
         cc_sources = [(s[0], s[1], s[2]) for s in cc_sources]
 
         for src_path, cc_dir, display in cc_sources:
@@ -1403,8 +1361,6 @@ Disclaimer: Educational content. Data compiled from public sources.
         print(f"[YTMetadata] {summary}")
         return summary
 
-    # ── Legacy helper ─────────────────────────────────────────────────────────
-
     def _generate_youtube_metadata(self, topic, start_year, end_year, video_duration,
                                    output_dir, clean_filename,
                                    channel="PlayOwnAi", channel_lower="playownai",
@@ -1413,11 +1369,9 @@ Disclaimer: Educational content. Data compiled from public sources.
         desc = self._generate_youtube_description(
             topic, start_year, end_year, video_duration,
             channel=channel, channel_lower=channel_lower, website=website)
-        tags = self._generate_youtube_tags(topic, channel=channel)
+        tags = self._clean_tags(self._generate_youtube_tags(topic, channel=channel))
         ch = self._generate_youtube_chapters(start_year, end_year, video_duration)
         return self._write_metadata_files(topic, title, desc, tags, ch, output_dir)
-
-    # ── Migration ─────────────────────────────────────────────────────────────
 
     def _migrate_old_yt_structure(self, output_dir, video_formats):
         import glob as _glob, re as _re
@@ -1464,7 +1418,6 @@ Disclaimer: Educational content. Data compiled from public sources.
         if moved:
             print(f"[YTMetadata] Migration: {moved} files moved")
 
-        # Rename stale YT/Debate/ → YT/debate/
         import shutil as _sh
         old_cap = os.path.join(yt_dir, "Debate")
         new_low = os.path.join(yt_dir, "debate")
@@ -1486,7 +1439,6 @@ Disclaimer: Educational content. Data compiled from public sources.
                 _sh.rmtree(old_cap)
                 print(f"[YTMetadata] Merged YT/Debate/ into YT/debate/")
 
-        # Rename stale YT/YT_ID/ → YT/yt_id/
         old_ytid_cap = os.path.join(yt_dir, "YT_ID")
         new_ytid_low = os.path.join(yt_dir, "yt_id")
         if os.path.exists(old_ytid_cap):
@@ -1495,7 +1447,6 @@ Disclaimer: Educational content. Data compiled from public sources.
                 _sh.rmtree(old_ytid_cap)
                 print(f"[YTMetadata] Renamed: YT/YT_ID/ → YT/yt_id/")
 
-        # Rename stale TH/ → Th/
         if os.path.exists(new_low):
             for fmt_entry in os.scandir(new_low):
                 if not fmt_entry.is_dir():
@@ -1506,7 +1457,6 @@ Disclaimer: Educational content. Data compiled from public sources.
                     _sh.move(old_th, new_th)
                     print(f"[YTMetadata] Renamed: YT/debate/{fmt_entry.name}/TH → Th")
 
-        # Migrate old flat YT/debate/MD/ → YT/debate/{fmt}/MD/
         old_debate_md = os.path.join(yt_dir, "debate", "MD")
         if os.path.exists(old_debate_md):
             real_fmts = [f for f in video_formats if f in {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}] or ["HD"]
@@ -1532,8 +1482,6 @@ Disclaimer: Educational content. Data compiled from public sources.
                 pass
         if moved:
             print(f"[YTMetadata] Migration total: {moved} files moved")
-
-    # ── Cleanup ───────────────────────────────────────────────────────────────
 
     def _cleanup_and_rename(self, output_dir, video_formats, channel, topic):
         import re, glob as _glob
@@ -1565,7 +1513,7 @@ Disclaimer: Educational content. Data compiled from public sources.
                 os.rename(src, dst)
                 print(f"[YTMetadata] Renamed: {os.path.basename(src)} → {os.path.basename(dst)}")
             else:
-                print(f"[YTMetadata]    No source found for fmt={fmt}")
+                print(f"[YTMetadata]   No source found for fmt={fmt}")
 
         for fname in os.listdir(output_dir):
             fpath = os.path.join(output_dir, fname)
