@@ -12,22 +12,21 @@ Features:
 - Saves fb_upload_log.json + fb_upload_summary.json
 
 Requirements:
-    pip install requests
+- pip install requests
 
 Facebook Setup:
-    1. Create a Facebook App at developers.facebook.com
-    2. Add "Pages" product and request publish_video permission
-    3. Generate a Page Access Token (long-lived, not user token)
-    4. Set page_id  = your Facebook Page numeric ID
-    5. Set page_access_token = your long-lived Page Access Token
+1. Create a Facebook App at developers.facebook.com
+2. Add "Pages" product and request publish_video permission
+3. Generate a Page Access Token (long-lived, not user token)
+4. Set page_id = your Facebook Page numeric ID
+5. Set page_access_token = your long-lived Page Access Token
 
-    Store in fb_credentials.json:
-    {
-        "page_id": "123456789",
-        "page_access_token": "EAAxxxxxxx..."
-    }
+Store in fb_credentials.json:
+{
+    "page_id": "123456789",
+    "page_access_token": "EAAxxxxxxx..."
+}
 """
-
 import os
 import json
 import time
@@ -36,32 +35,30 @@ from typing import Type
 from pydantic import BaseModel, Field
 from crewai.tools import BaseTool
 
-GRAPH_API_VERSION  = "v19.0"
-GRAPH_VIDEO_URL    = f"https://graph-video.facebook.com/{GRAPH_API_VERSION}"
-GRAPH_API_URL      = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
-CHUNK_SIZE         = 10 * 1024 * 1024   # 10 MB chunks
-MAX_RETRIES        = 3
-RETRY_BACKOFF      = [5, 15, 30]
+GRAPH_API_VERSION = "v19.0"
+GRAPH_VIDEO_URL = f"https://graph-video.facebook.com/{GRAPH_API_VERSION}"
+GRAPH_API_URL = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
+CHUNK_SIZE = 10 * 1024 * 1024  # 10 MB chunks
+MAX_RETRIES = 3
+RETRY_BACKOFF = [5, 15, 30]  # seconds
 
 
 # ── Input Schema ──────────────────────────────────────────────────────────────
-
 class FBUploadToolInput(BaseModel):
     """Input schema for FBUploadTool."""
-    topic:               str  = Field(...,   description="Topic name")
-    output_dir:          str  = Field(...,   description="Full path to output/Topic directory")
-    video_formats:       list = Field(...,   description="Formats to upload: ['Shorts', 'HD']")
+    topic: str = Field(..., description="Topic name")
+    output_dir: str = Field(..., description="Full path to output/Topic directory")
+    video_formats: list = Field(..., description="Formats to upload: ['Shorts', 'HD']")
     upload_facebook_video: bool = Field(default=False, description="Master switch — must be true to upload")
-    channel:             str  = Field(default="PlayOwnAi", description="Channel prefix for filename lookup")
-    privacy_status:      str  = Field(default="SELF",      description="EVERYONE | FRIENDS | SELF (default=SELF=private)")
-    credentials_file:    str  = Field(default="fb_credentials.json", description="Path to Facebook credentials JSON")
-    dry_run:             bool = Field(default=False, description="Validate files/metadata without uploading")
+    channel: str = Field(default="PlayOwnAi", description="Channel prefix for filename lookup")
+    privacy_status: str = Field(default="SELF", description="EVERYONE | FRIENDS | SELF (default=SELF=private)")
+    credentials_file: str = Field(default="fb_credentials.json", description="Path to Facebook credentials JSON")
+    dry_run: bool = Field(default=False, description="Validate files/metadata without uploading")
 
 
 # ── Tool ──────────────────────────────────────────────────────────────────────
-
 class FBUploadTool(BaseTool):
-    name:        str = "fb_upload_tool"
+    name: str = "fb_upload_tool"
     description: str = (
         "Uploads debate videos to a Facebook Page. "
         "Shorts → Facebook Reels. HD → Facebook Video. "
@@ -80,7 +77,6 @@ class FBUploadTool(BaseTool):
         credentials_file: str = "fb_credentials.json",
         dry_run: bool = False,
     ) -> str:
-
         if not upload_facebook_video:
             return "🔇 Facebook upload skipped (upload_facebook_video=false)."
 
@@ -94,7 +90,7 @@ class FBUploadTool(BaseTool):
         if not creds:
             return f"❌ Credentials not found: {credentials_file}\nCreate it with: {{\"page_id\": \"...\", \"page_access_token\": \"...\"}}"
 
-        page_id    = creds.get("page_id", "").strip()
+        page_id = creds.get("page_id", "").strip()
         page_token = creds.get("page_access_token", "").strip()
         if not page_id or not page_token:
             return "❌ fb_credentials.json must contain 'page_id' and 'page_access_token'."
@@ -104,7 +100,7 @@ class FBUploadTool(BaseTool):
             print(f"[FBUpload] 🧪 DRY RUN — no actual uploads")
 
         results = []
-        errors  = []
+        errors = []
 
         for fmt in video_formats:
             print(f"\n[FBUpload] ── Format: {fmt} ──────────────────")
@@ -133,8 +129,8 @@ class FBUploadTool(BaseTool):
 
             # ── Load metadata ─────────────────────────────────────────────────
             metadata = self._load_metadata(output_dir, fmt, topic)
-            title    = self._clean_text(metadata.get("title", topic))[:255]
-            desc     = self._build_description(metadata)
+            title = self._clean_text(metadata.get("title", topic))[:255]
+            desc = self._build_description(metadata)
 
             size_mb = os.path.getsize(video_path) / (1024 * 1024)
             upload_type = "Reel" if is_reel else "Video"
@@ -161,7 +157,6 @@ class FBUploadTool(BaseTool):
 
                 # ── Save log immediately ──────────────────────────────────────
                 self._save_log(log_path, video_id, video_path, fmt, privacy_status)
-
                 results.append(f"✅ {fmt}: Uploaded → {url}")
 
             except Exception as e:
@@ -179,7 +174,6 @@ class FBUploadTool(BaseTool):
         return "\n".join(lines)
 
     # ── Upload: standard video ────────────────────────────────────────────────
-
     def _upload_video(self, page_id, token, file_path, title, description, privacy):
         """Upload as a regular Facebook Page video (resumable)."""
         import requests
@@ -190,16 +184,16 @@ class FBUploadTool(BaseTool):
         start_r = requests.post(
             f"{GRAPH_VIDEO_URL}/{page_id}/videos",
             data={
-                "upload_phase":  "start",
-                "file_size":     file_size,
-                "access_token":  token,
+                "upload_phase": "start",
+                "file_size": file_size,
+                "access_token": token,
             },
             timeout=30,
         )
         start_r.raise_for_status()
-        start_data   = start_r.json()
+        start_data = start_r.json()
         upload_session_id = start_data.get("upload_session_id")
-        video_id          = start_data.get("video_id")
+        video_id = start_data.get("video_id")
         if not upload_session_id:
             raise RuntimeError(f"No upload_session_id: {start_data}")
         print(f"[FBUpload]   🆔 session={upload_session_id}  video_id={video_id}")
@@ -211,12 +205,12 @@ class FBUploadTool(BaseTool):
         finish_r = requests.post(
             f"{GRAPH_VIDEO_URL}/{page_id}/videos",
             data={
-                "upload_phase":    "finish",
+                "upload_phase": "finish",
                 "upload_session_id": upload_session_id,
-                "title":           title,
-                "description":     description,
-                "privacy":         json.dumps({"value": privacy}),
-                "access_token":    token,
+                "title": title,
+                "description": description,
+                "privacy": json.dumps({"value": privacy}),
+                "access_token": token,
             },
             timeout=60,
         )
@@ -228,7 +222,6 @@ class FBUploadTool(BaseTool):
         return video_id
 
     # ── Upload: Reels ─────────────────────────────────────────────────────────
-
     def _upload_reel(self, page_id, token, file_path, title, description, privacy):
         """Upload as a Facebook Reel."""
         import requests
@@ -239,14 +232,14 @@ class FBUploadTool(BaseTool):
         init_r = requests.post(
             f"{GRAPH_API_URL}/{page_id}/video_reels",
             data={
-                "upload_phase":  "start",
-                "access_token":  token,
+                "upload_phase": "start",
+                "access_token": token,
             },
             timeout=30,
         )
         init_r.raise_for_status()
         init_data = init_r.json()
-        video_id  = init_data.get("video_id")
+        video_id = init_data.get("video_id")
         if not video_id:
             raise RuntimeError(f"No video_id from Reel init: {init_data}")
         print(f"[FBUpload]   🎬 Reel video_id={video_id}")
@@ -257,12 +250,12 @@ class FBUploadTool(BaseTool):
             upload_r = requests.post(
                 upload_url,
                 headers={
-                    "Authorization":       f"OAuth {token}",
-                    "offset":              "0",
-                    "file_size":           str(file_size),
+                    "Authorization": f"OAuth {token}",
+                    "offset": "0",
+                    "file_size": str(file_size),
                 },
                 data=f,
-                timeout=600,
+                timeout=900,  # ✅ Increased from 600 to 900 for large files
             )
         upload_r.raise_for_status()
 
@@ -270,13 +263,13 @@ class FBUploadTool(BaseTool):
         pub_r = requests.post(
             f"{GRAPH_API_URL}/{page_id}/video_reels",
             data={
-                "upload_phase":  "finish",
-                "video_id":      video_id,
-                "title":         title,
-                "description":   description,
-                "privacy":       json.dumps({"value": privacy}),
-                "video_state":   "PUBLISHED",
-                "access_token":  token,
+                "upload_phase": "finish",
+                "video_id": video_id,
+                "title": title,
+                "description": description,
+                "privacy": json.dumps({"value": privacy}),
+                "video_state": "PUBLISHED",
+                "access_token": token,
             },
             timeout=60,
         )
@@ -288,12 +281,12 @@ class FBUploadTool(BaseTool):
         return video_id
 
     # ── Chunked transfer ──────────────────────────────────────────────────────
-
     def _transfer_chunks(self, page_id, token, session_id, file_path, file_size):
+        """Transfer video in chunks with retry logic."""
         import requests
 
-        offset  = 0
-        t0      = time.time()
+        offset = 0
+        t0 = time.time()
 
         with open(file_path, "rb") as f:
             while offset < file_size:
@@ -306,13 +299,13 @@ class FBUploadTool(BaseTool):
                         r = requests.post(
                             f"{GRAPH_VIDEO_URL}/{page_id}/videos",
                             data={
-                                "upload_phase":      "transfer",
+                                "upload_phase": "transfer",
                                 "upload_session_id": session_id,
-                                "start_offset":      offset,
-                                "access_token":      token,
+                                "start_offset": offset,
+                                "access_token": token,
                             },
                             files={"video_file_chunk": ("chunk", chunk, "application/octet-stream")},
-                            timeout=120,
+                            timeout=300,  # ✅ Increased from 120 to 300 seconds
                         )
                         r.raise_for_status()
                         resp = r.json()
@@ -331,7 +324,6 @@ class FBUploadTool(BaseTool):
                             raise RuntimeError(f"Chunk upload failed after {MAX_RETRIES} attempts: {e}")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
-
     def _load_credentials(self, credentials_file: str) -> dict:
         for path in [credentials_file, os.path.join(os.getcwd(), credentials_file)]:
             if os.path.exists(path):
@@ -342,12 +334,21 @@ class FBUploadTool(BaseTool):
         return {}
 
     def _find_video(self, output_dir, channel, topic, fmt) -> str:
+        """Find video file with multiple pattern support."""
         import glob as _glob
+
         topic_slug = "_".join(re.findall(r"\w+", topic)[:4]) if topic else "Video"
-        # Exact name first
-        exact = os.path.join(output_dir, f"{channel}_{topic_slug}_{fmt}.mp4")
+
+        # Exact name first (debate merge output)
+        exact = os.path.join(output_dir, f"{channel}_Debate_{topic_slug}_{fmt}.mp4")
         if os.path.exists(exact):
             return exact
+
+        # Standard merge output
+        exact2 = os.path.join(output_dir, f"{channel}_{topic_slug}_{fmt}.mp4")
+        if os.path.exists(exact2):
+            return exact2
+
         # Glob fallback (debate videos have language suffix e.g. _HD_En.mp4)
         seg_pfx = ("intro_", "bar_race_", "definition_video_", "_norm_")
         candidates = []
@@ -371,14 +372,14 @@ class FBUploadTool(BaseTool):
         return {"title": topic, "description": topic, "tags": [], "chapters": ""}
 
     def _build_description(self, metadata) -> str:
-        desc     = metadata.get("description", "")
+        desc = metadata.get("description", "")
         chapters = metadata.get("chapters", "")
-        tags     = metadata.get("tags", [])
-        parts    = [desc]
+        tags = metadata.get("tags", [])
+        parts = [desc]
         if chapters:
             parts.append(f"\n\nCHAPTERS:\n{chapters}")
         if tags:
-            hashtags = " ".join(f"#{t.replace(' ','')}" for t in tags[:10] if t)
+            hashtags = "  ".join(f"#{t.replace(' ', '')}" for t in tags[:10] if t)
             parts.append(f"\n\n{hashtags}")
         return self._clean_text("\n".join(parts))[:5000]
 
@@ -394,13 +395,13 @@ class FBUploadTool(BaseTool):
     def _save_log(self, log_path, video_id, video_path, fmt, privacy):
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         log = {
-            "video_id":    video_id,
-            "video_url":   f"https://www.facebook.com/video/{video_id}",
-            "video_file":  os.path.basename(video_path),
-            "format":      fmt,
-            "privacy":     privacy,
+            "video_id": video_id,
+            "video_url": f"https://www.facebook.com/video/{video_id}",
+            "video_file": os.path.basename(video_path),
+            "format": fmt,
+            "privacy": privacy,
             "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "platform":    "facebook",
+            "platform": "facebook",
         }
         with open(log_path, "w") as f:
             json.dump(log, f, indent=2)
@@ -411,21 +412,21 @@ class FBUploadTool(BaseTool):
         os.makedirs(yt_dir, exist_ok=True)
 
         summary = {
-            "topic":       topic,
+            "topic": topic,
             "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "total":       len(results) + len(errors),
-            "success":     len(results),
-            "failed":      len(errors),
-            "uploads":     [],
+            "total": len(results) + len(errors),
+            "success": len(results),
+            "failed": len(errors),
+            "uploads": [],
         }
         for r in results:
             fmt_match = re.search(r"(Shorts|HD|2K|4K|8K)", r)
             fmt = fmt_match.group(1) if fmt_match else "unknown"
             url_match = re.search(r"https://\S+", r)
             summary["uploads"].append({
-                "format":    fmt,
+                "format": fmt,
                 "video_url": url_match.group(0) if url_match else "",
-                "status":    "success" if r.startswith("✅") else "skipped",
+                "status": "success" if r.startswith("✅") else "skipped",
             })
 
         json_path = os.path.join(yt_dir, "fb_upload_summary.json")
