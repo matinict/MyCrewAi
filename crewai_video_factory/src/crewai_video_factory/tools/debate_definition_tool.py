@@ -32,6 +32,8 @@ class DebateDefinitionToolInput(BaseModel):
     channel: str = Field(default="PlayOwnAi", description="Channel name for branding")
     debate_max_chars: int = Field(default=5000, description="Hard cap on each debate argument in characters")
     lang_suffix: str = Field(default="En", description="Language suffix for output .md filenames")
+    use_label_mappings: bool = Field(default=False, description="Apply abbreviation map only to -m.md (Shorts) files")
+    force_regenerate: bool = Field(default=False, description="Force rewrite of all .md files even if they already exist (use to fix stale/corrupt files)")
 
 
 class DebateDefinitionTool(BaseTool):
@@ -100,6 +102,8 @@ class DebateDefinitionTool(BaseTool):
         channel: str = "PlayOwnAi",
         debate_max_chars: int = 5000,
         lang_suffix: str = "En",
+        use_label_mappings: bool = False,
+        force_regenerate: bool = False,
     ) -> str:
 
         if not debate_definition_enabled:
@@ -114,7 +118,7 @@ class DebateDefinitionTool(BaseTool):
             os.path.exists(p) and os.path.getsize(p) > 0
             for p in list(_md_paths.values()) + list(_mobile_paths.values())
         )
-        if _all_exist:
+        if _all_exist and not force_regenerate:
             _sizes  = {r: os.path.getsize(p) for r, p in _md_paths.items()}
             _msizes = {r: os.path.getsize(p) for r, p in _mobile_paths.items()}
             print(f"[DebateDef] All 6 debate files exist ({_lang}) - skipping")
@@ -123,6 +127,8 @@ class DebateDefinitionTool(BaseTool):
                 for r in ('propose', 'oppose', 'decide')
             ]
             return f"Debate files exist ({_lang}) - skipping\n" + "\n".join(lines)
+        if _all_exist and force_regenerate:
+            print(f"[DebateDef] force_regenerate=True — overwriting all 6 files ({_lang})")
 
         # ── PARTIAL SKIP: track which -m.md files still need writing ─────────
         _mobile_needed = {
@@ -157,16 +163,16 @@ class DebateDefinitionTool(BaseTool):
         for role, raw in all_texts.items():
             orig_chars = len(raw)
 
-            # Full / HD version
-            cleaned = self._clean_debate_text(raw, debate_max_chars)
+            # Full / HD version — abbreviations always OFF for HD
+            cleaned = self._clean_debate_text(raw, debate_max_chars, apply_abbrev=False)
             with open(_md_paths[role], 'w', encoding='utf-8') as f:
                 f.write(cleaned)
             print(f"[DebateDef] Saved {_md_paths[role]} ({len(cleaned)} chars)")
 
-            # Mobile / Shorts version
+            # Mobile / Shorts version — abbreviations ON only when use_label_mappings=True
             mobile_len = 0
             if role in _mobile_needed:
-                mobile = self._make_mobile(raw, mobile_caps[role])
+                mobile = self._make_mobile(raw, mobile_caps[role], apply_abbrev=use_label_mappings)
                 with open(_mobile_paths[role], 'w', encoding='utf-8') as f:
                     f.write(mobile)
                 mobile_len = len(mobile)
@@ -209,17 +215,23 @@ class DebateDefinitionTool(BaseTool):
                     return f.read().strip()
         return ''
 
-    def _clean_debate_text(self, text: str, max_chars: int = 5000) -> str:
-        """Full/HD compression: abbreviate -> strip aux -> collapse -> hard cap."""
-        text = self._apply_abbreviations(text)
+    def _clean_debate_text(self, text: str, max_chars: int = 5000, apply_abbrev: bool = False) -> str:
+        """Full/HD compression: pre-clean artifacts -> optionally abbreviate -> strip aux -> collapse -> hard cap.
+        apply_abbrev is always False for HD — full names are preserved."""
+        text = self._pre_clean(text)
+        if apply_abbrev:
+            text = self._apply_abbreviations(text)
         text = self._strip_aux_and_articles(text)
         text = self._collapse_whitespace(text)
         return self._hard_cap(text, max_chars)
 
-    def _make_mobile(self, text: str, max_chars: int = 2000) -> str:
-        """Shorts compression: keep ALL args, word-safe + logic-safe trim."""
+    def _make_mobile(self, text: str, max_chars: int = 2000, apply_abbrev: bool = False) -> str:
+        """Shorts compression: keep ALL args, word-safe + logic-safe trim.
+        apply_abbrev=True only when use_label_mappings=True in data.json."""
         max_chars = 1200 # 🔒 hard limit
-        text = self._apply_abbreviations(text)
+        text = self._pre_clean(text)
+        if apply_abbrev:
+            text = self._apply_abbreviations(text)
         text = self._strip_aux_and_articles(text)
         text = self._collapse_whitespace(text)
         if len(text) <= max_chars:
@@ -289,19 +301,59 @@ class DebateDefinitionTool(BaseTool):
             patterns.extend(pairs)
         return patterns
 
-    def _apply_abbreviations(self, text: str) -> str:
-        """Apply all abbreviations and patterns from label_mappings.json only.
-        1. debate_labels  — plain string replacements, longest key first
-        2. debate_regex_patterns — capture-group regex, in declared order"""
+    @staticmethod
+    def _pre_clean(text: str) -> str:
+        """Strip known artifact patterns that should NEVER reach the label map.
+        Runs before _apply_abbreviations on every input text.
+        - (None–None), (None-None), (–), standalone None tokens
+        - Stray bare parentheses left after prior cleanups
+        """
+        # Remove date-range placeholders like "(None–None)" or "(2020–None)"
+        text = re.sub(r'\(\s*(?:None|[0-9]{4})\s*[–\-]\s*(?:None|[0-9]{4})\s*\)\s*', '', text)
+        # Remove "(–)" or "( – )" standalone
+        text = re.sub(r'\(\s*[–\-]\s*\)\s*', '', text)
+        # Remove bare "None" tokens (whole word only, not inside other words)
+        text = re.sub(r'\bNone\b\s*', '', text)
+        # Remove stray bare parens left over (single unmatched)
+        text = re.sub(r'(?<!\w)\((?!\S)', '', text)
+        text = re.sub(r'(?<!\S)\)(?!\w)', '', text)
+        return text
 
-        # 1. Plain string mappings (longest key first prevents partial matches)
-        for src, dst in self._debate_labels():
+    def _apply_abbreviations(self, text: str) -> str:
+        """Apply abbreviations from label_mappings.json.
+
+        Pass 1 — HEADER labels (all-caps or Title Case keys, multi-word first):
+            Matched with re.IGNORECASE=False on ALL-CAPS keys so 'OPENING STATEMENT'→'Opening'
+            does NOT then get re-matched by the lowercase 'opening'→'start' entry.
+
+        Pass 2 — BODY labels (single-word, lowercase keys):
+            Applied with word-boundary matching, IGNORECASE=True.
+
+        Pass 3 — Regex patterns from debate_regex_patterns.
+        """
+        labels = self._debate_labels()  # sorted longest-key first
+
+        # Split into header keys (contain uppercase) vs body keys (all lowercase)
+        # Header keys: any key that has at least one uppercase letter → exact case match
+        # Body keys: all-lowercase keys → word-boundary + IGNORECASE
+        header_keys = [(s, d) for s, d in labels if s != s.lower()]
+        body_keys   = [(s, d) for s, d in labels if s == s.lower()]
+
+        # Pass 1: headers — exact case (no IGNORECASE) to prevent downstream chaining
+        for src, dst in header_keys:
+            if ' ' in src or '-' in src:
+                text = re.sub(re.escape(src), dst, text)   # ← no IGNORECASE
+            else:
+                text = re.sub(r'\b' + re.escape(src) + r'\b', dst, text)  # no IGNORECASE
+
+        # Pass 2: body — IGNORECASE, word-boundary safe
+        for src, dst in body_keys:
             if ' ' in src or '-' in src:
                 text = re.sub(re.escape(src), dst, text, flags=re.IGNORECASE)
             else:
                 text = re.sub(r'\b' + re.escape(src) + r'\b', dst, text, flags=re.IGNORECASE)
 
-        # 2. Regex patterns with capture groups
+        # Pass 3: regex patterns with capture groups
         for pattern, replacement in self._regex_patterns():
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 

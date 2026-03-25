@@ -1,9 +1,9 @@
 {
-  "topic": "AI Dangerous for Humanity or Our Greatest Tool?",
+  "topic": "OpenClaw Agents Going Rogue — Exciting or Terrifying?",
   "start": null,
   "end": null,
   "granularity": "yearly",
-  "video_formats": ["Shorts" ],
+  "video_formats": ["HD",  "Shorts" ],
   "video_style": ["debate" ],
   "fps": 4.9,
   "video_fps": 30,
@@ -48,17 +48,17 @@
   "debate_config": {
     "use_label_mappings": true,
     "intro_slug": "One of the biggest debates in Ai tech right now",
-    "debate_definition_enabled": false,
+    "debate_definition_enabled": true,
     "debate_max_chars":8000,
     "llm_debate": "dashscope/qwen-plus",
-    "intro_enabled": false,
-    "debate_video_enabled": false,
+    "intro_enabled": true,
+    "debate_video_enabled": true,
     "debate_secs_per_line": 3.5,
     "debate_background_enabled": false,
     "debate_bg_opacity": 150,
     "debate_background_prompt": "futuristic digital debate arena, dark navy deep purple, abstract geometric circuit patterns, soft volumetric light beams, blurred bokeh background, cinematic, no text, no people, no faces",
     "image_gen_backend": "auto",
-    "debate_merge_enabled": false,
+    "debate_merge_enabled": true,
     "piper_voices": {
       "propose": {
         "model": "models/joe_medium.onnx",
@@ -90,10 +90,10 @@
 
   },
 
-  "metadata_prep": false,
+  "metadata_prep": true,
     "metadata_prep_config": {
-      "generate_youtube_metadata": false,
-      "generate_thumbnail": false,
+      "generate_youtube_metadata": true,
+      "generate_thumbnail": true,
       "yt_metadata_lang": "35",
       "yt_cc_lang": "35",
       "llm_youtube": "ollama/qwen2.5:latest"
@@ -103,13 +103,13 @@
   "publisher_config": {
       "llm_upload": "ollama/qwen2.5-coder:3b",
       "llm_embed": "ollama/nomic-embed-text:latest",
-      "yt_upload": false,
+      "yt_upload": true,
       "yt_upload_config": {
-          "upload_youtube_video": false,
+          "upload_youtube_video": true,
           "upload_dry_run": false,
           "upload_privacy": "private",
           "upload_category_id": "28",
-          "upload_cc": false,
+          "upload_cc": true,
           "upload_cc_lang": "35",
           "upload_md_lang": "35",
           "yt_pin_comment_gen": false,
@@ -117,17 +117,17 @@
           "upload_client_secrets_file": "input/client_secrets.json",
           "upload_token_file": "input/token.json"
       },
-      "fb_upload": true,
+      "fb_upload": false,
       "fb_upload_config": {
-          "upload_facebook_video": true,
+          "upload_facebook_video": false,
           "privacy_status": "SELF",
           "credentials_file": "input/fb_credentials.json"
       }
   },
 
-  "social": true,
+  "social": false,
   "social_config": {
-    "social_share_enabled": true,
+    "social_share_enabled": false,
     "social_share_dry_run": false,
     "social_platforms": ["LinkedIn", "Instagram", "Facebook"],
     "schedule_post": false,

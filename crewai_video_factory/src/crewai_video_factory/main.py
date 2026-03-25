@@ -28,7 +28,6 @@ logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
 warnings.filterwarnings("ignore", message=".*fastapi.*")
 warnings.filterwarnings("ignore", message=".*litellm.*proxy.*")
 
-import os
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"  # prevents proxy server import
 
 
@@ -489,21 +488,34 @@ def run():
         print(f"   🌍 MD langs:        {inputs.get('yt_metadata_lang', 35)} | CC langs: {inputs.get('yt_cc_lang', 20)}")
 
     # ── Publisher block ──────────────────────────────────────
-    pub_on = inputs.get('publisher', False)
-    fb_on  = inputs.get('fb_upload', False)
-    print(f"📤 Publisher:        {pub_on}")
-    if pub_on:
-        upload_on  = inputs.get('upload_youtube_video', False)
-        cc_only_on = inputs.get('upload_cc', False) and not upload_on
-        yt_upload_on = inputs.get('yt_upload', False)
-        print(f"   ▶️  YouTube Upload:  {upload_on or yt_upload_on}" +
-              (f"  [{inputs.get('upload_privacy','private')}]" if (upload_on or yt_upload_on) else ""))
+    # publisher = master switch for LLM-key hoisting + legacy upload_youtube_video flag.
+    # yt_upload and fb_upload are INDEPENDENT sub-blocks — they always display and
+    # queue regardless of the parent publisher switch value.
+    pub_on   = inputs.get('publisher', False)
+    fb_on    = inputs.get('fb_upload', False)
+    yt_on    = inputs.get('yt_upload', False)
+    print(f"📤 Publisher:        {pub_on}" +
+          ("  (LLM keys + legacy YT flag gated)" if pub_on else
+           "  ℹ️  LLM-key hoisting off — sub-blocks (yt_upload, fb_upload) operate independently"))
+
+    # ── YouTube upload sub-block — always shown ───────────────
+    upload_on    = inputs.get('upload_youtube_video', False)
+    cc_only_on   = inputs.get('upload_cc', False) and not upload_on
+    if yt_on:
+        print(f"   ▶️  YouTube Upload:  {upload_on or yt_on}" +
+              (f"  [{inputs.get('upload_privacy','private')}]" if (upload_on or yt_on) else ""))
         if cc_only_on:
             print(f"   📝 CC/MD Update:    True  "
                   f"[cc_limit={inputs.get('upload_cc_limit',0)}, md_limit={inputs.get('upload_md_limit',0)}]")
-        if fb_on:
-            print(f"   📘 Facebook Upload: {inputs.get('upload_facebook_video', False)}" +
-                  (f"  [{inputs.get('fb_privacy_status','SELF')}]" if inputs.get('upload_facebook_video') else ""))
+    else:
+        print(f"   ▶️  YouTube Upload:  Skipped (yt_upload=false)")
+
+    # ── Facebook upload sub-block — always shown ─────────────
+    if fb_on:
+        print(f"   📘 Facebook Upload: {inputs.get('upload_facebook_video', False)}" +
+              (f"  [{inputs.get('fb_privacy_status','SELF')}]" if inputs.get('upload_facebook_video') else ""))
+    else:
+        print(f"   📘 Facebook Upload: Skipped (fb_upload=false)")
 
     # ── Social block ─────────────────────────────────────────
     soc_on = inputs.get('social', False)
@@ -580,7 +592,7 @@ def run():
         if not inputs.get('_skip_csv', False):
             final_tasks.append(full_crew.tasks[1])  # generate_csv
 
-        if inputs.get('video_enabled', True):
+        if inputs.get('video_enabled', False):
             final_tasks.append(full_crew.tasks[4])  # create_video
 
         if inputs.get('bar_race_video_enabled', False):
@@ -637,42 +649,78 @@ def run():
 
         if inputs.get("debate_merge_enabled", False) and not is_youtube_id:
             print(f"🔀 Queueing Task 18: debate_merge")
-            final_tasks.append(full_crew.tasks[18])  # debate_merge 
+            final_tasks.append(full_crew.tasks[18])  # debate_merge
         # ── Facebook Upload Task ───────────────────────────────────────────────
-        # Router Principle: Respects 'publisher' parent switch (handled by load_config)
-        # Only queue if fb_upload flag is true AND video is found.
-        if inputs.get('fb_upload', False) and inputs.get('upload_facebook_video', False):
-            _lang = inputs.get('lang_suffix', 'En')
-            _topic_slug = inputs.get('topic_slug', '')
-            _channel = inputs.get('channel', 'PlayOwnAi')
-
-            # ✅ Detect video files (matches fb_upload_tool.py capabilities)
-            _has_video = False
-            for fmt in inputs.get('video_formats', []):
-                # Check multiple patterns to ensure we find existing files
-                patterns = [
-                    f"{_channel}_Debate_{_topic_slug}_{fmt}_{_lang}.mp4",  # Standard Merge
-                    f"debate_video_{fmt}_{_lang}_with_audio.mp4",          # Raw Debate (Your File)
-                    f"*_{fmt}.mp4",                                        # Generic Fallback
-                ]
-                for pat in patterns:
-                    import glob
-                    matches = glob.glob(os.path.join(output_dir, pat))
-                    # Filter out intermediate files
-                    valid = [m for m in matches if not os.path.basename(m).startswith(('intro_', 'definition_'))]
-                    if valid:
-                        _has_video = True
-                        print(f"   🔍 Found video for {fmt}: {os.path.basename(valid[0])}")
-                        break
-                if _has_video:
-                    break
-
-            # ✅ Queue Task if Video Found
-            if _has_video:
-                print(f"📘 Facebook Upload: Task queued (Video found)")
-                final_tasks.append(full_crew.tasks[22])  # upload_to_facebook
+        # INDEPENDENT of 'publisher' master switch — fb_upload is its own gate.
+        # Schema rule: publisher_config sub-blocks (yt_upload, fb_upload) are always
+        # extracted and operate on their own switch. publisher=false does NOT block them.
+        # Router only checks: fb_upload=true + upload_facebook_video=true + uploadable content exists.
+        if inputs.get('fb_upload', False):
+            if not inputs.get('upload_facebook_video', False):
+                print(f"📘 Facebook Upload: Skipped (upload_facebook_video=false)")
             else:
-                print(f"⚠️  Facebook Upload: Skipped (No video file found)")
+                import glob as _glob_fb
+                _lang        = inputs.get('lang_suffix', 'En')
+                _topic_slug  = inputs.get('topic_slug', '')
+                _channel     = inputs.get('channel', 'PlayOwnAi')
+                _fb_log      = os.path.join(output_dir, 'fb_upload_log.json')
+
+                # ── Smart skip: already uploaded? ─────────────────────────────
+                _already_uploaded = False
+                if os.path.exists(_fb_log):
+                    try:
+                        with open(_fb_log, 'r') as _fl:
+                            _fb_data = json.load(_fl)
+                        _vid_id = (_fb_data.get('video_id') or
+                                   _fb_data.get('id') or
+                                   _fb_data.get('reels_upload_id') or '')
+                        if str(_vid_id).strip():
+                            print(f"📘 Facebook Upload: ⏭️  Already uploaded "
+                                  f"(video_id={_vid_id}) — skipping re-upload")
+                            _already_uploaded = True
+                    except Exception:
+                        pass  # corrupt log → treat as not uploaded
+
+                if not _already_uploaded:
+                    # ── Detect uploadable content ──────────────────────────────
+                    # Priority order: final merged → raw debate with audio → generic final
+                    _found_files = {}  # fmt → filepath
+                    for _fmt in inputs.get('video_formats', []):
+                        _patterns = [
+                            f"{_channel}_Debate_{_topic_slug}_{_fmt}_{_lang}.mp4",
+                            f"{_channel}_{_topic_slug}_{_fmt}.mp4",
+                            f"debate_video_{_fmt}_{_lang}_with_audio.mp4",
+                        ]
+                        # Generic fallback: any non-intermediate .mp4 for this fmt
+                        _generic = _glob_fb.glob(os.path.join(output_dir, f"*_{_fmt}.mp4"))
+                        _generic = [g for g in _generic
+                                    if not os.path.basename(g).startswith(
+                                        ('intro_', 'definition_', 'debate_video_', 'bar_race_'))]
+
+                        for _pat in _patterns:
+                            _fp = os.path.join(output_dir, _pat)
+                            if os.path.exists(_fp):
+                                _found_files[_fmt] = _fp
+                                break
+                        else:
+                            # Try generic matches
+                            if _generic:
+                                _found_files[_fmt] = _generic[0]
+
+                    if _found_files:
+                        for _fmt, _fp in _found_files.items():
+                            _mb = os.path.getsize(_fp) / (1024 * 1024)
+                            print(f"📘 Facebook Upload: ✅ Found [{_fmt}] "
+                                  f"{os.path.basename(_fp)} ({_mb:.1f} MB)")
+                        print(f"📘 Facebook Upload: Task queued")
+                        final_tasks.append(full_crew.tasks[22])  # upload_to_facebook
+                    else:
+                        print(f"📘 Facebook Upload: ⚠️  No uploadable video found in {output_dir}/")
+                        print(f"   Expected patterns (any of):")
+                        for _fmt in inputs.get('video_formats', []):
+                            print(f"     • {_channel}_Debate_{_topic_slug}_{_fmt}_{_lang}.mp4")
+                            print(f"     • debate_video_{_fmt}_{_lang}_with_audio.mp4")
+                        print(f"   💡 Run debate_merge first, or set debate_merge_enabled=true")
         # ── generate_youtube_metadata runs after all video/merge tasks ──
         if inputs.get('generate_youtube_metadata', False):
             # Resolve which video_formats the metadata tool should use.
@@ -683,9 +731,14 @@ def run():
             inputs['_metadata_video_formats'] = _meta_fmts
             final_tasks.append(full_crew.tasks[20])  # generate_youtube_metadata
 
-        # Run upload task if uploading video OR if CC/MD update needed for existing video
-        if inputs.get('upload_youtube_video', False) or inputs.get('upload_cc', False):
-            final_tasks.append(full_crew.tasks[21])  # upload_to_youtube
+        # ── YouTube Upload — INDEPENDENT of publisher switch ─────────────────
+        # yt_upload is its own gate (always extracted from publisher_config).
+        # Queue if: yt_upload=true AND (uploading video OR CC/MD update needed).
+        if inputs.get('yt_upload', False):
+            if inputs.get('upload_youtube_video', False) or inputs.get('upload_cc', False):
+                final_tasks.append(full_crew.tasks[21])  # upload_to_youtube
+            else:
+                print(f"▶️  YouTube Upload: Skipped (upload_youtube_video=false and upload_cc=false)")
 
         # Social share — LAST unit always.
         # Parent switch "social" MUST be true AND social_share_enabled must be true.
@@ -767,7 +820,7 @@ def run():
         print(f"   CSV: {csv_path}")
         print(f"   Subdirectory: {output_dir}/")
 
-        if inputs.get('video_enabled', True):
+        if inputs.get('video_enabled', False):
             print(f"   Videos (Standard):")
             for style in inputs['animation_styles']:
                 for fmt in inputs['video_formats']:
@@ -914,6 +967,26 @@ def run():
                     print(f"      ✅ {merged} ({size_mb:.1f} MB)")
                 else:
                     print(f"      ❌ Not found: {merged}")
+
+        if inputs.get('fb_upload', False):
+            print(f"   Facebook Upload:")
+            _fb_log = os.path.join(output_dir, 'fb_upload_log.json')
+            if os.path.exists(_fb_log):
+                try:
+                    with open(_fb_log, 'r') as _fl:
+                        _fb_result = json.load(_fl)
+                    _vid_id = (_fb_result.get('video_id') or _fb_result.get('id') or
+                               _fb_result.get('reels_upload_id') or '')
+                    _status = _fb_result.get('status', '')
+                    if str(_vid_id).strip():
+                        print(f"      ✅ Uploaded — video_id={_vid_id}"
+                              + (f"  [{_status}]" if _status else ""))
+                    else:
+                        print(f"      ⚠️  Log found but no video_id — check fb_upload_log.json")
+                except Exception:
+                    print(f"      ⚠️  fb_upload_log.json unreadable")
+            else:
+                print(f"      ❌ fb_upload_log.json not found — upload may have failed")
 
         print(f"\n⏱️  Duration tip: {fps} seconds per period")
         print("="*60 + "\n")
