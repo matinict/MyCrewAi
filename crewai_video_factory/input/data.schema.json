@@ -43,6 +43,12 @@
       "HD"
     ]
   },
+  "video_style": {
+    "type": "array",
+    "description": "Top-level video style tag(s) used by the metadata pipeline. Mirrors metadata_prep_config.video_style and controls which branch the metadata tool takes. Valid values: 'debate', 'bar_race', 'animation', 'ytid'. When set here, metadata_prep_config.video_style inherits this value if not explicitly overridden.",
+    "enum": ["debate", "bar_race", "animation", "ytid"],
+    "example": ["debate"]
+  },
   "fps": {
     "type": "number",
     "description": "Seconds per period for bar_race videos. Controls animation pace — higher = slower/longer video.",
@@ -330,6 +336,12 @@
     "type": "object",
     "description": "Debate pipeline settings. Only read when debate=true.",
     "properties": {
+      "use_label_mappings": {
+        "type": "boolean",
+        "description": "Apply label_mappings.json to shorten bar names in debate context (e.g. 'JavaScript' → 'JS'). Mirrors the top-level use_label_mappings but scoped to the debate pipeline only.",
+        "default": false,
+        "example": true
+      },
       "debate_definition_enabled": {
         "type": "boolean",
         "description": "Generate debate text (propose.md, oppose.md, decide.md) via LLM agents. Smart skip: if all 3 .md files already exist, LLM generation is skipped automatically.",

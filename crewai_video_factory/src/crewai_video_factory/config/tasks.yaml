@@ -754,6 +754,8 @@ create_debate_definition:
       channel: "{channel}"
       debate_max_chars: {debate_max_chars}
       lang_suffix: "{lang_suffix}"
+      use_label_mappings: {use_label_mappings}  # ✅ MUST BE INCLUDED
+      force_regenerate: false
 
     The tool reads propose.md / oppose.md / decide.md from {output_dir}
     automatically when propose_text / oppose_text / decide_text are empty.
@@ -779,25 +781,23 @@ debate_merge:
   description: >
     Concatenate intro + debate video segments WITH AUDIO into a single final MP4 per format.
     This task will automatically skip if debate_merge_enabled is false in inputs.
-  Pipeline per format (where [format] is each entry in {video_formats}):
-    intro_[format]_with_audio.mp4
-      +
-    debate_video_[format]_with_audio.mp4
-        → ffmpeg concat (with -reset_timestamps 1 for perfect sync)
-        → {channel}_{topic_slug}_[format].mp4
 
-  Also merges CC text files:
-    intro_[format]_cc_en.txt
-      +
-    debate_video_[format]_cc_en.txt
-        → {channel}_{topic_slug}_[format]_cc_en.txt
+    CRITICAL — You MUST call the Debate Merge Tool with EXACTLY these values:
+      output_dir: "{output_dir}"
+      video_formats: {video_formats}
+      debate_merge_enabled: {debate_merge_enabled}
+      channel: "{channel}"
+      topic: "{topic}"
+      topic_slug: "{topic_slug}"
+      lang_suffix: "{lang_suffix}"
 
-  CRITICAL — call the Debate Merge Tool with EXACTLY these values:
-    output_dir: "{output_dir}"
-    video_formats: {video_formats}
-    debate_merge_enabled: {debate_merge_enabled}    # ✅ Must match _task_defaults key
-    channel: "{channel}"
-    topic: "{topic}"
+    IMPORTANT: Call the tool ONCE and return its output verbatim as your Final Answer.
+    Do NOT rephrase, summarize, or fabricate output. If the tool returns a skip or error message, return that directly.
+  expected_output: >
+    The raw output from the Debate Merge Tool, e.g.:
+    ✅ COMPLETE: 2/2 formats merged
+    ✅ HD: PlayOwnAi_Debate_..._HD_En.mp4 (XX.X MB)
+    ✅ Shorts: PlayOwnAi_Debate_..._Shorts_En.mp4 (XX.X MB)
 
   Output files per format:
     • {channel}_{topic_slug}_[format].mp4          (final video with perfect audio sync)

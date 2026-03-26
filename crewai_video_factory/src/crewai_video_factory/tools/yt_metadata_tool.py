@@ -237,7 +237,7 @@ def _scrape_youtube_video_data(video_id: str, api_key: str = None) -> dict:
                     'tags': snippet.get('tags', []),
                     'chapters': "0:00 Introduction",
                     'transcript': '',
-                    'category_id': snippet.get('categoryId', '28'),
+                    'category_id': snippet.get('categoryId', '27'),
                     'existing_captions': [],
                     'source': 'youtube_api',
                 }
@@ -309,8 +309,49 @@ class YouTubeMetadataTool(BaseTool):
     )
     args_schema: Type[BaseModel] = YouTubeMetadataToolInput
 
-    def _clean_tags(self, tags: list, max_words: int = 3) -> list:
-        """Sanitize tags: 1-3 words max, no articles/verbs at start."""
+    def _limit_tags_length(self, tags: list, max_len: int = 450) -> list:
+        """Ensure total tag string stays within max_len characters."""
+        result = []
+        total = 0
+
+        for tag in tags:
+            cost = len(tag) + (2 if result else 0)  # ", "
+            if total + cost > max_len:
+                break
+            result.append(tag)
+            total += cost
+
+        return result
+    def _ensure_desc_limit(self, text: str, max_len: int = 4300) -> str:
+        if len(text) <= max_len:
+            return text
+
+        trimmed = text[:max_len]
+
+        # Cut at last sentence boundary
+        last_break = max(trimmed.rfind(". "), trimmed.rfind("\n"))
+        if last_break > 2000:
+            trimmed = trimmed[:last_break + 1]
+
+        # Ensure disclaimer exists
+        if "Disclaimer" not in trimmed:
+            trimmed += "\n\nDisclaimer: Content for educational and research purposes only."
+
+        return trimmed.strip()
+
+    def _clean_tags(self, tags: list, max_words: int = 3,
+                    source_texts: list = None) -> list:
+        """Sanitize tags and enrich with individual words extracted from
+        source_texts (title, slug, description).
+
+        Rules:
+        - Existing tags: strip punctuation, drop leading stop-words, cap at
+          max_words per tag, deduplicate.
+        - source_texts words: every token ≥ 3 chars that is not a pure
+          stop-word is appended as a 1-word tag (after the explicit tags).
+        - Hard limit: total comma-joined tag string must stay ≤ 500 chars
+          (YouTube's absolute maximum for the tags field).
+        """
         _stop_words = {
             'is', 'are', 'was', 'were', 'be', 'been', 'being',
             'the', 'a', 'an', 'this', 'that', 'these', 'those',
@@ -319,13 +360,21 @@ class YouTubeMetadataTool(BaseTool):
             'how', 'what', 'when', 'where', 'why', 'which', 'who',
             'can', 'could', 'will', 'would', 'shall', 'should',
             'do', 'does', 'did', 'have', 'has', 'had',
+            'not', 'no', 'its', 'it', 'we', 'our', 'us',
+            'you', 'your', 'he', 'she', 'they', 'their', 'my',
+            'if', 'as', 'up', 'out', 'more', 'also', 'both',
+            'than', 'then', 'just', 'from', 'into', 'about',
         }
+        YT_TAG_LIMIT = 450  # YouTube hard limit for the entire tags field
+
+        # ── Step 1: Process the explicit tags list ────────────────────────────
         cleaned = []
         seen = set()
+
         for tag in tags:
             if not tag or not isinstance(tag, str):
                 continue
-            tag = tag.strip().rstrip('.,!?;:')
+            tag = tag.strip().rstrip('.,!?;:#@')
             words = tag.split()
             while words and words[0].lower() in _stop_words:
                 words = words[1:]
@@ -336,9 +385,36 @@ class YouTubeMetadataTool(BaseTool):
             if clean_tag.lower() not in seen:
                 seen.add(clean_tag.lower())
                 cleaned.append(clean_tag)
-            if sum(len(t) + 1 for t in cleaned) > 480:
+
+        # ── Step 2: Extract individual words from source_texts ────────────────
+        if source_texts:
+            import re as _re
+            for text in source_texts:
+                if not text or not isinstance(text, str):
+                    continue
+                for word in _re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z]+)?", text):
+                    w = word.strip()
+                    if len(w) < 3:
+                        continue
+                    if w.lower() in _stop_words:
+                        continue
+                    if w.lower() not in seen:
+                        seen.add(w.lower())
+                        cleaned.append(w)
+
+        # ── Step 3: Enforce YouTube 500-char hard limit ───────────────────────
+        # Build the tag string the same way YouTube counts it (comma + space).
+        result = []
+        running_chars = 0
+        for tag in cleaned:
+            # Each tag costs: len(tag) + 2 for ", " separator (except first)
+            cost = len(tag) + (2 if result else 0)
+            if running_chars + cost > YT_TAG_LIMIT:
                 break
-        return cleaned[:25]
+            result.append(tag)
+            running_chars += cost
+
+        return result
 
     def _run(
         self,
@@ -755,34 +831,181 @@ AI-generated for educational purposes.
             chapters = "0:00 Introduction\n0:10 Pro Argument\n0:35 Counter Argument\n0:50 Verdict"
         else:
             title = f"{topic}: AI Debate & Analysis | @{channel}"
-            description = f"""{topic} — AI Debate & Analysis
-THE QUESTION
-Should {topic}? This debate explores both sides with evidence-based arguments.
-PRO ARGUMENTS
-{pro}
-CON ARGUMENTS
-{con}
-VERDICT
-{dec}
-Subscribe to @{channel} for more AI debates and analysis!
-FOLLOW US:
-• YouTube: @{channel}
-• LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
-• Website: {website}
-#{topic.replace(' ', '')} #AIDebate #ArtificialIntelligence #TechDebate #FutureOfWork #AIAnalysis
-Disclaimer: Arguments generated by AI for educational purposes only.
-""".strip()
+
+            # ── Build description then enforce 4000–4500 char target ──────────
+            # We progressively expand the PRO / CON / VERDICT excerpts from the
+            # raw .md content until the description lands in the target window.
+            DESC_MIN, DESC_MAX = 3000, 4000
+
+            _boilerplate_top = (
+                f"{topic} — AI Debate & Analysis\n\n"
+                f"THE QUESTION\n"
+                f"Should {topic}? This debate explores both sides with evidence-based arguments.\n\n"
+            )
+            _boilerplate_bot = (
+                f"\n\nSubscribe to @{channel} for more AI debates and analysis!\n\n"
+                f"FOLLOW US:\n"
+                f"• YouTube: @{channel}\n"
+                f"• LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/\n"
+                f"• Website: {website}\n\n"
+                f"#{topic.replace(' ', '')} #AIDebate #ArtificialIntelligence "
+                f"#TechDebate #FutureOfWork #AIAnalysis\n\n"
+                f"Disclaimer: Arguments generated by AI for educational purposes only."
+            )
+
+            def _build_desc(pro_text, con_text, dec_text):
+                return (
+                    _boilerplate_top
+                    + f"PRO ARGUMENTS\n{pro_text}\n\n"
+                    + f"CON ARGUMENTS\n{con_text}\n\n"
+                    + f"VERDICT\n{dec_text}"
+                    + _boilerplate_bot
+                )
+
+            # Helper: extract up to `n` sentences from raw markdown
+            def _extract_sentences(raw, n):
+                text = re.sub(r"^#+\s.*$", " ", raw, flags=re.MULTILINE)
+                text = re.sub(r"^\s*[-*]\s+", " ", text, flags=re.MULTILINE)
+                text = re.sub(r"\*+", " ", text)
+                text = re.sub(r"\n{2,}", " ", text).strip()
+                sents = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text)
+                         if len(s.strip()) > 20]
+                return " ".join(sents[:n])
+
+            # Start with the initial 2-sentence excerpts already computed above
+            pro_txt, con_txt, dec_txt = pro, con, dec
+            description = _build_desc(pro_txt, con_txt, dec_txt)
+
+            # ── Expand: add more sentences until we reach DESC_MIN ───────────
+            if len(description) < DESC_MIN:
+                for n_sents in range(3, 60):
+                    pro_txt = _extract_sentences(pro_raw, n_sents) if pro_raw else pro
+                    con_txt = _extract_sentences(con_raw, n_sents) if con_raw else con
+                    dec_txt = _extract_sentences(dec_raw, n_sents) if dec_raw else dec
+                    description = _build_desc(pro_txt, con_txt, dec_txt)
+                    if len(description) >= DESC_MIN:
+                        break
+
+            # ── Pad: if still short, append structured analysis sections ───────
+            # Each section is inserted before the boilerplate bottom and we
+            # keep appending until DESC_MIN is reached or we run out of pads.
+            if len(description) < DESC_MIN:
+                _pad_sections = [
+                    "\n\nWHY THIS DEBATE MATTERS\n"
+                    f"The question of {topic} sits at the intersection of technology, society, "
+                    f"and human progress. As AI systems become more capable, understanding both "
+                    f"their benefits and drawbacks is critical for informed decision-making. "
+                    f"Policymakers, educators, business leaders, and individuals all have a stake "
+                    f"in getting this right. Engaging seriously with both sides of debates like "
+                    f"this one is the first step toward thoughtful, evidence-based conclusions.",
+
+                    "\n\nKEY TAKEAWAYS\n"
+                    f"• The proposition presents evidence that {topic} represents a genuine "
+                    f"shift in how humans and technology interact.\n"
+                    f"• The opposition highlights important nuances and counterexamples that "
+                    f"challenge a one-sided conclusion.\n"
+                    f"• The verdict synthesises both perspectives into a balanced, evidence-based "
+                    f"assessment.\n"
+                    f"• Ultimately, context matters: outcomes depend on how technology is designed, "
+                    f"deployed, and governed — not the technology alone.\n"
+                    f"• Critical thinking, continuous learning, and an open mind are the best "
+                    f"tools any individual or organisation can bring to these questions.",
+
+                    "\n\nABOUT THIS SERIES\n"
+                    f"@{channel} uses AI to explore the most important debates shaping our "
+                    f"future. Every episode presents a structured argument format — Proposition, "
+                    f"Opposition, and an impartial Verdict — so you can evaluate the evidence "
+                    f"and form your own view. Topics span artificial intelligence, technology, "
+                    f"society, economics, and the future of work. Our goal is not to tell you "
+                    f"what to think, but to give you the clearest possible picture of what the "
+                    f"strongest arguments on each side actually are.",
+
+                    "\n\nJOIN THE CONVERSATION\n"
+                    f"What do you think? Leave your perspective in the comments below. "
+                    f"Do you side with the proposition, the opposition, or do you think the "
+                    f"truth is somewhere more nuanced? We read every comment and the best "
+                    f"responses shape future episodes. If you found this debate valuable, "
+                    f"please like, share, and subscribe to @{channel} — it helps us reach "
+                    f"more people who care about understanding these issues deeply.\n\n"
+                    f"New debates drop regularly. Hit the notification bell so you never miss one.",
+
+                    "\n\nRELATED TOPICS YOU MIGHT ENJOY\n"
+                    f"If {topic} interests you, you may also want to explore related debates "
+                    f"on our channel covering the broader landscape of artificial intelligence, "
+                    f"automation, and the evolving relationship between humans and technology. "
+                    f"From questions about AI creativity and consciousness to the ethics of "
+                    f"algorithmic decision-making and the economic impacts of automation — we "
+                    f"cover the debates that matter most for navigating the decades ahead.",
+                ]
+                for section in _pad_sections:
+                    if len(description) >= DESC_MIN:
+                        break
+                    # Insert section before the boilerplate bottom block
+                    splice_idx = description.rfind("\n\nSubscribe")
+                    if splice_idx == -1:
+                        description += section + _boilerplate_bot
+                    else:
+                        description = description[:splice_idx] + section + _boilerplate_bot
+
+            # ── Final fill: if pad sections were not enough (very short .md) ──
+            # Repeat the expanded argument excerpts verbosely until DESC_MIN hit.
+            if len(description) < DESC_MIN:
+                _fill_header = "\n\nEXPANDED ANALYSIS\n"
+                _fill_body = (
+                    f"This debate on {topic} invites us to think carefully about the role of "
+                    f"AI in modern life. The proposition argues that reliance on AI systems for "
+                    f"tasks like memory, navigation, reasoning, and decision-making may erode "
+                    f"the cognitive muscles that humans have developed over millennia. "
+                    f"When we outsource thinking to machines, we risk losing the capacity to "
+                    f"think independently — a concern with profound implications for education, "
+                    f"democracy, and personal autonomy.\n\n"
+                    f"The opposition counters that every generation has worried about new "
+                    f"cognitive technologies — from writing to calculators to the internet — "
+                    f"and that each has ultimately expanded rather than diminished human "
+                    f"capability. The key is not the tool itself but how deliberately and "
+                    f"critically we choose to use it. AI, on this view, is a cognitive "
+                    f"amplifier: it frees up mental bandwidth for higher-order thinking by "
+                    f"handling routine cognitive tasks.\n\n"
+                    f"The verdict acknowledges that both effects are real and can co-exist. "
+                    f"Passive, unreflective reliance on AI likely does weaken certain skills. "
+                    f"Active, intentional use of AI as a thinking partner likely strengthens "
+                    f"them. The outcome is therefore less about the technology itself and more "
+                    f"about the habits of mind — curiosity, scepticism, reflection — that we "
+                    f"cultivate alongside it. This makes the debate ultimately a question of "
+                    f"education, design, and policy as much as of technology."
+                )
+                splice_idx = description.rfind("\n\nSubscribe")
+                fill_block = _fill_header + _fill_body
+                # Repeat fill block as many times as needed to reach DESC_MIN
+                while len(description) < DESC_MIN:
+                    if splice_idx == -1:
+                        description += fill_block + _boilerplate_bot
+                        splice_idx = description.rfind("\n\nSubscribe")
+                    else:
+                        description = description[:splice_idx] + fill_block + _boilerplate_bot
+                        splice_idx = description.rfind("\n\nSubscribe")
+
+            # ── Trim: hard-cap at DESC_MAX, break at sentence boundary ───────
+            # ── Final enforcement (safe 4500 cap) ───────
+            description = self._ensure_desc_limit(description, 4300)
+
+            print(f"[YTMetadata]   • [debate/{fmt}] Description length: {len(description)} chars")
             chapters = "0:00 Introduction\n0:30 Pro Argument\n1:30 Counter Argument\n2:30 Verdict & Conclusion"
 
         print(f"[YTMetadata]   • [debate/{fmt}] Title: {title}")
 
+        # ── Tags: extract words from title, topic slug, and description ───────
+        topic_slug = "_".join(re.findall(r"\w+", topic)[:6])
         raw_tags = [
             topic.lower(), f"{topic.lower()} debate", f"{topic.lower()} analysis",
             "AI debate", "artificial intelligence", "tech debate", "pro vs con",
             "AI analysis", "future of work", "technology debate",
             channel, f"@{channel}", "data driven", "tech trends",
         ]
-        tags = self._clean_tags(raw_tags)
+        tags = self._clean_tags(
+            raw_tags,
+            source_texts=[title, topic_slug, description],
+        )
 
         return {
             "title": title,
@@ -856,18 +1079,20 @@ Disclaimer: Arguments generated by AI for educational purposes only.
     def _generate_youtube_description(self, topic, start_year, end_year, video_duration,
                                       channel="PlayOwnAi", channel_lower="playownai",
                                       website="youtube.com/@PlayOwnAi") -> str:
-        return f"""{topic} Race {start_year}-{end_year}: Complete Data Visualization
-We explore the evolution of {topic} from {start_year} to {end_year}. Watch how market leaders changed!
-Subscribe to @{channel} for more data-driven insights!
-DATA SOURCE: Comprehensive market data tracking {topic.lower()} popularity from {start_year} to {end_year}.
-KEY INSIGHTS: Market trends • Year-by-year leader changes • Growth patterns • Competitive landscape
-FOLLOW US:
-• YouTube: @{channel}
-• LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
-• Website: {website}
-#DataVisualization #{topic.replace(' ', '')} #MarketAnalysis #TechTrends
-Disclaimer: Educational content. Data compiled from public sources.
-""".strip()
+        desc = f"""{topic} Race {start_year}-{end_year}: Complete Data Visualization
+            We explore the evolution of {topic} from {start_year} to {end_year}. Watch how market leaders changed!
+            Subscribe to @{channel} for more data-driven insights!
+            DATA SOURCE: Comprehensive market data tracking {topic.lower()} popularity from {start_year} to {end_year}.
+            KEY INSIGHTS: Market trends • Year-by-year leader changes • Growth patterns • Competitive landscape
+            FOLLOW US:
+            • YouTube: @{channel}
+            • LinkedIn: {channel_lower} | www.linkedin.com/company/{channel_lower}/
+            • Website: {website}
+            #DataVisualization #{topic.replace(' ', '')} #MarketAnalysis #TechTrends
+
+            Disclaimer: This content is generated for educational and research purposes only.
+            """
+        return self._ensure_desc_limit(desc)
 
     def _generate_youtube_tags(self, topic, channel="PlayOwnAi") -> list:
         raw_tags = [
@@ -877,9 +1102,65 @@ Disclaimer: Educational content. Data compiled from public sources.
             f"{topic.lower()} evolution", f"{topic.lower()} analysis",
             str(datetime.now().year), "trend analysis", "visualization",
         ]
-        return self._clean_tags(raw_tags, max_words=3)
 
+        # Step 1: clean tags (your existing logic)
+        tags = self._clean_tags(raw_tags, max_words=3)
+
+        # Step 2: enforce 450 character limit (YouTube safe)
+        result = []
+        total = 0
+
+        for tag in tags:
+            cost = len(tag) + (2 if result else 0)  # ", "
+            if total + cost > 450:
+                break
+            result.append(tag)
+            total += cost
+
+        return result
+
+    #def _generate_youtube_chapters(self, start_year, end_year, video_duration) -> str:
     def _generate_youtube_chapters(self, start_year, end_year, video_duration) -> str:
+        total_sec = int(video_duration)
+        # Define segment count based on duration
+        if total_sec <= 60:
+            segments = [
+                ("Introduction", 0),
+                ("Overview", int(total_sec * 0.25)),
+                ("Key Insight", int(total_sec * 0.55)),
+                ("Conclusion", int(total_sec * 0.85)),
+            ]
+        elif total_sec <= 180:
+            segments = [
+                ("Introduction", 0),
+                ("Early Trends", int(total_sec * 0.15)),
+                ("Growth Phase", int(total_sec * 0.35)),
+                ("Peak Competition", int(total_sec * 0.60)),
+                ("Final Results", int(total_sec * 0.80)),
+                ("Conclusion", int(total_sec * 0.95)),
+            ]
+        else:
+            segments = [
+                ("Introduction", 0),
+                ("Initial Phase", int(total_sec * 0.10)),
+                ("Acceleration", int(total_sec * 0.25)),
+                ("Market Shift", int(total_sec * 0.45)),
+                ("Dominance Phase", int(total_sec * 0.65)),
+                ("Late Trends", int(total_sec * 0.85)),
+                ("Conclusion", int(total_sec * 0.97)),
+            ]
+
+        # Convert to timestamp format
+        lines = []
+        for title, sec in segments:
+            m, s = divmod(sec, 60)
+            lines.append(f"{m:02d}:{s:02d} {title}")
+
+        return "\n".join(lines)
+
+
+
+
         total = end_year - start_year + 1
         secs = video_duration / total if total > 0 else 5
         lines = ["0:00 Introduction"]
@@ -1360,7 +1641,157 @@ Disclaimer: Educational content. Data compiled from public sources.
         summary = f"CC translations: {translated_total} new, {skipped_total} skipped\n" + "\n".join(report)
         print(f"[YTMetadata] {summary}")
         return summary
+# ── NEW CODE (Replace entire method) ──────────────────────────────────────────
+def _translate_cc_files(self, output_dir, video_formats,
+                        lang_list=None, animation_video_formats=None, video_style=None) -> str:
+    """Translate CC files to multiple languages with better error handling."""
+    if not video_style:
+        video_style = []
+    if lang_list is None:
+        lang_list = LANGUAGES[:20]
+    if not animation_video_formats:
+        animation_video_formats = ["HD"]
 
+    import glob as _glob
+    _real = {"HD", "2K", "4K", "8K", "Shorts", "ShortsHD", "Shorts4K"}
+
+    translated_total = 0
+    skipped_total = 0
+    failed_total = 0
+    report = []
+    cc_sources = []
+
+    print(f"[YTMetadata] 🌍 CC Translation: {len(lang_list)} target languages")
+
+    # ── Find CC source files for debate format ───────────────────────────────
+    if "debate" in video_formats or "debate" in video_style:
+        for real_fmt in animation_video_formats:
+            # ✅ EXPANDED PATTERNS for debate CC files
+            patterns = [
+                os.path.join(output_dir, f"*_{real_fmt}_*_cc.txt"),
+                os.path.join(output_dir, f"*_{real_fmt}_*cc_en.txt"),
+                os.path.join(output_dir, f"*_{real_fmt}_En_cc.txt"),
+                os.path.join(output_dir, f"*_{real_fmt}_cc.txt"),
+                os.path.join(output_dir, f"*{real_fmt}*cc*.txt"),  # Wildcard fallback
+                os.path.join(output_dir, f"*_cc_en.txt"),          # Root level fallback
+                os.path.join(output_dir, "cc_en.txt"),             # Absolute fallback
+            ]
+            found = []
+            seen = set()
+            for pat in patterns:
+                for p in _glob.glob(pat):
+                    if p not in seen and os.path.exists(p):
+                        seen.add(p)
+                        found.append(p)
+                        print(f"[YTMetadata]   📁 Found CC source: {os.path.basename(p)}")
+                        break  # Take first match per format
+                if found:
+                    break
+
+            if found:
+                cc_dir = os.path.join(output_dir, "YT", "debate", real_fmt, "CC")
+                display = f"debate/{real_fmt}"
+                cc_sources.append((found[0], cc_dir, display))
+            else:
+                print(f"[YTMetadata]   ⚠️  No CC source found for debate/{real_fmt}")
+
+    # ── Fallback: Check if CC dir already has en.txt ─────────────────────────
+    if not cc_sources:
+        for real_fmt in animation_video_formats:
+            cc_dir = os.path.join(output_dir, "YT", "debate", real_fmt, "CC")
+            en_file = os.path.join(cc_dir, "en.txt")
+            if os.path.exists(en_file):
+                cc_sources.append((en_file, cc_dir, f"debate/{real_fmt}"))
+                print(f"[YTMetadata]   📁 Using existing: YT/debate/{real_fmt}/CC/en.txt")
+
+    if not cc_sources:
+        msg = "❌ No CC source files found — cannot translate"
+        print(f"[YTMetadata] {msg}")
+        return msg
+
+    # ── Translate each CC source ─────────────────────────────────────────────
+    for src_path, cc_dir, display in cc_sources:
+        print(f"\n[YTMetadata] ── Translating: {display} ──────────────────")
+
+        # Read source English text
+        try:
+            with open(src_path, "r", encoding="utf-8") as f:
+                en_text = f.read().strip()
+        except Exception as e:
+            print(f"[YTMetadata]   ❌ Cannot read {src_path}: {e}")
+            failed_total += 1
+            continue
+
+        if not en_text:
+            print(f"[YTMetadata]   ⚠️  Source file is empty: {src_path}")
+            continue
+
+        print(f"[YTMetadata]   📖 Source: {len(en_text)} chars from {os.path.basename(src_path)}")
+
+        # Ensure CC directory exists
+        os.makedirs(cc_dir, exist_ok=True)
+
+        # Save English (if not already there)
+        en_out = os.path.join(cc_dir, "en.txt")
+        if not os.path.exists(en_out):
+            with open(en_out, "w", encoding="utf-8") as f:
+                f.write(en_text)
+            print(f"[YTMetadata]   ✅ Saved: YT/{display}/CC/en.txt")
+        else:
+            print(f"[YTMetadata]   ✓  Exists: YT/{display}/CC/en.txt")
+
+        # ── Translate to each language ─────────────────────────────────────
+        ok = 1  # Count English as 1
+        for i, lang in enumerate(lang_list):
+            if lang == "en":
+                continue  # Skip English (already done)
+
+            out = os.path.join(cc_dir, f"{lang}.txt")
+
+            # Skip if already exists
+            if os.path.exists(out):
+                skipped_total += 1
+                ok += 1
+                print(f"[YTMetadata]   [{i+1}/{len(lang_list)}] ✓  {lang}: exists")
+                continue
+
+            # Translate with retry logic
+            translated = None
+            for attempt in range(3):
+                try:
+                    translated = _google_translate(en_text, lang, retries=1)
+                    if translated and len(translated) > 10:
+                        break
+                except Exception as e:
+                    print(f"[YTMetadata]   [{i+1}/{len(lang_list)}] ⚠️  {lang}: attempt {attempt+1} failed ({e})")
+                    time.sleep(2 ** attempt)  # Exponential backoff
+
+            if translated and len(translated) > 10:
+                try:
+                    with open(out, "w", encoding="utf-8") as f:
+                        f.write(translated)
+                    print(f"[YTMetadata]   [{i+1}/{len(lang_list)}] ✅ {lang}: {LANG_NAMES.get(lang, lang)}")
+                    ok += 1
+                    translated_total += 1
+                    time.sleep(0.3)  # Rate limiting
+                except Exception as e:
+                    print(f"[YTMetadata]   [{i+1}/{len(lang_list)}] ❌ {lang}: write failed ({e})")
+                    failed_total += 1
+            else:
+                print(f"[YTMetadata]   [{i+1}/{len(lang_list)}] ❌ {lang}: translation failed")
+                failed_total += 1
+
+        total = len(lang_list) + 1
+        report.append(f"[{display}] {ok}/{total} files ({translated_total} new, {skipped_total} skipped, {failed_total} failed)")
+
+    summary = f"\n🌍 CC Translation Summary:\n"
+    summary += f"   ✅ Translated: {translated_total}\n"
+    summary += f"   ⏭️  Skipped:   {skipped_total}\n"
+    summary += f"   ❌ Failed:    {failed_total}\n"
+    summary += "\n".join(report)
+
+    print(f"[YTMetadata] {summary}")
+    return summary
     def _generate_youtube_metadata(self, topic, start_year, end_year, video_duration,
                                    output_dir, clean_filename,
                                    channel="PlayOwnAi", channel_lower="playownai",

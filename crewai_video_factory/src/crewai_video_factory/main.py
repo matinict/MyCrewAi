@@ -496,7 +496,7 @@ def run():
     yt_on    = inputs.get('yt_upload', False)
     print(f"📤 Publisher:        {pub_on}" +
           ("  (LLM keys + legacy YT flag gated)" if pub_on else
-           "  ℹ️  LLM-key hoisting off — sub-blocks (yt_upload, fb_upload) operate independently"))
+           "  ℹ️  LLM-key hoisting off — sub(yt,fb_upload) operate independent"))
 
     # ── YouTube upload sub-block — always shown ───────────────
     upload_on    = inputs.get('upload_youtube_video', False)

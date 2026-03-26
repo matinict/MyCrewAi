@@ -118,7 +118,7 @@ class DebateDefinitionTool(BaseTool):
             os.path.exists(p) and os.path.getsize(p) > 0
             for p in list(_md_paths.values()) + list(_mobile_paths.values())
         )
-        if _all_exist and not force_regenerate:
+        if _all_exist and not force_regenerate and not use_label_mappings:
             _sizes  = {r: os.path.getsize(p) for r, p in _md_paths.items()}
             _msizes = {r: os.path.getsize(p) for r, p in _mobile_paths.items()}
             print(f"[DebateDef] All 6 debate files exist ({_lang}) - skipping")
@@ -127,14 +127,21 @@ class DebateDefinitionTool(BaseTool):
                 for r in ('propose', 'oppose', 'decide')
             ]
             return f"Debate files exist ({_lang}) - skipping\n" + "\n".join(lines)
+        if _all_exist and use_label_mappings and not force_regenerate:
+            print(f"[DebateDef] use_label_mappings=True — regenerating -m.md files with abbreviations ({_lang})")
         if _all_exist and force_regenerate:
             print(f"[DebateDef] force_regenerate=True — overwriting all 6 files ({_lang})")
 
         # ── PARTIAL SKIP: track which -m.md files still need writing ─────────
-        _mobile_needed = {
-            r for r in ('propose', 'oppose', 'decide')
-            if not (os.path.exists(_mobile_paths[r]) and os.path.getsize(_mobile_paths[r]) > 0)
-        }
+        # When use_label_mappings=True, always regenerate ALL -m.md files so
+        # abbreviations are (re-)applied even if old un-mapped files exist.
+        if use_label_mappings or force_regenerate:
+            _mobile_needed = {'propose', 'oppose', 'decide'}
+        else:
+            _mobile_needed = {
+                r for r in ('propose', 'oppose', 'decide')
+                if not (os.path.exists(_mobile_paths[r]) and os.path.getsize(_mobile_paths[r]) > 0)
+            }
 
         t0 = time.time()
         print(f"[DebateDef] Generating debate files  topic={topic}  max={debate_max_chars}  lang={_lang}")
@@ -228,7 +235,7 @@ class DebateDefinitionTool(BaseTool):
     def _make_mobile(self, text: str, max_chars: int = 2000, apply_abbrev: bool = False) -> str:
         """Shorts compression: keep ALL args, word-safe + logic-safe trim.
         apply_abbrev=True only when use_label_mappings=True in data.json."""
-        max_chars = 1200 # 🔒 hard limit
+        # max_chars is driven by mobile_caps from label_mappings.json — do NOT hardcode here
         text = self._pre_clean(text)
         if apply_abbrev:
             text = self._apply_abbreviations(text)
