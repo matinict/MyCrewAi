@@ -1,6 +1,0 @@
-.env
-__pycache__/
-.DS_Store
-input/social_credentials.json
-models/
-output/
